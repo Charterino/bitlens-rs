@@ -1,4 +1,4 @@
-use anyhow::{Result, bail};
+use anyhow::Result;
 use bumpalo::{Bump, boxed::Box};
 use sha2::{Digest, Sha256};
 use tokio::{
@@ -7,14 +7,22 @@ use tokio::{
 };
 
 use crate::packets::{
+    addr::{ADDR_COMMAND, Addr},
+    addrv2::{ADDRV2_COMMAND, AddrV2},
     magic::ACTIVE_MAGIC,
     packetpayload::Serializable,
+    ping::{PING_COMMAND, Ping},
+    pong::{PONG_COMMAND, Pong},
+    sendaddrv2::{SENDADDRV2_COMMAND, SendAddrV2},
+    sendheaders::{SENDHEADERS_COMMAND, SendHeaders},
+    tx::{TX_COMMAND, Tx},
     version::{VERSION_COMMAND, Version},
 };
 
 use super::{
     magic::Magic,
     packetpayload::{PacketPayload, PacketPayloadType},
+    verack::{VERACK_COMMAND, VerAck},
 };
 
 pub struct PacketHeader {
@@ -27,21 +35,73 @@ pub struct PacketHeader {
 pub async fn deserialize_packet<'bump, 'stream>(
     stream: &mut BufReader<ReadHalf<'stream>>,
     allocator: &'bump Bump,
-) -> Result<(PacketHeader, PacketPayloadType<'bump>)> {
+) -> Result<(PacketHeader, Option<PacketPayloadType<'bump>>)> {
     let magic = stream.read_u32_le().await?;
     let mut command = [0u8; 12];
     stream.read_exact(&mut command).await?;
     let length = stream.read_u32_le().await?;
     let checksum = stream.read_u32().await?;
+    println!(
+        "magic: {} payload length: {} command: {}",
+        hex::encode(magic.to_le_bytes()),
+        length,
+        String::from_utf8_lossy(&command)
+    );
 
     let payload = match command {
         VERSION_COMMAND => {
-            let mut v = Box::new_in(Version::default(), &allocator);
+            let mut v: Box<'bump, Version<'bump>> = Box::new_in(Version::default(), allocator);
             v.deserialize(allocator, stream).await?;
-            PacketPayloadType::Version(v)
+            Some(PacketPayloadType::Version(v))
+        }
+        VERACK_COMMAND => {
+            let mut v = Box::new_in(VerAck::default(), allocator);
+            v.deserialize(allocator, stream).await?;
+            Some(PacketPayloadType::VerAck(v))
+        }
+        PING_COMMAND => {
+            let mut v = Box::new_in(Ping::default(), allocator);
+            v.deserialize(allocator, stream).await?;
+            Some(PacketPayloadType::Ping(v))
+        }
+        PONG_COMMAND => {
+            let mut v = Box::new_in(Pong::default(), allocator);
+            v.deserialize(allocator, stream).await?;
+            Some(PacketPayloadType::Pong(v))
+        }
+        ADDR_COMMAND => {
+            let mut v = Box::new_in(Addr::default(), allocator);
+            v.deserialize(allocator, stream).await?;
+            Some(PacketPayloadType::Addr(v))
+        }
+        ADDRV2_COMMAND => {
+            let mut v = Box::new_in(AddrV2::default(), allocator);
+            v.deserialize(allocator, stream).await?;
+            Some(PacketPayloadType::AddrV2(v))
+        }
+        SENDADDRV2_COMMAND => {
+            let mut v = Box::new_in(SendAddrV2::default(), allocator);
+            v.deserialize(allocator, stream).await?;
+            Some(PacketPayloadType::SendAddrV2(v))
+        }
+        SENDHEADERS_COMMAND => {
+            let mut v = Box::new_in(SendHeaders::default(), allocator);
+            v.deserialize(allocator, stream).await?;
+            Some(PacketPayloadType::SendHeaders(v))
+        }
+        TX_COMMAND => {
+            let mut v = Box::new_in(Tx::default(), allocator);
+            v.deserialize(allocator, stream).await?;
+            Some(PacketPayloadType::Tx(v))
         }
         other => {
-            bail!("unknown command {}", hex::encode(command))
+            println!(
+                "unknown command {} {}",
+                String::from_utf8_lossy(&command),
+                hex::encode(command)
+            );
+            tokio::io::copy(&mut stream.take(length as u64), &mut tokio::io::sink()).await?;
+            None
         }
     };
 

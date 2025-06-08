@@ -10,7 +10,7 @@ impl Serializable<'_, '_> for VarInt {
     async fn deserialize(
         &mut self,
         _allocator: &bumpalo::Bump<1>,
-        stream: &mut tokio::io::BufReader<ReadHalf<'_>>,
+        stream: &'_ mut tokio::io::BufReader<ReadHalf<'_>>,
     ) -> Result<()> {
         let leader = stream.read_u8().await?;
         if leader < 0xFD {
@@ -26,7 +26,7 @@ impl Serializable<'_, '_> for VarInt {
         Ok(())
     }
 
-    fn serialize(&'_ self, stream: &mut impl BufMut) {
+    fn serialize(&self, stream: &mut impl BufMut) {
         if *self < 0xFD {
             stream.put_u8(*self as u8);
         } else if *self < 0xFFFF {
