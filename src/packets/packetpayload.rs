@@ -6,6 +6,7 @@ use tokio::net::tcp::ReadHalf;
 
 use super::addr::Addr;
 use super::addrv2::AddrV2;
+use super::block::Block;
 use super::getaddr::GetAddr;
 use super::ping::Ping;
 use super::pong::Pong;
@@ -41,6 +42,7 @@ pub enum PacketPayloadType<'a> {
     SendHeaders(Box<'a, SendHeaders>),
     SendAddrV2(Box<'a, SendAddrV2>),
     Tx(Box<'a, Tx<'a>>),
+    Block(Box<'a, Block<'a>>),
 }
 
 impl<'a, 'b, T: Serializable<'a, 'b> + Default + Clone> Serializable<'a, 'b>

@@ -9,6 +9,7 @@ use tokio::{
 use crate::packets::{
     addr::{ADDR_COMMAND, Addr},
     addrv2::{ADDRV2_COMMAND, AddrV2},
+    block::{BLOCK_COMMAND, Block},
     magic::ACTIVE_MAGIC,
     packetpayload::Serializable,
     ping::{PING_COMMAND, Ping},
@@ -93,6 +94,11 @@ pub async fn deserialize_packet<'bump, 'stream>(
             let mut v = Box::new_in(Tx::default(), allocator);
             v.deserialize(allocator, stream).await?;
             Some(PacketPayloadType::Tx(v))
+        }
+        BLOCK_COMMAND => {
+            let mut v = Box::new_in(Block::default(), allocator);
+            v.deserialize(allocator, stream).await?;
+            Some(PacketPayloadType::Block(v))
         }
         other => {
             println!(

@@ -1,4 +1,4 @@
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Vec<'a, T> {
     Bumpalod(bumpalo::collections::Vec<'a, T>),
     Heaped(std::vec::Vec<T>),
