@@ -3,7 +3,6 @@ use bumpalo::boxed::Box;
 use tokio::io::AsyncReadExt;
 
 use super::{
-    hashedstream::HashedStream,
     packetpayload::{PacketPayload, Serializable},
     varint::VarInt,
     varstr::VarStr,
@@ -17,6 +16,21 @@ pub struct Tx<'a> {
     pub txins: Option<Box<'a, Vec<'a, TxIn<'a>>>>,
     pub txouts: Option<Box<'a, Vec<'a, TxOut<'a>>>>,
     pub witness_data: Option<Box<'a, Vec<'a, Vec<'a, VarStr<'a>>>>>,
+}
+
+impl<'a> Clone for Tx<'a> {
+    fn clone(&self) -> Self {
+        if self.txins.is_some() || self.txouts.is_some() || self.witness_data.is_some() {
+            panic!("can't clone non-default tx objects")
+        }
+        Self {
+            version: self.version.clone(),
+            locktime: self.locktime.clone(),
+            txins: None,
+            txouts: None,
+            witness_data: None,
+        }
+    }
 }
 
 pub const TX_COMMAND: [u8; 12] = *b"tx\0\0\0\0\0\0\0\0\0\0";
@@ -33,6 +47,7 @@ impl<'a, 'b> Serializable<'a, 'b> for Tx<'a> {
         allocator: &'a bumpalo::Bump<1>,
         stream: &mut tokio::io::BufReader<tokio::net::tcp::ReadHalf<'b>>,
     ) -> anyhow::Result<()> {
+        self.version = stream.read_u32_le().await?;
         let mut txin_count = 0 as VarInt;
         txin_count.deserialize(allocator, stream).await?;
 
@@ -89,6 +104,8 @@ impl<'a, 'b> Serializable<'a, 'b> for Tx<'a> {
 
             self.witness_data = Some(Box::new_in(Vec::Bumpalod(witnesses), allocator));
         }
+
+        self.locktime = stream.read_u32_le().await?;
 
         Ok(())
     }
