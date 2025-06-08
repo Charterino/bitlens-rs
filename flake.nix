@@ -33,6 +33,7 @@
             packages = with pkgs; [
               cargo
               rustfmt
+              clippy
               rustc
             ];
           };
