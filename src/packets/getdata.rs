@@ -1,7 +1,6 @@
 use super::{
     inv::InventoryVector,
-    packetpayload::{PacketPayload, Serializable},
-    varint::VarInt,
+    packetpayload::PacketPayload,
     vec::Vec,
 };
 

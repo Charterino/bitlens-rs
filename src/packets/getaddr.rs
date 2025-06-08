@@ -1,4 +1,5 @@
-use super::packetpayload::{PacketPayload, Serializable};
+
+use super::packetpayload::{PacketPayload, Serializable, Stream};
 
 #[derive(Default)]
 pub struct GetAddr {}
@@ -15,7 +16,7 @@ impl<'a, 'b> Serializable<'a, 'b> for GetAddr {
     async fn deserialize(
         &mut self,
         allocator: &'a bumpalo::Bump<1>,
-        stream: &mut tokio::io::BufReader<tokio::net::tcp::ReadHalf<'b>>,
+        stream: &mut impl Stream,
     ) -> anyhow::Result<()> {
         Ok(())
     }

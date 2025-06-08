@@ -3,7 +3,7 @@ use bumpalo::boxed::Box;
 use tokio::io::AsyncReadExt;
 
 use super::{
-    packetpayload::{PacketPayload, Serializable},
+    packetpayload::{PacketPayload, Serializable, Stream},
     varint::VarInt,
     varstr::VarStr,
     vec::Vec,
@@ -45,7 +45,7 @@ impl<'a, 'b> Serializable<'a, 'b> for Tx<'a> {
     async fn deserialize(
         &mut self,
         allocator: &'a bumpalo::Bump<1>,
-        stream: &mut tokio::io::BufReader<tokio::net::tcp::ReadHalf<'b>>,
+        stream: &mut impl Stream,
     ) -> anyhow::Result<()> {
         self.version = stream.read_u32_le().await?;
         let mut txin_count = 0 as VarInt;
@@ -173,7 +173,7 @@ impl<'a, 'b> Serializable<'a, 'b> for TxIn<'a> {
     async fn deserialize(
         &mut self,
         allocator: &'a bumpalo::Bump<1>,
-        stream: &mut tokio::io::BufReader<tokio::net::tcp::ReadHalf<'b>>,
+        stream: &mut impl Stream,
     ) -> anyhow::Result<()> {
         stream.read_exact(&mut self.prevout_hash).await?;
         self.prevout_index = stream.read_u32_le().await?;
@@ -200,7 +200,7 @@ impl<'a, 'b> Serializable<'a, 'b> for TxOut<'a> {
     async fn deserialize(
         &mut self,
         allocator: &'a bumpalo::Bump<1>,
-        stream: &mut tokio::io::BufReader<tokio::net::tcp::ReadHalf<'b>>,
+        stream: &mut impl Stream,
     ) -> anyhow::Result<()> {
         self.value = stream.read_u64_le().await?;
         self.script.deserialize(allocator, stream).await?;

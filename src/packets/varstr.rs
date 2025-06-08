@@ -1,7 +1,11 @@
 use bytes::BufMut;
-use tokio::{io::AsyncReadExt, net::tcp::ReadHalf};
+use tokio::io::AsyncReadExt;
 
-use super::{packetpayload::Serializable, varint::VarInt, vec::Vec};
+use super::{
+    packetpayload::{Serializable, Stream},
+    varint::VarInt,
+    vec::Vec,
+};
 
 // not necessarily valid UTF-8
 pub type VarStr<'a> = Option<Vec<'a, u8>>;
@@ -10,7 +14,7 @@ impl<'a, 'b> Serializable<'a, 'b> for VarStr<'a> {
     async fn deserialize(
         &mut self,
         allocator: &'a bumpalo::Bump<1>,
-        stream: &mut tokio::io::BufReader<ReadHalf<'b>>,
+        stream: &mut impl Stream,
     ) -> anyhow::Result<()> {
         let mut length = 0 as VarInt;
         length.deserialize(allocator, stream).await?;

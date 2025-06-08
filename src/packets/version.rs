@@ -1,9 +1,8 @@
 use anyhow::Result;
 use bytes::BufMut;
-use tokio::io::{AsyncReadExt, BufReader};
-use tokio::net::tcp::ReadHalf;
+use tokio::io::AsyncReadExt;
 
-use super::packetpayload::Serializable;
+use super::packetpayload::{Serializable, Stream};
 use super::varstr::VarStr;
 use super::{netaddr::NetAddrShort, packetpayload::PacketPayload};
 
@@ -32,7 +31,7 @@ impl<'a, 'b> Serializable<'a, 'b> for Version<'a> {
     async fn deserialize(
         &mut self,
         allocator: &'a bumpalo::Bump<1>,
-        stream: &mut BufReader<ReadHalf<'b>>,
+        stream: &mut impl Stream,
     ) -> Result<()> {
         self.version = stream.read_i32_le().await?;
         self.services = stream.read_u64_le().await?;

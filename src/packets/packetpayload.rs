@@ -1,7 +1,7 @@
 use anyhow::Result;
 use bumpalo::boxed::Box;
 use bytes::BufMut;
-use tokio::io::BufReader;
+use tokio::io::{AsyncReadExt, BufReader};
 use tokio::net::tcp::ReadHalf;
 
 use super::addr::Addr;
@@ -17,6 +17,9 @@ use super::varint::VarInt;
 use super::verack::VerAck;
 use super::version::Version;
 
+pub trait Stream: AsyncReadExt + Unpin {}
+impl<'a> Stream for BufReader<ReadHalf<'a>> {}
+
 pub trait PacketPayload<'bump, 'stream>: Default + Serializable<'bump, 'stream> {
     fn command(&self) -> &'static [u8; 12];
 }
@@ -25,7 +28,7 @@ pub trait Serializable<'bump, 'stream> {
     async fn deserialize(
         &mut self,
         allocator: &'bump bumpalo::Bump<1>,
-        stream: &mut BufReader<ReadHalf<'stream>>,
+        stream: &mut impl Stream,
     ) -> Result<()>; // Not an Option<Error> to allow for ? shorthand
 
     fn serialize(&self, stream: &mut impl BufMut);
@@ -51,7 +54,7 @@ impl<'a, 'b, T: Serializable<'a, 'b> + Default + Clone> Serializable<'a, 'b>
     async fn deserialize(
         &mut self,
         allocator: &'a bumpalo::Bump<1>,
-        stream: &mut BufReader<ReadHalf<'b>>,
+        stream: &mut impl Stream,
     ) -> Result<()> {
         let mut len = 0 as VarInt;
         len.deserialize(allocator, stream).await?;

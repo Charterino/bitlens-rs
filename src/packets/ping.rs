@@ -1,6 +1,6 @@
 use tokio::io::AsyncReadExt;
 
-use super::packetpayload::{PacketPayload, Serializable};
+use super::packetpayload::{PacketPayload, Serializable, Stream};
 
 #[derive(Default)]
 pub struct Ping {
@@ -19,7 +19,7 @@ impl<'a, 'b> Serializable<'a, 'b> for Ping {
     async fn deserialize(
         &mut self,
         allocator: &'a bumpalo::Bump<1>,
-        stream: &mut tokio::io::BufReader<tokio::net::tcp::ReadHalf<'b>>,
+        stream: &mut impl Stream,
     ) -> anyhow::Result<()> {
         self.nonce = stream.read_u64().await?;
         Ok(())

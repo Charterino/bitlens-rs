@@ -3,7 +3,7 @@ use num::{FromPrimitive, ToPrimitive};
 use num_derive::{FromPrimitive, ToPrimitive};
 use tokio::io::AsyncReadExt;
 
-use super::packetpayload::Serializable;
+use super::packetpayload::{Serializable, Stream};
 
 #[derive(FromPrimitive, ToPrimitive, Clone)]
 pub enum InventoryVectorType {
@@ -33,7 +33,7 @@ impl Serializable<'_, '_> for InventoryVector {
     async fn deserialize(
         &mut self,
         allocator: &'_ bumpalo::Bump<1>,
-        stream: &mut tokio::io::BufReader<tokio::net::tcp::ReadHalf<'_>>,
+        stream: &mut impl Stream,
     ) -> anyhow::Result<()> {
         let raw_type = stream.read_u32_le().await?;
         match InventoryVectorType::from_u32(raw_type) {

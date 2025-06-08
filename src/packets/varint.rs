@@ -1,7 +1,7 @@
 use bytes::BufMut;
-use tokio::{io::AsyncReadExt, net::tcp::ReadHalf};
+use tokio::io::AsyncReadExt;
 
-use super::packetpayload::Serializable;
+use super::packetpayload::{Serializable, Stream};
 use anyhow::Result;
 
 pub type VarInt = u64;
@@ -10,7 +10,7 @@ impl Serializable<'_, '_> for VarInt {
     async fn deserialize(
         &mut self,
         _allocator: &bumpalo::Bump<1>,
-        stream: &'_ mut tokio::io::BufReader<ReadHalf<'_>>,
+        stream: &mut impl Stream,
     ) -> Result<()> {
         let leader = stream.read_u8().await?;
         if leader < 0xFD {

@@ -1,8 +1,11 @@
 use anyhow::{Result, bail};
 use bytes::BufMut;
-use tokio::{io::AsyncReadExt, net::tcp::ReadHalf};
+use tokio::io::AsyncReadExt;
 
-use super::{packetpayload::Serializable, varstr::VarStr};
+use super::{
+    packetpayload::{Serializable, Stream},
+    varstr::VarStr,
+};
 
 #[derive(Default, Clone, Copy)]
 pub struct NetAddrShort {
@@ -15,7 +18,7 @@ impl Serializable<'_, '_> for NetAddrShort {
     async fn deserialize(
         &mut self,
         _allocator: &bumpalo::Bump<1>,
-        stream: &mut tokio::io::BufReader<ReadHalf<'_>>,
+        stream: &mut impl Stream,
     ) -> Result<()> {
         self.services = stream.read_u64_le().await?;
         let read = stream.read_exact(&mut self.addr).await?;
@@ -45,7 +48,7 @@ impl Serializable<'_, '_> for NetAddr {
     async fn deserialize(
         &mut self,
         allocator: &'_ bumpalo::Bump<1>,
-        stream: &mut tokio::io::BufReader<ReadHalf<'_>>,
+        stream: &mut impl Stream,
     ) -> Result<()> {
         self.time = stream.read_u32_le().await?;
         self.services = stream.read_u64_le().await?;
@@ -75,7 +78,7 @@ impl<'a, 'b> Serializable<'a, 'b> for NetAddrV2<'a> {
     async fn deserialize(
         &mut self,
         allocator: &'a bumpalo::Bump<1>,
-        stream: &mut tokio::io::BufReader<ReadHalf<'b>>,
+        stream: &mut impl Stream,
     ) -> Result<()> {
         self.time = stream.read_u32_le().await?;
         self.services.deserialize(allocator, stream).await?;

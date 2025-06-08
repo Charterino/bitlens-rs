@@ -1,7 +1,7 @@
 use tokio::io::AsyncReadExt;
 
 use super::{
-    packetpayload::{PacketPayload, Serializable},
+    packetpayload::{PacketPayload, Serializable, Stream},
     tx::Tx,
     varint::VarInt,
     vec::Vec,
@@ -31,7 +31,7 @@ impl<'a, 'b> Serializable<'a, 'b> for Block<'a> {
     async fn deserialize(
         &mut self,
         allocator: &'a bumpalo::Bump<1>,
-        stream: &mut tokio::io::BufReader<tokio::net::tcp::ReadHalf<'b>>,
+        stream: &mut impl Stream,
     ) -> anyhow::Result<()> {
         self.version = stream.read_u32_le().await?;
         stream.read_exact(&mut self.parent).await?;
