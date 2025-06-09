@@ -1,113 +1,104 @@
-use anyhow::bail;
-use bumpalo::boxed::Box;
-use tokio::io::AsyncReadExt;
+use anyhow::{Result, anyhow, bail};
+use bumpalo::{Bump, collections::Vec};
+use sha2::{Digest, Sha256};
 
 use super::{
-    packetpayload::{PacketPayload, Serializable, Stream},
+    buffer::Buffer,
+    packetpayload::{PacketPayload, Serializable, SerializableValue},
     varint::VarInt,
     varstr::VarStr,
-    vec::Vec,
 };
 
-#[derive(Default)]
 pub struct Tx<'a> {
     pub version: u32,
     pub locktime: u32,
-    pub txins: Option<Box<'a, Vec<'a, TxIn<'a>>>>,
-    pub txouts: Option<Box<'a, Vec<'a, TxOut<'a>>>>,
-    pub witness_data: Option<Box<'a, Vec<'a, Vec<'a, VarStr<'a>>>>>,
-}
+    pub txins: Option<&'a [&'a TxIn<'a>]>,
+    pub txouts: Option<&'a [&'a TxOut<'a>]>,
+    pub witness_data: Option<&'a [&'a [VarStr<'a>]]>,
 
-impl<'a> Clone for Tx<'a> {
-    fn clone(&self) -> Self {
-        if self.txins.is_some() || self.txouts.is_some() || self.witness_data.is_some() {
-            panic!("can't clone non-default tx objects")
-        }
-        Self {
-            version: self.version.clone(),
-            locktime: self.locktime.clone(),
-            txins: None,
-            txouts: None,
-            witness_data: None,
-        }
-    }
+    pub hash: [u8; 32],
 }
 
 pub const TX_COMMAND: [u8; 12] = *b"tx\0\0\0\0\0\0\0\0\0\0";
 
-impl<'a, 'b> PacketPayload<'a, 'b> for Tx<'a> {
+impl<'a> PacketPayload<'a> for Tx<'a> {
     fn command(&self) -> &'static [u8; 12] {
         &TX_COMMAND
     }
 }
 
-impl<'a, 'b> Serializable<'a, 'b> for Tx<'a> {
-    async fn deserialize(
-        &mut self,
-        allocator: &'a bumpalo::Bump<1>,
-        stream: &mut impl Stream,
-    ) -> anyhow::Result<()> {
-        self.version = stream.read_u32_le().await?;
-        let mut txin_count = 0 as VarInt;
-        txin_count.deserialize(allocator, stream).await?;
+impl<'a> Serializable<'a> for Tx<'a> {
+    fn deserialize(allocator: &'a Bump<1>, buffer: &'a [u8]) -> Result<(&'a Tx<'a>, usize)> {
+        let version = buffer.get_u32_le(0)?;
 
-        let mut has_witness_data = false;
-        if txin_count == 0 {
-            let marker = stream.read_u8().await?;
-            if marker != 1 {
-                bail!("expected 0001 marker, got 00{:x}", marker)
-            }
+        let has_witness_data = match buffer.get(4..6) {
+            Some(v) => *v == [0x00, 0x01],
+            None => return Err(anyhow!("not enough data")),
+        };
 
-            // read the real txin count
-            txin_count.deserialize(allocator, stream).await?;
-            has_witness_data = true;
+        let mut offset = if has_witness_data { 6 } else { 4 };
+
+        let (txins, offset_delta) = <Option<&'a [&'a TxIn<'a>]> as SerializableValue>::deserialize(
+            allocator,
+            buffer.with_offset(offset)?,
+        )?;
+        offset += offset_delta;
+        let txins_count = match &txins {
+            Some(a) => a.len(),
+            None => 0,
+        };
+        if txins_count == 0 {
+            bail!("0 txins")
         }
+        let (txouts, offset_delta) =
+            <Option<_> as SerializableValue>::deserialize(allocator, buffer.with_offset(offset)?)?;
+        offset += offset_delta;
 
-        let mut txins = bumpalo::vec![in allocator; TxIn::default(); txin_count as usize];
-        for i in 0..txin_count as usize {
-            txins
-                .get_mut(i)
-                .unwrap()
-                .deserialize(allocator, stream)
-                .await?;
-        }
-        let txinsb = Vec::Bumpalod(txins);
-        self.txins = Some(Box::new_in(txinsb, allocator));
-
-        let mut txout_count = 0 as VarInt;
-        txout_count.deserialize(allocator, stream).await?;
-
-        let mut txouts = bumpalo::vec![in allocator; TxOut::default(); txout_count as usize];
-        for i in 0..txout_count as usize {
-            txouts
-                .get_mut(i)
-                .unwrap()
-                .deserialize(allocator, stream)
-                .await?;
-        }
-
-        self.txouts = Some(Box::new_in(Vec::Bumpalod(txouts), allocator));
-
-        if has_witness_data {
-            let mut witnesses: bumpalo::collections::Vec<'a, Vec<'a, Option<Vec<'a, u8>>>> = bumpalo::vec![in allocator; Vec::Bumpalod(bumpalo::vec![in allocator; VarStr::default(); 0]); txin_count as usize];
-            for i in 0..txin_count as usize {
-                let witness = witnesses.get_mut(i).unwrap();
-                let mut witness_size = 0 as VarInt;
-                witness_size.deserialize(allocator, stream).await?;
-                witness.reserve(witness_size as usize);
-                for j in 0..witness_size as usize {
-                    let mut component = VarStr::default();
-                    component.deserialize(allocator, stream).await?;
-                    witness.push(component);
+        let (witnesses, witnesses_start) = if has_witness_data {
+            let start = offset;
+            let mut wits = Vec::with_capacity_in(txins_count, allocator);
+            for i in 0..txins_count {
+                let (components_count, offset_delta) =
+                    VarInt::deserialize(allocator, buffer.with_offset(offset)?)?;
+                offset += offset_delta;
+                let mut components = Vec::with_capacity_in(components_count as usize, allocator);
+                for j in 0..components_count as usize {
+                    let (component, offset_delta) =
+                        VarStr::deserialize(allocator, buffer.with_offset(offset)?)?;
+                    offset += offset_delta;
+                    components.push(component);
                 }
+                wits.push(components.into_bump_slice());
             }
+            (Some(wits.into_bump_slice()), start)
+        } else {
+            (None, 0)
+        };
+        let witnesses_end = offset;
 
-            self.witness_data = Some(Box::new_in(Vec::Bumpalod(witnesses), allocator));
-        }
+        let locktime = buffer.get_u32_le(offset)?;
 
-        self.locktime = stream.read_u32_le().await?;
+        let first_pass = if has_witness_data {
+            let mut sha = Sha256::new();
+            sha.update(buffer.get(0..4).unwrap());
+            sha.update(buffer.get(6..witnesses_start).unwrap());
+            sha.update(buffer.get(witnesses_end..witnesses_end + 4).unwrap());
+            sha.finalize()
+        } else {
+            Sha256::digest(buffer.get(0..offset + 4).unwrap())
+        };
+        let second_pass = Sha256::digest(first_pass);
 
-        Ok(())
+        let result = allocator.alloc(Tx {
+            version,
+            locktime,
+            txins,
+            txouts,
+            witness_data: witnesses,
+            hash: second_pass.into(),
+        });
+
+        Ok((result, offset + 4))
     }
 
     fn serialize(&self, stream: &mut impl bytes::BufMut) {
@@ -161,25 +152,31 @@ impl<'a, 'b> Serializable<'a, 'b> for Tx<'a> {
     }
 }
 
-#[derive(Default, Clone)]
 pub struct TxIn<'a> {
-    pub prevout_hash: [u8; 32],
+    pub prevout_hash: &'a [u8; 32],
     pub prevout_index: u32,
     pub sequence: u32,
     pub sig_script: VarStr<'a>,
 }
 
-impl<'a, 'b> Serializable<'a, 'b> for TxIn<'a> {
-    async fn deserialize(
-        &mut self,
+impl<'a> Serializable<'a> for TxIn<'a> {
+    fn deserialize(
         allocator: &'a bumpalo::Bump<1>,
-        stream: &mut impl Stream,
-    ) -> anyhow::Result<()> {
-        stream.read_exact(&mut self.prevout_hash).await?;
-        self.prevout_index = stream.read_u32_le().await?;
-        self.sig_script.deserialize(allocator, stream).await?;
-        self.sequence = stream.read_u32_le().await?;
-        Ok(())
+        buffer: &'a [u8],
+    ) -> anyhow::Result<(&'a TxIn<'a>, usize)> {
+        let hash = buffer.get_hash(0)?;
+        let index = buffer.get_u32_le(32)?;
+        let (script, offset) = VarStr::deserialize(allocator, buffer.with_offset(36)?)?;
+        let sequence = buffer.get_u32_le(offset + 36)?;
+        Ok((
+            allocator.alloc(TxIn {
+                prevout_hash: hash,
+                prevout_index: index,
+                sequence,
+                sig_script: script,
+            }),
+            offset + 40,
+        ))
     }
 
     fn serialize(&self, stream: &mut impl bytes::BufMut) {
@@ -196,15 +193,14 @@ pub struct TxOut<'a> {
     pub script: VarStr<'a>,
 }
 
-impl<'a, 'b> Serializable<'a, 'b> for TxOut<'a> {
-    async fn deserialize(
-        &mut self,
+impl<'a> Serializable<'a> for TxOut<'a> {
+    fn deserialize(
         allocator: &'a bumpalo::Bump<1>,
-        stream: &mut impl Stream,
-    ) -> anyhow::Result<()> {
-        self.value = stream.read_u64_le().await?;
-        self.script.deserialize(allocator, stream).await?;
-        Ok(())
+        buffer: &'a [u8],
+    ) -> anyhow::Result<(&'a TxOut<'a>, usize)> {
+        let value = buffer.get_u64_le(0)?;
+        let (script, offset) = VarStr::deserialize(allocator, buffer.with_offset(8)?)?;
+        Ok((allocator.alloc(TxOut { value, script }), offset + 8))
     }
 
     fn serialize(&self, stream: &mut impl bytes::BufMut) {

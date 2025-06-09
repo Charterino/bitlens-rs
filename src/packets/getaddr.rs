@@ -1,24 +1,22 @@
-
-use super::packetpayload::{PacketPayload, Serializable, Stream};
+use super::packetpayload::{PacketPayload, Serializable};
 
 #[derive(Default)]
 pub struct GetAddr {}
 
 pub const GETADDR_COMMAND: [u8; 12] = *b"getaddr\0\0\0\0\0";
 
-impl<'a, 'b> PacketPayload<'a, 'b> for GetAddr {
+impl<'a> PacketPayload<'a> for GetAddr {
     fn command(&self) -> &'static [u8; 12] {
         return &GETADDR_COMMAND;
     }
 }
 
-impl<'a, 'b> Serializable<'a, 'b> for GetAddr {
-    async fn deserialize(
-        &mut self,
+impl<'a> Serializable<'a> for GetAddr {
+    fn deserialize(
         allocator: &'a bumpalo::Bump<1>,
-        stream: &mut impl Stream,
-    ) -> anyhow::Result<()> {
-        Ok(())
+        buffer: &'a [u8],
+    ) -> anyhow::Result<(&'a GetAddr, usize)> {
+        Ok((&GetAddr {}, 0))
     }
 
     fn serialize(&self, stream: &mut impl bytes::BufMut) {}

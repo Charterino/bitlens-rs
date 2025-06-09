@@ -1,62 +1,73 @@
-use anyhow::Result;
-use bytes::BufMut;
-use tokio::io::AsyncReadExt;
-
-use super::packetpayload::{Serializable, Stream};
+use super::buffer::Buffer;
+use super::packetpayload::{Serializable, SerializableValue};
 use super::varstr::VarStr;
 use super::{netaddr::NetAddrShort, packetpayload::PacketPayload};
+use anyhow::{Result, anyhow};
+use bytes::BufMut;
 
-#[derive(Default)]
 pub struct Version<'a> {
     pub services: u64,
     pub timestamp: u64,
-    pub addrrecv: NetAddrShort,
-    pub addrfrom: NetAddrShort,
+    pub addrrecv: &'a NetAddrShort<'a>,
+    pub addrfrom: &'a NetAddrShort<'a>,
     pub nonce: u64,
     pub user_agent: VarStr<'a>,
-    pub start_height: i32,
-    pub version: i32,
+    pub start_height: u32,
+    pub version: u32,
     pub announce_relayed_transactions: bool,
 }
 
 pub const VERSION_COMMAND: [u8; 12] = *b"version\0\0\0\0\0";
 
-impl<'a, 'b> PacketPayload<'a, 'b> for Version<'a> {
+impl<'a, 'b> PacketPayload<'a> for Version<'a> {
     fn command(&self) -> &'static [u8; 12] {
         &VERSION_COMMAND
     }
 }
 
-impl<'a, 'b> Serializable<'a, 'b> for Version<'a> {
-    async fn deserialize(
-        &mut self,
+impl<'a> Serializable<'a> for Version<'a> {
+    fn deserialize(
         allocator: &'a bumpalo::Bump<1>,
-        stream: &mut impl Stream,
-    ) -> Result<()> {
-        self.version = stream.read_i32_le().await?;
-        self.services = stream.read_u64_le().await?;
-        self.timestamp = stream.read_u64_le().await?;
-        self.addrrecv.deserialize(allocator, stream).await?;
-        self.addrfrom.deserialize(allocator, stream).await?;
-        self.nonce = stream.read_u64_le().await?;
-        self.user_agent.deserialize(allocator, stream).await?;
-        self.start_height = stream.read_i32_le().await?;
-        if self.version >= 70001 {
-            self.announce_relayed_transactions = stream.read_u8().await? != 0;
+        buffer: &'a [u8],
+    ) -> Result<(&'a Version<'a>, usize)> {
+        let version = buffer.get_u32_le(0)?;
+        let services = buffer.get_u64_le(4)?;
+        let timestamp = buffer.get_u64_le(12)?;
+        let (addrrecv, _) = NetAddrShort::deserialize(allocator, buffer.with_offset(20)?)?;
+        let (addrfrom, _) = NetAddrShort::deserialize(allocator, buffer.with_offset(46)?)?;
+        let nonce = buffer.get_u64_le(72)?;
+        let (ua, offset) = VarStr::deserialize(allocator, buffer.with_offset(80)?)?;
+        let start_height = buffer.get_u32_le(80 + offset)?;
+        let res = allocator.alloc(Version {
+            services,
+            timestamp,
+            addrrecv: addrrecv,
+            addrfrom: addrfrom,
+            nonce,
+            user_agent: ua,
+            start_height,
+            version,
+            announce_relayed_transactions: false,
+        });
+        if version >= 70001 {
+            res.announce_relayed_transactions = *buffer
+                .get(84 + offset)
+                .ok_or(anyhow!("missing last byte in version"))?
+                != 0;
+            return Ok((res, offset + 85));
         }
-
-        Ok(())
+        Ok((res, offset + 84))
     }
 
     fn serialize(&self, stream: &mut impl BufMut) {
-        stream.put_i32_le(self.version);
+        stream.put_u32_le(self.version);
         stream.put_u64_le(self.services);
         stream.put_u64_le(self.timestamp);
         self.addrrecv.serialize(stream);
         self.addrfrom.serialize(stream);
         stream.put_u64_le(self.nonce);
         self.user_agent.serialize(stream);
-        stream.put_i32_le(self.start_height);
+        stream.put_u32_le(self.start_height);
         if self.version >= 70001 {
             stream.put_u8(self.announce_relayed_transactions as u8);
         }

@@ -1,41 +1,33 @@
+use anyhow::{Result, anyhow};
 use bytes::BufMut;
-use tokio::io::AsyncReadExt;
 
-use super::{
-    packetpayload::{Serializable, Stream},
-    varint::VarInt,
-    vec::Vec,
-};
+use super::{packetpayload::SerializableValue, varint::VarInt};
 
 // not necessarily valid UTF-8
-pub type VarStr<'a> = Option<Vec<'a, u8>>;
+pub type VarStr<'a> = Option<&'a [u8]>;
 
-impl<'a, 'b> Serializable<'a, 'b> for VarStr<'a> {
-    async fn deserialize(
-        &mut self,
+impl<'a> SerializableValue<'a> for VarStr<'a> {
+    fn deserialize(
         allocator: &'a bumpalo::Bump<1>,
-        stream: &mut impl Stream,
-    ) -> anyhow::Result<()> {
-        let mut length = 0 as VarInt;
-        length.deserialize(allocator, stream).await?;
+        buffer: &'a [u8],
+    ) -> Result<(VarStr<'a>, usize)> {
+        let (length, offset) = VarInt::deserialize(allocator, buffer)?;
         if length == 0 {
-            *self = None;
-            return Ok(());
+            return Ok((None, 1));
         }
-        let mut storage = bumpalo::vec![in &allocator; 0u8; length as usize];
-        // storage.as_mut_slice will return an empty slice because storage's length is 0
-        stream.read_exact(storage.as_mut_slice()).await?;
-        *self = Some(Vec::Bumpalod(storage));
 
-        Ok(())
+        match buffer.get(offset..offset + length as usize) {
+            Some(v) => Ok((Some(v), offset + length as usize)),
+            None => Err(anyhow!("not enough bytes")),
+        }
     }
 
     fn serialize(&self, stream: &mut impl BufMut) {
-        match &self {
+        match self {
             Some(ua) => {
                 let len = ua.len() as VarInt;
                 len.serialize(stream);
-                stream.put(ua.as_slice());
+                stream.put(*ua);
             }
             None => {
                 stream.put_u8(0);

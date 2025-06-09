@@ -1,6 +1,7 @@
-use tokio::io::AsyncReadExt;
-
-use super::packetpayload::{PacketPayload, Serializable, Stream};
+use super::{
+    buffer::Buffer,
+    packetpayload::{PacketPayload, Serializable},
+};
 
 #[derive(Default)]
 pub struct Pong {
@@ -9,20 +10,23 @@ pub struct Pong {
 
 pub const PONG_COMMAND: [u8; 12] = *b"pong\0\0\0\0\0\0\0\0";
 
-impl<'a, 'b> PacketPayload<'a, 'b> for Pong {
+impl<'a> PacketPayload<'a> for Pong {
     fn command(&self) -> &'static [u8; 12] {
         return &PONG_COMMAND;
     }
 }
 
-impl<'a, 'b> Serializable<'a, 'b> for Pong {
-    async fn deserialize(
-        &mut self,
+impl<'a> Serializable<'a> for Pong {
+    fn deserialize(
         allocator: &'a bumpalo::Bump<1>,
-        stream: &mut impl Stream,
-    ) -> anyhow::Result<()> {
-        self.nonce = stream.read_u64().await?;
-        Ok(())
+        buffer: &[u8],
+    ) -> anyhow::Result<(&'a Pong, usize)> {
+        Ok((
+            allocator.alloc(Pong {
+                nonce: buffer.get_u64_le(0)?,
+            }),
+            8,
+        ))
     }
 
     fn serialize(&self, stream: &mut impl bytes::BufMut) {

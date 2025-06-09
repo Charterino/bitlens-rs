@@ -1,9 +1,8 @@
 use anyhow::bail;
 use num::{FromPrimitive, ToPrimitive};
 use num_derive::{FromPrimitive, ToPrimitive};
-use tokio::io::AsyncReadExt;
 
-use super::packetpayload::{Serializable, Stream};
+use super::{buffer::Buffer, packetpayload::Serializable};
 
 #[derive(FromPrimitive, ToPrimitive, Clone)]
 pub enum InventoryVectorType {
@@ -23,29 +22,25 @@ impl Default for InventoryVectorType {
     }
 }
 
-#[derive(Default, Clone)]
-pub struct InventoryVector {
+pub struct InventoryVector<'a> {
     pub inv_type: InventoryVectorType,
-    pub hash: [u8; 32],
+    pub hash: &'a [u8; 32],
 }
 
-impl Serializable<'_, '_> for InventoryVector {
-    async fn deserialize(
-        &mut self,
-        allocator: &'_ bumpalo::Bump<1>,
-        stream: &mut impl Stream,
-    ) -> anyhow::Result<()> {
-        let raw_type = stream.read_u32_le().await?;
-        match InventoryVectorType::from_u32(raw_type) {
-            Some(inv_type) => {
-                self.inv_type = inv_type;
-            }
+impl<'a> Serializable<'a> for InventoryVector<'a> {
+    fn deserialize(
+        allocator: &'a bumpalo::Bump<1>,
+        buffer: &'a [u8],
+    ) -> anyhow::Result<(&'a InventoryVector<'a>, usize)> {
+        let raw_type = buffer.get_u32_le(0)?;
+        let inv_type = match InventoryVectorType::from_u32(raw_type) {
+            Some(inv_type) => inv_type,
             None => {
                 bail!("unknown inventory type: {:x}", raw_type)
             }
-        }
-        stream.read_exact(&mut self.hash).await?;
-        Ok(())
+        };
+        let hash = buffer.get_hash(4)?;
+        Ok((allocator.alloc(InventoryVector { inv_type, hash }), 36))
     }
 
     fn serialize(&self, stream: &mut impl bytes::BufMut) {

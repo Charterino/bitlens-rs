@@ -1,5 +1,5 @@
 use anyhow::Result;
-use bumpalo::{Bump, boxed::Box};
+use bumpalo::Bump;
 use sha2::{Digest, Sha256};
 use tokio::{
     io::{AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader},
@@ -7,8 +7,6 @@ use tokio::{
 };
 
 use crate::packets::{
-    addr::{ADDR_COMMAND, Addr},
-    addrv2::{ADDRV2_COMMAND, AddrV2},
     block::{BLOCK_COMMAND, Block},
     magic::ACTIVE_MAGIC,
     packetpayload::Serializable,
@@ -37,11 +35,12 @@ pub async fn deserialize_packet<'bump, 'stream>(
     stream: &mut BufReader<ReadHalf<'stream>>,
     allocator: &'bump Bump,
 ) -> Result<(PacketHeader, Option<PacketPayloadType<'bump>>)> {
-    let magic = stream.read_u32_le().await?;
+    let magic = AsyncReadExt::read_u32_le(stream).await?;
     let mut command = [0u8; 12];
-    stream.read_exact(&mut command).await?;
-    let length = stream.read_u32_le().await?;
-    let checksum = stream.read_u32().await?;
+    AsyncReadExt::read_exact(stream, &mut command).await?;
+    let length = AsyncReadExt::read_u32_le(stream).await?;
+    let mut checksum = [0u8; 4];
+    AsyncReadExt::read_exact(stream, &mut checksum).await?;
     println!(
         "magic: {} payload length: {} command: {}",
         hex::encode(magic.to_le_bytes()),
@@ -49,55 +48,52 @@ pub async fn deserialize_packet<'bump, 'stream>(
         String::from_utf8_lossy(&command)
     );
 
+    let mut buffer = allocator.alloc_slice_fill_default::<u8>(length as usize);
+
+    // Read the entire packet into buffer
+    stream.read_exact(&mut buffer).await?;
+
+    let mut hash = Sha256::digest(&buffer);
+    hash = Sha256::digest(hash).into();
+    let shorthash = &hash.as_slice()[..4];
+
+    println!(
+        "expected {} got {}",
+        hex::encode(checksum),
+        hex::encode(shorthash)
+    );
+
     let payload = match command {
         VERSION_COMMAND => {
-            let mut v: Box<'bump, Version<'bump>> = Box::new_in(Version::default(), allocator);
-            v.deserialize(allocator, stream).await?;
+            let (v, _) = Version::deserialize(allocator, buffer)?;
             Some(PacketPayloadType::Version(v))
         }
         VERACK_COMMAND => {
-            let mut v = Box::new_in(VerAck::default(), allocator);
-            v.deserialize(allocator, stream).await?;
+            let (v, _) = VerAck::deserialize(allocator, buffer)?;
             Some(PacketPayloadType::VerAck(v))
         }
         PING_COMMAND => {
-            let mut v = Box::new_in(Ping::default(), allocator);
-            v.deserialize(allocator, stream).await?;
+            let (v, _) = Ping::deserialize(allocator, buffer)?;
             Some(PacketPayloadType::Ping(v))
         }
         PONG_COMMAND => {
-            let mut v = Box::new_in(Pong::default(), allocator);
-            v.deserialize(allocator, stream).await?;
+            let (v, _) = Pong::deserialize(allocator, buffer)?;
             Some(PacketPayloadType::Pong(v))
         }
-        ADDR_COMMAND => {
-            let mut v = Box::new_in(Addr::default(), allocator);
-            v.deserialize(allocator, stream).await?;
-            Some(PacketPayloadType::Addr(v))
-        }
-        ADDRV2_COMMAND => {
-            let mut v = Box::new_in(AddrV2::default(), allocator);
-            v.deserialize(allocator, stream).await?;
-            Some(PacketPayloadType::AddrV2(v))
-        }
         SENDADDRV2_COMMAND => {
-            let mut v = Box::new_in(SendAddrV2::default(), allocator);
-            v.deserialize(allocator, stream).await?;
+            let (v, _) = SendAddrV2::deserialize(allocator, buffer)?;
             Some(PacketPayloadType::SendAddrV2(v))
         }
         SENDHEADERS_COMMAND => {
-            let mut v = Box::new_in(SendHeaders::default(), allocator);
-            v.deserialize(allocator, stream).await?;
+            let (v, _) = SendHeaders::deserialize(allocator, buffer)?;
             Some(PacketPayloadType::SendHeaders(v))
         }
         TX_COMMAND => {
-            let mut v = Box::new_in(Tx::default(), allocator);
-            v.deserialize(allocator, stream).await?;
+            let (v, _) = Tx::deserialize(allocator, buffer)?;
             Some(PacketPayloadType::Tx(v))
         }
         BLOCK_COMMAND => {
-            let mut v = Box::new_in(Block::default(), allocator);
-            v.deserialize(allocator, stream).await?;
+            let (v, _) = Block::deserialize(allocator, buffer)?;
             Some(PacketPayloadType::Block(v))
         }
         other => {
@@ -106,7 +102,6 @@ pub async fn deserialize_packet<'bump, 'stream>(
                 String::from_utf8_lossy(&command),
                 hex::encode(command)
             );
-            tokio::io::copy(&mut stream.take(length as u64), &mut tokio::io::sink()).await?;
             None
         }
     };
@@ -116,14 +111,14 @@ pub async fn deserialize_packet<'bump, 'stream>(
             magic,
             command: command,
             length,
-            checksum,
+            checksum: u32::from_le_bytes(checksum),
         },
         payload,
     ))
 }
 
-pub async fn write_packet_to_stream<'a, 'b>(
-    packet: &'a impl PacketPayload<'a, 'b>,
+pub async fn write_packet_to_stream<'a>(
+    packet: &'a impl PacketPayload<'a>,
     stream: &mut (impl AsyncWrite + Unpin),
 ) -> Result<()> {
     let mut buf = Vec::<u8>::with_capacity(32 * 1024 * 1024);

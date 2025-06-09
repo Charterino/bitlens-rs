@@ -1,9 +1,9 @@
 pub mod addr;
 pub mod addrv2;
 pub mod block;
+pub mod buffer;
 pub mod getaddr;
 pub mod getdata;
-pub mod hashedstream;
 pub mod inv;
 pub mod magic;
 pub mod netaddr;

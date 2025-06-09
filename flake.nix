@@ -35,6 +35,7 @@
               rustfmt
               clippy
               rustc
+              cargo-flamegraph
             ];
           };
         }

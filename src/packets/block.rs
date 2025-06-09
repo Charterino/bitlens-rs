@@ -1,63 +1,53 @@
-use tokio::io::AsyncReadExt;
-
 use super::{
-    packetpayload::{PacketPayload, Serializable, Stream},
+    buffer::Buffer,
+    packetpayload::{PacketPayload, Serializable, SerializableValue},
     tx::Tx,
-    varint::VarInt,
-    vec::Vec,
 };
 
-#[derive(Default)]
 pub struct Block<'a> {
     pub version: u32,
     pub timestamp: u32,
     pub bits: u32,
     pub nonce: u32,
-    pub parent: [u8; 32],
-    pub merkle_root: [u8; 32],
+    pub parent: &'a [u8; 32],
+    pub merkle_root: &'a [u8; 32],
 
-    pub txs: Option<Vec<'a, Tx<'a>>>,
+    pub txs: Option<&'a [&'a Tx<'a>]>,
 }
 
 pub const BLOCK_COMMAND: [u8; 12] = *b"block\0\0\0\0\0\0\0";
 
-impl<'a, 'b> PacketPayload<'a, 'b> for Block<'a> {
+impl<'a> PacketPayload<'a> for Block<'a> {
     fn command(&self) -> &'static [u8; 12] {
         &BLOCK_COMMAND
     }
 }
 
-impl<'a, 'b> Serializable<'a, 'b> for Block<'a> {
-    async fn deserialize(
-        &mut self,
+impl<'a> Serializable<'a> for Block<'a> {
+    fn deserialize(
         allocator: &'a bumpalo::Bump<1>,
-        stream: &mut impl Stream,
-    ) -> anyhow::Result<()> {
-        self.version = stream.read_u32_le().await?;
-        stream.read_exact(&mut self.parent).await?;
-        stream.read_exact(&mut self.merkle_root).await?;
-        self.timestamp = stream.read_u32_le().await?;
-        self.bits = stream.read_u32_le().await?;
-        self.nonce = stream.read_u32_le().await?;
-        let mut txs_count = 0 as VarInt;
-        txs_count.deserialize(allocator, stream).await?;
+        buffer: &'a [u8],
+    ) -> anyhow::Result<(&'a Block<'a>, usize)> {
+        let version = buffer.get_u32_le(0)?;
+        let parent = buffer.get_hash(4)?;
+        let merkle_root = buffer.get_hash(36)?;
+        let timestamp = buffer.get_u32_le(68)?;
+        let bits = buffer.get_u32_le(72)?;
+        let nonce = buffer.get_u32_le(76)?;
 
-        if txs_count == 0 {
-            self.txs = None;
-            return Ok(());
-        }
+        let (txs, offset) =
+            <Option<_> as SerializableValue>::deserialize(allocator, buffer.with_offset(80)?)?;
 
-        let mut txs = bumpalo::vec![in allocator; Tx::default(); txs_count as usize];
-        for i in 0..txs_count as usize {
-            txs.get_mut(i)
-                .unwrap()
-                .deserialize(allocator, stream)
-                .await?;
-        }
-
-        self.txs = Some(Vec::Bumpalod(txs));
-
-        Ok(())
+        let result = allocator.alloc(Block {
+            version,
+            timestamp,
+            bits,
+            nonce,
+            parent,
+            merkle_root,
+            txs,
+        });
+        Ok((result, offset + 80))
     }
 
     fn serialize(&self, stream: &mut impl bytes::BufMut) {}

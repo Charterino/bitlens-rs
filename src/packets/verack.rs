@@ -1,24 +1,22 @@
-
-use super::packetpayload::{PacketPayload, Serializable, Stream};
+use super::packetpayload::{PacketPayload, Serializable};
 
 #[derive(Default)]
 pub struct VerAck {}
 
 pub const VERACK_COMMAND: [u8; 12] = *b"verack\0\0\0\0\0\0";
 
-impl<'a, 'b> PacketPayload<'a, 'b> for VerAck {
+impl<'a> PacketPayload<'a> for VerAck {
     fn command(&self) -> &'static [u8; 12] {
         return &VERACK_COMMAND;
     }
 }
 
-impl<'a, 'b> Serializable<'a, 'b> for VerAck {
-    async fn deserialize(
-        &mut self,
+impl<'a> Serializable<'a> for VerAck {
+    fn deserialize(
         allocator: &'a bumpalo::Bump<1>,
-        stream: &mut impl Stream,
-    ) -> anyhow::Result<()> {
-        Ok(())
+        buffer: &'a [u8],
+    ) -> anyhow::Result<(&'a VerAck, usize)> {
+        Ok((&VerAck {}, 0))
     }
 
     fn serialize(&self, stream: &mut impl bytes::BufMut) {}

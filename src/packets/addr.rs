@@ -1,10 +1,10 @@
-use super::{netaddr::NetAddr, packetpayload::PacketPayload, vec::Vec};
+use super::{netaddr::NetAddr, packetpayload::PacketPayload};
 
-pub type Addr<'a> = Option<Vec<'a, NetAddr>>;
+pub type Addr<'a> = Option<&'a [&'a NetAddr<'a>]>;
 
 pub const ADDR_COMMAND: [u8; 12] = *b"addr\0\0\0\0\0\0\0\0";
 
-impl<'a, 'b> PacketPayload<'a, 'b> for Addr<'a> {
+impl<'a> PacketPayload<'a> for Addr<'a> {
     fn command(&self) -> &'static [u8; 12] {
         return &ADDR_COMMAND;
     }

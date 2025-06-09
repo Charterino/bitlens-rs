@@ -1,32 +1,34 @@
-use anyhow::{Result, bail};
+use anyhow::{Result, anyhow};
 use bytes::BufMut;
-use tokio::io::AsyncReadExt;
 
 use super::{
-    packetpayload::{Serializable, Stream},
+    buffer::Buffer,
+    packetpayload::{Serializable, SerializableValue},
+    varint::VarInt,
     varstr::VarStr,
 };
 
-#[derive(Default, Clone, Copy)]
-pub struct NetAddrShort {
+#[derive(Clone, Copy)]
+pub struct NetAddrShort<'a> {
     pub services: u64,
-    pub addr: [u8; 16],
+    pub addr: &'a [u8; 16],
     pub port: u16,
 }
 
-impl Serializable<'_, '_> for NetAddrShort {
-    async fn deserialize(
-        &mut self,
-        _allocator: &bumpalo::Bump<1>,
-        stream: &mut impl Stream,
-    ) -> Result<()> {
-        self.services = stream.read_u64_le().await?;
-        let read = stream.read_exact(&mut self.addr).await?;
-        if read != 16 {
-            bail!("could not read 16 bytes of address for netaddrshort")
-        }
-        self.port = stream.read_u16().await?;
-        Ok(())
+impl<'a> Serializable<'a> for NetAddrShort<'a> {
+    fn deserialize(
+        allocator: &'a bumpalo::Bump<1>,
+        buffer: &'a [u8],
+    ) -> Result<(&'a NetAddrShort<'a>, usize)> {
+        let res = allocator.alloc(NetAddrShort {
+            services: buffer.get_u64_le(0)?,
+            addr: buffer
+                .get(8..24)
+                .ok_or(anyhow!("not enough bytes for netaddrshort"))?
+                .try_into()?,
+            port: buffer.get_u16(24)?,
+        });
+        Ok((res, 26))
     }
 
     fn serialize(&self, stream: &mut impl BufMut) {
@@ -36,25 +38,29 @@ impl Serializable<'_, '_> for NetAddrShort {
     }
 }
 
-#[derive(Default, Clone, Copy)]
-pub struct NetAddr {
+#[derive(Clone, Copy)]
+pub struct NetAddr<'a> {
     services: u64,
-    addr: [u8; 16],
+    addr: &'a [u8; 16],
     time: u32,
     port: u16,
 }
 
-impl Serializable<'_, '_> for NetAddr {
-    async fn deserialize(
-        &mut self,
-        allocator: &'_ bumpalo::Bump<1>,
-        stream: &mut impl Stream,
-    ) -> Result<()> {
-        self.time = stream.read_u32_le().await?;
-        self.services = stream.read_u64_le().await?;
-        stream.read_exact(&mut self.addr).await?;
-        self.port = stream.read_u16().await?;
-        Ok(())
+impl<'a> Serializable<'a> for NetAddr<'a> {
+    fn deserialize(
+        allocator: &'a bumpalo::Bump<1>,
+        buffer: &'a [u8],
+    ) -> Result<(&'a NetAddr<'a>, usize)> {
+        let res = allocator.alloc(NetAddr {
+            time: buffer.get_u32_le(0)?,
+            services: buffer.get_u64_le(4)?,
+            addr: buffer
+                .get(12..28)
+                .ok_or(anyhow!("not enough bytes for netaddr"))?
+                .try_into()?,
+            port: buffer.get_u16(28)?,
+        });
+        Ok((res, 30))
     }
 
     fn serialize(&self, stream: &mut impl BufMut) {
@@ -65,27 +71,38 @@ impl Serializable<'_, '_> for NetAddr {
     }
 }
 
-#[derive(Default, Clone)]
+#[derive(Clone)]
 pub struct NetAddrV2<'a> {
     address: VarStr<'a>,
-    services: u64,
+    services: VarInt,
     time: u32,
     port: u16,
     network_id: u8,
 }
 
-impl<'a, 'b> Serializable<'a, 'b> for NetAddrV2<'a> {
-    async fn deserialize(
-        &mut self,
+impl<'a> Serializable<'a> for NetAddrV2<'a> {
+    fn deserialize(
         allocator: &'a bumpalo::Bump<1>,
-        stream: &mut impl Stream,
-    ) -> Result<()> {
-        self.time = stream.read_u32_le().await?;
-        self.services.deserialize(allocator, stream).await?;
-        self.network_id = stream.read_u8().await?;
-        self.address.deserialize(allocator, stream).await?;
-        self.port = stream.read_u16().await?;
-        Ok(())
+        buffer: &'a [u8],
+    ) -> Result<(&'a NetAddrV2<'a>, usize)> {
+        let time = buffer.get_u32_le(0)?;
+        let (services, mut offset) = VarInt::deserialize(allocator, buffer.with_offset(4)?)?;
+        offset += 4;
+        let network_id = *buffer
+            .get(offset)
+            .ok_or(anyhow!("not enough bytes for netaddrv2"))?;
+        offset += 1;
+        let (address, offset_delta) = VarStr::deserialize(allocator, buffer.with_offset(offset)?)?;
+        offset += offset_delta;
+        let port = buffer.get_u16(offset)?;
+        let res = allocator.alloc(NetAddrV2 {
+            address,
+            services,
+            time,
+            port,
+            network_id,
+        });
+        Ok((res, offset + 2))
     }
 
     fn serialize(&self, stream: &mut impl BufMut) {

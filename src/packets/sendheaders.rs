@@ -1,24 +1,22 @@
-
-use super::packetpayload::{PacketPayload, Serializable, Stream};
+use super::packetpayload::{PacketPayload, Serializable};
 
 #[derive(Default)]
 pub struct SendHeaders {}
 
 pub const SENDHEADERS_COMMAND: [u8; 12] = *b"sendheaders\0";
 
-impl<'a, 'b> PacketPayload<'a, 'b> for SendHeaders {
+impl<'a> PacketPayload<'a> for SendHeaders {
     fn command(&self) -> &'static [u8; 12] {
         return &SENDHEADERS_COMMAND;
     }
 }
 
-impl<'a, 'b> Serializable<'a, 'b> for SendHeaders {
-    async fn deserialize(
-        &mut self,
+impl<'a> Serializable<'a> for SendHeaders {
+    fn deserialize(
         allocator: &'a bumpalo::Bump<1>,
-        stream: &mut impl Stream,
-    ) -> anyhow::Result<()> {
-        Ok(())
+        buffer: &'a [u8],
+    ) -> anyhow::Result<(&'a SendHeaders, usize)> {
+        Ok((&SendHeaders {}, 0))
     }
 
     fn serialize(&self, stream: &mut impl bytes::BufMut) {}

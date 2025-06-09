@@ -1,29 +1,21 @@
-use bytes::BufMut;
-use tokio::io::AsyncReadExt;
-
-use super::packetpayload::{Serializable, Stream};
+use super::{buffer::Buffer, packetpayload::SerializableValue};
 use anyhow::Result;
+use bytes::BufMut;
 
 pub type VarInt = u64;
 
-impl Serializable<'_, '_> for VarInt {
-    async fn deserialize(
-        &mut self,
-        _allocator: &bumpalo::Bump<1>,
-        stream: &mut impl Stream,
-    ) -> Result<()> {
-        let leader = stream.read_u8().await?;
-        if leader < 0xFD {
-            *self = leader as u64;
+impl<'a> SerializableValue<'a> for VarInt {
+    fn deserialize(allocator: &'a bumpalo::Bump<1>, buffer: &'a [u8]) -> Result<(VarInt, usize)> {
+        let leader = buffer[0];
+        Ok(if leader < 0xFD {
+            (leader as u64, 1)
         } else if leader == 0xFD {
-            *self = stream.read_u16_le().await? as u64;
+            (buffer.get_u16_le(1)? as u64, 3)
         } else if leader == 0xFE {
-            *self = stream.read_u32_le().await? as u64;
+            (buffer.get_u32_le(1)? as u64, 5)
         } else {
-            *self = stream.read_u64_le().await?;
-        }
-
-        Ok(())
+            (buffer.get_u64_le(1)?, 9)
+        })
     }
 
     fn serialize(&self, stream: &mut impl BufMut) {
