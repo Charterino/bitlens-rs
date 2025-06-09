@@ -19,7 +19,7 @@ pub struct Version<'a> {
 
 pub const VERSION_COMMAND: [u8; 12] = *b"version\0\0\0\0\0";
 
-impl<'a, 'b> PacketPayload<'a> for Version<'a> {
+impl<'a> PacketPayload<'a> for Version<'a> {
     fn command(&self) -> &'static [u8; 12] {
         &VERSION_COMMAND
     }
@@ -41,8 +41,8 @@ impl<'a> Serializable<'a> for Version<'a> {
         let res = allocator.alloc(Version {
             services,
             timestamp,
-            addrrecv: addrrecv,
-            addrfrom: addrfrom,
+            addrrecv,
+            addrfrom,
             nonce,
             user_agent: ua,
             start_height,

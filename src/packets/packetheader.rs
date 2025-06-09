@@ -31,8 +31,8 @@ pub struct PacketHeader {
     pub checksum: u32,
 }
 
-pub async fn deserialize_packet<'bump, 'stream>(
-    stream: &mut BufReader<ReadHalf<'stream>>,
+pub async fn deserialize_packet<'bump>(
+    stream: &mut BufReader<ReadHalf<'_>>,
     allocator: &'bump Bump,
 ) -> Result<(PacketHeader, Option<PacketPayloadType<'bump>>)> {
     let magic = AsyncReadExt::read_u32_le(stream).await?;
@@ -48,13 +48,13 @@ pub async fn deserialize_packet<'bump, 'stream>(
         String::from_utf8_lossy(&command)
     );
 
-    let mut buffer = allocator.alloc_slice_fill_default::<u8>(length as usize);
+    let buffer = allocator.alloc_slice_fill_default::<u8>(length as usize);
 
     // Read the entire packet into buffer
-    stream.read_exact(&mut buffer).await?;
+    stream.read_exact(buffer).await?;
 
     let mut hash = Sha256::digest(&buffer);
-    hash = Sha256::digest(hash).into();
+    hash = Sha256::digest(hash);
     let shorthash = &hash.as_slice()[..4];
 
     println!(
@@ -96,7 +96,7 @@ pub async fn deserialize_packet<'bump, 'stream>(
             let (v, _) = Block::deserialize(allocator, buffer)?;
             Some(PacketPayloadType::Block(v))
         }
-        other => {
+        _ => {
             println!(
                 "unknown command {} {}",
                 String::from_utf8_lossy(&command),
@@ -109,7 +109,7 @@ pub async fn deserialize_packet<'bump, 'stream>(
     Ok((
         PacketHeader {
             magic,
-            command: command,
+            command,
             length,
             checksum: u32::from_le_bytes(checksum),
         },
@@ -128,10 +128,10 @@ pub async fn write_packet_to_stream<'a>(
     let shorthash = &hash.as_slice()[..4];
 
     stream.write_u32_le(ACTIVE_MAGIC).await?;
-    stream.write(packet.command()).await?;
+    stream.write_all(packet.command()).await?;
     stream.write_u32_le(buf.len() as u32).await?;
-    stream.write(shorthash).await?;
-    stream.write(&buf).await?;
+    stream.write_all(shorthash).await?;
+    stream.write_all(&buf).await?;
 
     stream.flush().await?;
 

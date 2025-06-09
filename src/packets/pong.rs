@@ -10,9 +10,9 @@ pub struct Pong {
 
 pub const PONG_COMMAND: [u8; 12] = *b"pong\0\0\0\0\0\0\0\0";
 
-impl<'a> PacketPayload<'a> for Pong {
+impl PacketPayload<'_> for Pong {
     fn command(&self) -> &'static [u8; 12] {
-        return &PONG_COMMAND;
+        &PONG_COMMAND
     }
 }
 

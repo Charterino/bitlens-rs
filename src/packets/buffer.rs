@@ -21,8 +21,8 @@ impl<'a> Buffer<'a> for &'a [u8] {
 
     fn with_offset(self, offset: usize) -> Result<&'a [u8]> {
         match self.get(offset..) {
-            Some(v) => return Ok(v),
-            None => return Err(anyhow!("not enough bytes")),
+            Some(v) => Ok(v),
+            None => Err(anyhow!("not enough bytes")),
         }
     }
 

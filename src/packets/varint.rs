@@ -5,7 +5,7 @@ use bytes::BufMut;
 pub type VarInt = u64;
 
 impl<'a> SerializableValue<'a> for VarInt {
-    fn deserialize(allocator: &'a bumpalo::Bump<1>, buffer: &'a [u8]) -> Result<(VarInt, usize)> {
+    fn deserialize(_: &'a bumpalo::Bump<1>, buffer: &'a [u8]) -> Result<(VarInt, usize)> {
         let leader = buffer[0];
         Ok(if leader < 0xFD {
             (leader as u64, 1)

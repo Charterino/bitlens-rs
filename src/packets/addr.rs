@@ -6,6 +6,6 @@ pub const ADDR_COMMAND: [u8; 12] = *b"addr\0\0\0\0\0\0\0\0";
 
 impl<'a> PacketPayload<'a> for Addr<'a> {
     fn command(&self) -> &'static [u8; 12] {
-        return &ADDR_COMMAND;
+        &ADDR_COMMAND
     }
 }

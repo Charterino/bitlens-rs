@@ -5,19 +5,19 @@ pub struct SendHeaders {}
 
 pub const SENDHEADERS_COMMAND: [u8; 12] = *b"sendheaders\0";
 
-impl<'a> PacketPayload<'a> for SendHeaders {
+impl PacketPayload<'_> for SendHeaders {
     fn command(&self) -> &'static [u8; 12] {
-        return &SENDHEADERS_COMMAND;
+        &SENDHEADERS_COMMAND
     }
 }
 
 impl<'a> Serializable<'a> for SendHeaders {
     fn deserialize(
-        allocator: &'a bumpalo::Bump<1>,
-        buffer: &'a [u8],
+        _: &'a bumpalo::Bump<1>,
+        _: &'a [u8],
     ) -> anyhow::Result<(&'a SendHeaders, usize)> {
         Ok((&SendHeaders {}, 0))
     }
 
-    fn serialize(&self, stream: &mut impl bytes::BufMut) {}
+    fn serialize(&self, _: &mut impl bytes::BufMut) {}
 }

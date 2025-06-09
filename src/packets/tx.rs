@@ -57,12 +57,12 @@ impl<'a> Serializable<'a> for Tx<'a> {
         let (witnesses, witnesses_start) = if has_witness_data {
             let start = offset;
             let mut wits = Vec::with_capacity_in(txins_count, allocator);
-            for i in 0..txins_count {
+            for _ in 0..txins_count {
                 let (components_count, offset_delta) =
                     VarInt::deserialize(allocator, buffer.with_offset(offset)?)?;
                 offset += offset_delta;
                 let mut components = Vec::with_capacity_in(components_count as usize, allocator);
-                for j in 0..components_count as usize {
+                for _ in 0..components_count as usize {
                     let (component, offset_delta) =
                         VarStr::deserialize(allocator, buffer.with_offset(offset)?)?;
                     offset += offset_delta;
@@ -104,11 +104,8 @@ impl<'a> Serializable<'a> for Tx<'a> {
     fn serialize(&self, stream: &mut impl bytes::BufMut) {
         stream.put_u32_le(self.version);
         // If we have witness data, insert 0x0001 marker
-        match self.witness_data {
-            Some(_) => {
-                stream.put_u16(0x0001);
-            }
-            None => {}
+        if self.witness_data.is_some() {
+            stream.put_u16(0x0001);
         }
         match &self.txins {
             Some(txins) => {

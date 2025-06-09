@@ -64,7 +64,7 @@ impl<'a, T: Serializable<'a>> SerializableValue<'a> for Option<&'a [&'a T]> {
         }
 
         let mut result: Vec<'a, &'a T> = Vec::with_capacity_in(len as usize, allocator);
-        for i in 0..len as usize {
+        for _ in 0..len as usize {
             let (value, offset_delta) = T::deserialize(allocator, buffer.with_offset(offset)?)?;
             offset += offset_delta;
             result.push(value);
@@ -98,7 +98,7 @@ impl<'a, T: Serializable<'a>> Serializable<'a> for Option<&'a [&'a T]> {
         }
 
         let mut result: Vec<'a, &'a T> = Vec::with_capacity_in(len as usize, allocator);
-        for i in 0..len as usize {
+        for _ in 0..len as usize {
             let (value, offset_delta) = T::deserialize(allocator, buffer.with_offset(offset)?)?;
             offset += offset_delta;
             result.push(value);

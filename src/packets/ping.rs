@@ -1,4 +1,3 @@
-
 use super::{
     buffer::Buffer,
     packetpayload::{PacketPayload, Serializable},
@@ -11,9 +10,9 @@ pub struct Ping {
 
 pub const PING_COMMAND: [u8; 12] = *b"ping\0\0\0\0\0\0\0\0";
 
-impl<'a> PacketPayload<'a> for Ping {
+impl PacketPayload<'_> for Ping {
     fn command(&self) -> &'static [u8; 12] {
-        return &PING_COMMAND;
+        &PING_COMMAND
     }
 }
 

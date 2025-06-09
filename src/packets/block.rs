@@ -50,5 +50,5 @@ impl<'a> Serializable<'a> for Block<'a> {
         Ok((result, offset + 80))
     }
 
-    fn serialize(&self, stream: &mut impl bytes::BufMut) {}
+    fn serialize(&self, _: &mut impl bytes::BufMut) {}
 }

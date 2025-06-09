@@ -16,6 +16,5 @@ pub mod sendheaders;
 pub mod tx;
 pub mod varint;
 pub mod varstr;
-pub mod vec;
 pub mod verack;
 pub mod version;
