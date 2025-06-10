@@ -2,6 +2,7 @@ pub mod addr;
 pub mod addrv2;
 pub mod block;
 pub mod buffer;
+pub mod deepclone;
 pub mod getaddr;
 pub mod getdata;
 pub mod inv;

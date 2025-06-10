@@ -1,13 +1,26 @@
-use super::packetpayload::{PacketPayload, Serializable};
+use super::{
+    deepclone::{DeepClone, MustOutlive},
+    packetpayload::{PacketPayload, Serializable},
+};
 
 #[derive(Default, Clone, Debug)]
 pub struct SendHeaders {}
 
 pub const SENDHEADERS_COMMAND: [u8; 12] = *b"sendheaders\0";
 
-impl<'a> PacketPayload<'_> for SendHeaders {
+impl<'old, 'new: 'old> PacketPayload<'old, 'new> for SendHeaders {
     fn command(&self) -> &'static [u8; 12] {
         &SENDHEADERS_COMMAND
+    }
+}
+
+impl<'old> MustOutlive<'old> for SendHeaders {
+    type WithLifetime<'new: 'old> = SendHeaders;
+}
+
+impl<'old, 'new: 'old> DeepClone<'old, 'new> for SendHeaders {
+    fn deep_clone(&self) -> Self::WithLifetime<'new> {
+        Self::WithLifetime {}
     }
 }
 

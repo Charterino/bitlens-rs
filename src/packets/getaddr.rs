@@ -1,13 +1,26 @@
-use super::packetpayload::{PacketPayload, Serializable};
+use super::{
+    deepclone::{DeepClone, MustOutlive},
+    packetpayload::{PacketPayload, Serializable},
+};
 
 #[derive(Default, Clone, Debug)]
 pub struct GetAddr {}
 
 pub const GETADDR_COMMAND: [u8; 12] = *b"getaddr\0\0\0\0\0";
 
-impl PacketPayload<'_> for GetAddr {
+impl<'old, 'new: 'old> PacketPayload<'old, 'new> for GetAddr {
     fn command(&self) -> &'static [u8; 12] {
         &GETADDR_COMMAND
+    }
+}
+
+impl<'old> MustOutlive<'old> for GetAddr {
+    type WithLifetime<'new: 'old> = GetAddr;
+}
+
+impl<'old, 'new: 'old> DeepClone<'old, 'new> for GetAddr {
+    fn deep_clone(&self) -> Self::WithLifetime<'new> {
+        Self::WithLifetime {}
     }
 }
 

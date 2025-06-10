@@ -3,12 +3,29 @@ use std::borrow::Cow;
 use anyhow::{Result, anyhow};
 use bytes::BufMut;
 
-use super::{packetpayload::SerializableValue, varint::VarInt};
+use super::{
+    deepclone::{DeepClone, MustOutlive},
+    packetpayload::SerializableValue,
+    varint::VarInt,
+};
 
 // not necessarily valid UTF-8
 #[derive(Debug, Clone, Default)]
 pub struct VarStr<'a> {
     pub inner: Cow<'a, [u8]>,
+}
+
+impl<'old> MustOutlive<'old> for VarStr<'old> {
+    type WithLifetime<'new: 'old> = VarStr<'new>;
+}
+
+impl<'old, 'new: 'old> DeepClone<'old, 'new> for VarStr<'old> {
+    fn deep_clone(&self) -> Self::WithLifetime<'new> {
+        let cloned = self.inner.clone().into_owned();
+        Self::WithLifetime {
+            inner: Cow::Owned(cloned),
+        }
+    }
 }
 
 impl<'a> SerializableValue<'a> for VarStr<'a> {

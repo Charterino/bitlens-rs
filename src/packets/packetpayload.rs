@@ -7,9 +7,10 @@ use sha2::{Digest, Sha256};
 use tokio::io::AsyncReadExt;
 
 use super::{
-    addr::Addr, addrv2::AddrV2, block::Block, buffer::Buffer, getaddr::GetAddr, getdata::GetData,
-    packetheader::PacketHeader, ping::Ping, pong::Pong, sendaddrv2::SendAddrV2,
-    sendheaders::SendHeaders, tx::Tx, varint::VarInt, verack::VerAck, version::Version,
+    addr::Addr, addrv2::AddrV2, block::Block, buffer::Buffer, deepclone::DeepClone,
+    getaddr::GetAddr, getdata::GetData, packetheader::PacketHeader, ping::Ping, pong::Pong,
+    sendaddrv2::SendAddrV2, sendheaders::SendHeaders, tx::Tx, varint::VarInt, verack::VerAck,
+    version::Version,
 };
 
 pub struct Packet<'a> {
@@ -17,7 +18,9 @@ pub struct Packet<'a> {
     pub payload: Option<PacketPayloadType<'a>>,
 }
 
-pub trait PacketPayload<'a>: Clone + Debug + Default + Serializable<'a> {
+pub trait PacketPayload<'a, 'b: 'a>:
+    Clone + Debug + Default + DeepClone<'a, 'b> + Serializable<'a>
+{
     fn command(&self) -> &'static [u8; 12];
 }
 
@@ -77,6 +80,14 @@ pub async fn read_payload<'bump>(
             let (v, _) = Block::deserialize(allocator, buffer)?;
             Some(PacketPayloadType::Block(Cow::Borrowed(v)))
         }
+        super::addr::ADDR_COMMAND => {
+            let (v, _) = Addr::deserialize(allocator, buffer)?;
+            Some(PacketPayloadType::Addr(Cow::Borrowed(v)))
+        }
+        super::addrv2::ADDRV2_COMMAND => {
+            let (v, _) = AddrV2::deserialize(allocator, buffer)?;
+            Some(PacketPayloadType::AddrV2(Cow::Borrowed(v)))
+        }
         _ => None,
     })
 }
@@ -112,12 +123,12 @@ where
 #[derive(Clone)]
 pub enum PacketPayloadType<'a> {
     Version(Cow<'a, Version<'a>>),
+    VerAck(Cow<'a, VerAck>),
     Addr(Cow<'a, Addr<'a>>),
     AddrV2(Cow<'a, AddrV2<'a>>),
     GetAddr(Cow<'a, GetAddr>),
     Ping(Cow<'a, Ping>),
     Pong(Cow<'a, Pong>),
-    VerAck(Cow<'a, VerAck>),
     SendHeaders(Cow<'a, SendHeaders>),
     SendAddrV2(Cow<'a, SendAddrV2>),
     Tx(Cow<'a, Tx<'a>>),
@@ -129,9 +140,9 @@ impl<'a> PacketPayloadType<'a> {
     pub fn serialize(&self, stream: &mut std::vec::Vec<u8>) {
         match self {
             PacketPayloadType::Version(version) => version.serialize(stream),
+            PacketPayloadType::VerAck(ver_ack) => ver_ack.serialize(stream),
             PacketPayloadType::Ping(ping) => ping.serialize(stream),
             PacketPayloadType::Pong(pong) => pong.serialize(stream),
-            PacketPayloadType::VerAck(ver_ack) => ver_ack.serialize(stream),
             PacketPayloadType::SendHeaders(send_headers) => send_headers.serialize(stream),
             PacketPayloadType::SendAddrV2(send_addr_v2) => send_addr_v2.serialize(stream),
             PacketPayloadType::Tx(tx) => tx.serialize(stream),
@@ -146,9 +157,9 @@ impl<'a> PacketPayloadType<'a> {
     pub fn command(&self) -> &'static [u8; 12] {
         match self {
             PacketPayloadType::Version(version) => version.command(),
+            PacketPayloadType::VerAck(ver_ack) => ver_ack.command(),
             PacketPayloadType::Ping(ping) => ping.command(),
             PacketPayloadType::Pong(pong) => pong.command(),
-            PacketPayloadType::VerAck(ver_ack) => ver_ack.command(),
             PacketPayloadType::SendHeaders(send_headers) => send_headers.command(),
             PacketPayloadType::SendAddrV2(send_addr_v2) => send_addr_v2.command(),
             PacketPayloadType::Tx(tx) => tx.command(),

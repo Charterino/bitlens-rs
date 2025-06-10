@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 
 use super::{
+    deepclone::{DeepClone, MustOutlive},
     inv::InventoryVector,
     packetpayload::{PacketPayload, Serializable, SerializableValue},
 };
@@ -12,9 +13,24 @@ pub struct GetData<'a> {
 
 pub const GETDATA_COMMAND: [u8; 12] = *b"getdata\0\0\0\0\0";
 
-impl<'a> PacketPayload<'a> for GetData<'a> {
+impl<'old, 'new: 'old> PacketPayload<'old, 'new> for GetData<'old> {
     fn command(&self) -> &'static [u8; 12] {
         &GETDATA_COMMAND
+    }
+}
+
+impl<'old> MustOutlive<'old> for GetData<'old> {
+    type WithLifetime<'new: 'old> = GetData<'new>;
+}
+
+impl<'old, 'new: 'old> DeepClone<'old, 'new> for GetData<'old> {
+    fn deep_clone(&self) -> Self::WithLifetime<'new> {
+        let data = (&*self.inner)
+            .deep_clone()
+            .into_iter()
+            .map(|x| Cow::Owned(x))
+            .collect();
+        Self::WithLifetime { inner: data }
     }
 }
 

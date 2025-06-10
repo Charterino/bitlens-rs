@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 
 use super::buffer::Buffer;
+use super::deepclone::{DeepClone, MustOutlive};
 use super::packetpayload::{Serializable, SerializableValue};
 use super::varstr::VarStr;
 use super::{netaddr::NetAddrShort, packetpayload::PacketPayload};
@@ -22,7 +23,27 @@ pub struct Version<'a> {
 
 pub const VERSION_COMMAND: [u8; 12] = *b"version\0\0\0\0\0";
 
-impl<'a> PacketPayload<'a> for Version<'a> {
+impl<'old> MustOutlive<'old> for Version<'old> {
+    type WithLifetime<'new: 'old> = Version<'new>;
+}
+
+impl<'old, 'new: 'old> DeepClone<'old, 'new> for Version<'old> {
+    fn deep_clone(&self) -> Self::WithLifetime<'new> {
+        Self::WithLifetime {
+            services: self.services,
+            timestamp: self.timestamp,
+            addrrecv: Cow::Owned(self.addrrecv.deep_clone()),
+            addrfrom: Cow::Owned(self.addrfrom.deep_clone()),
+            nonce: self.nonce,
+            user_agent: self.user_agent.deep_clone(),
+            start_height: self.start_height,
+            version: self.version,
+            announce_relayed_transactions: self.announce_relayed_transactions,
+        }
+    }
+}
+
+impl<'old, 'new: 'old> PacketPayload<'old, 'new> for Version<'old> {
     fn command(&self) -> &'static [u8; 12] {
         &VERSION_COMMAND
     }

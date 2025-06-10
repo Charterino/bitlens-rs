@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 
 use super::{
+    deepclone::{DeepClone, MustOutlive},
     netaddr::NetAddr,
     packetpayload::{PacketPayload, Serializable, SerializableValue},
 };
@@ -12,9 +13,24 @@ pub struct Addr<'a> {
 
 pub const ADDR_COMMAND: [u8; 12] = *b"addr\0\0\0\0\0\0\0\0";
 
-impl<'a> PacketPayload<'a> for Addr<'a> {
+impl<'old, 'new: 'old> PacketPayload<'old, 'new> for Addr<'old> {
     fn command(&self) -> &'static [u8; 12] {
         &ADDR_COMMAND
+    }
+}
+
+impl<'old> MustOutlive<'old> for Addr<'old> {
+    type WithLifetime<'new: 'old> = Addr<'new>;
+}
+
+impl<'old, 'new: 'old> DeepClone<'old, 'new> for Addr<'old> {
+    fn deep_clone(&self) -> Self::WithLifetime<'new> {
+        let addys = (&*self.inner)
+            .deep_clone()
+            .into_iter()
+            .map(|x| Cow::Owned(x))
+            .collect();
+        Self::WithLifetime { inner: addys }
     }
 }
 

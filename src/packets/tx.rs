@@ -6,6 +6,7 @@ use sha2::{Digest, Sha256};
 
 use super::{
     buffer::Buffer,
+    deepclone::{DeepClone, MustOutlive},
     packetpayload::{PacketPayload, Serializable, SerializableValue},
     varint::VarInt,
     varstr::VarStr,
@@ -24,9 +25,38 @@ pub struct Tx<'a> {
 
 pub const TX_COMMAND: [u8; 12] = *b"tx\0\0\0\0\0\0\0\0\0\0";
 
-impl<'a> PacketPayload<'a> for Tx<'a> {
+impl<'old, 'new: 'old> PacketPayload<'old, 'new> for Tx<'old> {
     fn command(&self) -> &'static [u8; 12] {
         &TX_COMMAND
+    }
+}
+
+impl<'old> MustOutlive<'old> for Tx<'old> {
+    type WithLifetime<'new: 'old> = Tx<'new>;
+}
+
+impl<'old, 'new: 'old> DeepClone<'old, 'new> for Tx<'old> {
+    fn deep_clone(&self) -> Self::WithLifetime<'new> {
+        // This is kind of suboptimal, but it'll do for now.
+        let txins = (&*self.txins)
+            .deep_clone()
+            .into_iter()
+            .map(|x| Cow::Owned(x))
+            .collect();
+        let txouts = (&*self.txouts)
+            .deep_clone()
+            .into_iter()
+            .map(|x| Cow::Owned(x))
+            .collect();
+
+        Self::WithLifetime {
+            version: self.version,
+            locktime: self.locktime,
+            txins: Cow::Owned(txins),
+            txouts: Cow::Owned(txouts),
+            witness_data: None,
+            hash: self.hash,
+        }
     }
 }
 
@@ -143,6 +173,23 @@ pub struct TxIn<'a> {
     pub sig_script: VarStr<'a>,
 }
 
+impl<'old> MustOutlive<'old> for TxIn<'old> {
+    type WithLifetime<'new: 'old> = TxIn<'new>;
+}
+
+impl<'old, 'new: 'old> DeepClone<'old, 'new> for TxIn<'old> {
+    fn deep_clone(&self) -> Self::WithLifetime<'new> {
+        let prevout_hash = self.prevout_hash.clone().into_owned();
+        let sig_script = self.sig_script.deep_clone();
+        Self::WithLifetime {
+            prevout_hash: Cow::Owned(prevout_hash),
+            prevout_index: self.prevout_index,
+            sequence: self.sequence,
+            sig_script,
+        }
+    }
+}
+
 impl<'a> Serializable<'a> for TxIn<'a> {
     fn deserialize(
         allocator: &'a bumpalo::Bump<1>,
@@ -175,6 +222,20 @@ impl<'a> Serializable<'a> for TxIn<'a> {
 pub struct TxOut<'a> {
     pub value: u64,
     pub script: VarStr<'a>,
+}
+
+impl<'old> MustOutlive<'old> for TxOut<'old> {
+    type WithLifetime<'new: 'old> = TxOut<'new>;
+}
+
+impl<'old, 'new: 'old> DeepClone<'old, 'new> for TxOut<'old> {
+    fn deep_clone(&self) -> Self::WithLifetime<'new> {
+        let script = self.script.deep_clone();
+        Self::WithLifetime {
+            value: self.value,
+            script,
+        }
+    }
 }
 
 impl<'a> Serializable<'a> for TxOut<'a> {

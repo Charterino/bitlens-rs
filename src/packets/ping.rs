@@ -1,5 +1,6 @@
 use super::{
     buffer::Buffer,
+    deepclone::{DeepClone, MustOutlive},
     packetpayload::{PacketPayload, Serializable},
 };
 
@@ -10,9 +11,19 @@ pub struct Ping {
 
 pub const PING_COMMAND: [u8; 12] = *b"ping\0\0\0\0\0\0\0\0";
 
-impl<'a> PacketPayload<'_> for Ping {
+impl<'old, 'new: 'old> PacketPayload<'old, 'new> for Ping {
     fn command(&self) -> &'static [u8; 12] {
         &PING_COMMAND
+    }
+}
+
+impl<'old> MustOutlive<'old> for Ping {
+    type WithLifetime<'new: 'old> = Ping;
+}
+
+impl<'old, 'new: 'old> DeepClone<'old, 'new> for Ping {
+    fn deep_clone(&self) -> Self::WithLifetime<'new> {
+        Self::WithLifetime { nonce: self.nonce }
     }
 }
 

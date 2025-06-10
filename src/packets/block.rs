@@ -2,6 +2,7 @@ use std::borrow::Cow;
 
 use super::{
     buffer::Buffer,
+    deepclone::{DeepClone, MustOutlive},
     packetpayload::{PacketPayload, Serializable, SerializableValue},
     tx::Tx,
 };
@@ -20,9 +21,35 @@ pub struct Block<'a> {
 
 pub const BLOCK_COMMAND: [u8; 12] = *b"block\0\0\0\0\0\0\0";
 
-impl<'a> PacketPayload<'a> for Block<'a> {
+impl<'old, 'new: 'old> PacketPayload<'old, 'new> for Block<'old> {
     fn command(&self) -> &'static [u8; 12] {
         &BLOCK_COMMAND
+    }
+}
+
+impl<'old> MustOutlive<'old> for Block<'old> {
+    type WithLifetime<'new: 'old> = Block<'new>;
+}
+
+impl<'old, 'new: 'old> DeepClone<'old, 'new> for Block<'old> {
+    fn deep_clone(&self) -> Self::WithLifetime<'new> {
+        let parent = self.parent.clone().into_owned();
+        let merkle_root = self.merkle_root.clone().into_owned();
+        // once again suboptimal but it will do for now
+        let txs = (&*self.txs)
+            .deep_clone()
+            .into_iter()
+            .map(|x| Cow::Owned(x))
+            .collect();
+        Self::WithLifetime {
+            version: self.version,
+            timestamp: self.timestamp,
+            bits: self.bits,
+            nonce: self.nonce,
+            parent: Cow::Owned(parent),
+            merkle_root: Cow::Owned(merkle_root),
+            txs: Cow::Owned(txs),
+        }
     }
 }
 

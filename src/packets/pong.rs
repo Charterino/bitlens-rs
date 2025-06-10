@@ -1,5 +1,6 @@
 use super::{
     buffer::Buffer,
+    deepclone::{DeepClone, MustOutlive},
     packetpayload::{PacketPayload, Serializable},
 };
 
@@ -10,9 +11,19 @@ pub struct Pong {
 
 pub const PONG_COMMAND: [u8; 12] = *b"pong\0\0\0\0\0\0\0\0";
 
-impl<'a> PacketPayload<'_> for Pong {
+impl<'old, 'new: 'old> PacketPayload<'old, 'new> for Pong {
     fn command(&self) -> &'static [u8; 12] {
         &PONG_COMMAND
+    }
+}
+
+impl<'old> MustOutlive<'old> for Pong {
+    type WithLifetime<'new: 'old> = Pong;
+}
+
+impl<'old, 'new: 'old> DeepClone<'old, 'new> for Pong {
+    fn deep_clone(&self) -> Self::WithLifetime<'new> {
+        Self::WithLifetime { nonce: self.nonce }
     }
 }
 
