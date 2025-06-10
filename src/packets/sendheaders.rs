@@ -5,7 +5,7 @@ pub struct SendHeaders {}
 
 pub const SENDHEADERS_COMMAND: [u8; 12] = *b"sendheaders\0";
 
-impl PacketPayload for SendHeaders {
+impl<'a> PacketPayload<'_> for SendHeaders {
     fn command(&self) -> &'static [u8; 12] {
         &SENDHEADERS_COMMAND
     }

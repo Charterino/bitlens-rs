@@ -5,7 +5,7 @@ pub struct VerAck {}
 
 pub const VERACK_COMMAND: [u8; 12] = *b"verack\0\0\0\0\0\0";
 
-impl PacketPayload for VerAck {
+impl PacketPayload<'_> for VerAck {
     fn command(&self) -> &'static [u8; 12] {
         &VERACK_COMMAND
     }

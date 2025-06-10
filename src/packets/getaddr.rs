@@ -5,7 +5,7 @@ pub struct GetAddr {}
 
 pub const GETADDR_COMMAND: [u8; 12] = *b"getaddr\0\0\0\0\0";
 
-impl PacketPayload for GetAddr {
+impl PacketPayload<'_> for GetAddr {
     fn command(&self) -> &'static [u8; 12] {
         &GETADDR_COMMAND
     }

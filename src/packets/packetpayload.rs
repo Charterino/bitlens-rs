@@ -1,4 +1,4 @@
-use std::borrow::Cow;
+use std::{borrow::Cow, fmt::Debug};
 
 use anyhow::{Result, bail};
 use bumpalo::{Bump, collections::Vec};
@@ -17,7 +17,7 @@ pub struct Packet<'a> {
     pub payload: Option<PacketPayloadType<'a>>,
 }
 
-pub trait PacketPayload {
+pub trait PacketPayload<'a>: Clone + Debug + Default + Serializable<'a> {
     fn command(&self) -> &'static [u8; 12];
 }
 
@@ -183,28 +183,3 @@ impl<'a, T: Serializable<'a> + ToOwned> SerializableValue<'a> for Cow<'a, [Cow<'
         }
     }
 }
-
-/*impl<'a, T: Serializable<'a> + ToOwned> Serializable<'a> for Cow<'a, [Cow<'a, T>]> {
-    fn deserialize(allocator: &'a Bump<1>, buffer: &'a [u8]) -> Result<(&'a Self, usize)> {
-        let (len, mut offset) = VarInt::deserialize(allocator, buffer)?;
-
-        let mut result: Vec<'a, Cow<'a, T>> = Vec::with_capacity_in(len as usize, allocator);
-        for _ in 0..len as usize {
-            let (value, offset_delta) = T::deserialize(allocator, buffer.with_offset(offset)?)?;
-            offset += offset_delta;
-            result.push(Cow::Borrowed(value));
-        }
-
-        let res = Cow::Owned(result.into_bump_slice());
-        Ok((&res, offset))
-    }
-
-    fn serialize(&self, stream: &mut impl BufMut) {
-        let len = self.len() as VarInt;
-        len.serialize(stream);
-        for i in 0..len as usize {
-            self.get(i).unwrap().serialize(stream);
-        }
-    }
-}
-*/

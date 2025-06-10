@@ -4,7 +4,7 @@ use num_derive::{FromPrimitive, ToPrimitive};
 
 use super::{buffer::Buffer, packetpayload::Serializable};
 
-#[derive(FromPrimitive, ToPrimitive, Clone, Default)]
+#[derive(FromPrimitive, ToPrimitive, Clone, Default, Debug)]
 pub enum InventoryVectorType {
     #[default]
     Error = 0,
@@ -17,7 +17,7 @@ pub enum InventoryVectorType {
     FilteredWitnessBlock = 0x40000003,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct InventoryVector<'a> {
     pub inv_type: InventoryVectorType,
     pub hash: &'a [u8; 32],

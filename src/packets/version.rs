@@ -7,7 +7,7 @@ use super::{netaddr::NetAddrShort, packetpayload::PacketPayload};
 use anyhow::{Result, anyhow};
 use bytes::BufMut;
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Version<'a> {
     pub services: u64,
     pub timestamp: u64,
@@ -22,7 +22,7 @@ pub struct Version<'a> {
 
 pub const VERSION_COMMAND: [u8; 12] = *b"version\0\0\0\0\0";
 
-impl<'a> PacketPayload for Version<'a> {
+impl<'a> PacketPayload<'a> for Version<'a> {
     fn command(&self) -> &'static [u8; 12] {
         &VERSION_COMMAND
     }

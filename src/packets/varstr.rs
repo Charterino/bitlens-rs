@@ -6,7 +6,10 @@ use bytes::BufMut;
 use super::{packetpayload::SerializableValue, varint::VarInt};
 
 // not necessarily valid UTF-8
-pub type VarStr<'a> = Option<Cow<'a, [u8]>>;
+#[derive(Debug, Clone, Default)]
+pub struct VarStr<'a> {
+    pub inner: Cow<'a, [u8]>,
+}
 
 impl<'a> SerializableValue<'a> for VarStr<'a> {
     fn deserialize(
@@ -14,29 +17,24 @@ impl<'a> SerializableValue<'a> for VarStr<'a> {
         buffer: &'a [u8],
     ) -> Result<(VarStr<'a>, usize)> {
         let (length, offset) = VarInt::deserialize(allocator, buffer)?;
-        if length == 0 {
-            return Ok((None, 1));
-        }
 
         match buffer.get(offset..offset + length as usize) {
-            Some(v) => Ok((Some(Cow::Borrowed(v)), offset + length as usize)),
+            Some(v) => Ok((
+                Self {
+                    inner: Cow::Borrowed(v),
+                },
+                offset + length as usize,
+            )),
             None => Err(anyhow!("not enough bytes for varstr")),
         }
     }
 
     fn serialize(&self, stream: &mut impl BufMut) {
-        match self {
-            Some(ua) => {
-                let len = ua.len() as VarInt;
-                len.serialize(stream);
-                match ua {
-                    Cow::Borrowed(ua) => stream.put(*ua),
-                    Cow::Owned(ua) => stream.put(ua.as_slice()),
-                }
-            }
-            None => {
-                stream.put_u8(0);
-            }
+        let len = self.inner.len() as VarInt;
+        len.serialize(stream);
+        match &self.inner {
+            Cow::Borrowed(ua) => stream.put(*ua),
+            Cow::Owned(ua) => stream.put(ua.as_slice()),
         }
     }
 }

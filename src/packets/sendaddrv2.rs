@@ -5,7 +5,7 @@ pub struct SendAddrV2 {}
 
 pub const SENDADDRV2_COMMAND: [u8; 12] = *b"sendaddrv2\0\0";
 
-impl PacketPayload for SendAddrV2 {
+impl<'a> PacketPayload<'_> for SendAddrV2 {
     fn command(&self) -> &'static [u8; 12] {
         &SENDADDRV2_COMMAND
     }

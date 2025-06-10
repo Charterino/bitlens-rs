@@ -54,7 +54,7 @@ impl<'a> Serializable<'a> for NetAddrShort<'a> {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Debug, Copy)]
 pub struct NetAddr<'a> {
     pub services: u64,
     pub addr: &'a [u8; 16],
@@ -87,7 +87,7 @@ impl<'a> Serializable<'a> for NetAddr<'a> {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct NetAddrV2<'a> {
     pub address: VarStr<'a>,
     pub services: VarInt,

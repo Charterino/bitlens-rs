@@ -11,7 +11,7 @@ use super::{
     varstr::VarStr,
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Tx<'a> {
     pub version: u32,
     pub locktime: u32,
@@ -24,7 +24,7 @@ pub struct Tx<'a> {
 
 pub const TX_COMMAND: [u8; 12] = *b"tx\0\0\0\0\0\0\0\0\0\0";
 
-impl<'a> PacketPayload for Tx<'a> {
+impl<'a> PacketPayload<'a> for Tx<'a> {
     fn command(&self) -> &'static [u8; 12] {
         &TX_COMMAND
     }

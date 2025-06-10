@@ -6,7 +6,7 @@ use super::{
     tx::Tx,
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Block<'a> {
     pub version: u32,
     pub timestamp: u32,
@@ -20,7 +20,7 @@ pub struct Block<'a> {
 
 pub const BLOCK_COMMAND: [u8; 12] = *b"block\0\0\0\0\0\0\0";
 
-impl<'a> PacketPayload for Block<'a> {
+impl<'a> PacketPayload<'a> for Block<'a> {
     fn command(&self) -> &'static [u8; 12] {
         &BLOCK_COMMAND
     }
