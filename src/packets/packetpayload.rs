@@ -14,7 +14,6 @@ use super::{
 pub struct Packet<'a> {
     pub header: PacketHeader,
     pub payload: Option<PacketPayloadType<'a>>,
-    pub allocator: &'a Bump,
 }
 
 pub trait PacketPayload<'bump>: Serializable<'bump> {
@@ -23,7 +22,7 @@ pub trait PacketPayload<'bump>: Serializable<'bump> {
 
 pub async fn read_payload<'bump>(
     stream: &mut (impl AsyncReadExt + Unpin),
-    allocator: &'bump Bump,
+    allocator: &'bump mut Bump,
     header: &PacketHeader,
 ) -> Result<Option<PacketPayloadType<'bump>>> {
     let buffer = allocator.alloc_slice_fill_default::<u8>(header.length as usize);
