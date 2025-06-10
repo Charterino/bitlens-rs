@@ -22,14 +22,14 @@ impl<'a> Buffer<'a> for &'a [u8] {
     fn with_offset(self, offset: usize) -> Result<&'a [u8]> {
         match self.get(offset..) {
             Some(v) => Ok(v),
-            None => Err(anyhow!("not enough bytes")),
+            None => Err(anyhow!("not enough bytes for with_offset")),
         }
     }
 
     fn get_u32_le(self, offset: usize) -> Result<u32> {
         match self.get(offset..offset + 4) {
             Some(b) => Ok(u32::from_le_bytes(b.try_into()?)),
-            None => Err(anyhow!("not enough bytes")),
+            None => Err(anyhow!("not enough bytes for a 32 bit integer")),
         }
     }
 

@@ -4,6 +4,7 @@ use super::{
     tx::Tx,
 };
 
+#[derive(Debug)]
 pub struct Block<'a> {
     pub version: u32,
     pub timestamp: u32,

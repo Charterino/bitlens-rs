@@ -3,7 +3,7 @@ use super::{
     packetpayload::{PacketPayload, Serializable},
 };
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct Pong {
     pub nonce: u64,
 }

@@ -5,6 +5,7 @@ use super::{netaddr::NetAddrShort, packetpayload::PacketPayload};
 use anyhow::{Result, anyhow};
 use bytes::BufMut;
 
+#[derive(Debug)]
 pub struct Version<'a> {
     pub services: u64,
     pub timestamp: u64,

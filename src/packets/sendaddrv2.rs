@@ -1,6 +1,6 @@
 use super::packetpayload::{PacketPayload, Serializable};
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct SendAddrV2 {}
 
 pub const SENDADDRV2_COMMAND: [u8; 12] = *b"sendaddrv2\0\0";

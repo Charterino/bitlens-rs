@@ -1,6 +1,6 @@
 use super::packetpayload::{PacketPayload, Serializable};
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct SendHeaders {}
 
 pub const SENDHEADERS_COMMAND: [u8; 12] = *b"sendheaders\0";

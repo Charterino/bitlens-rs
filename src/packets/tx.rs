@@ -9,6 +9,7 @@ use super::{
     varstr::VarStr,
 };
 
+#[derive(Debug)]
 pub struct Tx<'a> {
     pub version: u32,
     pub locktime: u32,
@@ -149,6 +150,7 @@ impl<'a> Serializable<'a> for Tx<'a> {
     }
 }
 
+#[derive(Debug)]
 pub struct TxIn<'a> {
     pub prevout_hash: &'a [u8; 32],
     pub prevout_index: u32,
@@ -184,7 +186,7 @@ impl<'a> Serializable<'a> for TxIn<'a> {
     }
 }
 
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Debug)]
 pub struct TxOut<'a> {
     pub value: u64,
     pub script: VarStr<'a>,

@@ -1,6 +1,6 @@
 use super::packetpayload::{PacketPayload, Serializable};
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct VerAck {}
 
 pub const VERACK_COMMAND: [u8; 12] = *b"verack\0\0\0\0\0\0";

@@ -18,3 +18,5 @@ pub mod varint;
 pub mod varstr;
 pub mod verack;
 pub mod version;
+
+pub const MAX_PACKET_SIZE: usize = 4 * 1024 * 1024;

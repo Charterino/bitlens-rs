@@ -8,11 +8,21 @@ use super::{
     varstr::VarStr,
 };
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct NetAddrShort<'a> {
     pub services: u64,
     pub addr: &'a [u8; 16],
     pub port: u16,
+}
+
+impl<'a> Default for NetAddrShort<'a> {
+    fn default() -> Self {
+        Self {
+            services: Default::default(),
+            addr: &[0u8; 16],
+            port: Default::default(),
+        }
+    }
 }
 
 impl<'a> Serializable<'a> for NetAddrShort<'a> {
@@ -40,10 +50,10 @@ impl<'a> Serializable<'a> for NetAddrShort<'a> {
 
 #[derive(Clone, Copy)]
 pub struct NetAddr<'a> {
-    services: u64,
-    addr: &'a [u8; 16],
-    time: u32,
-    port: u16,
+    pub services: u64,
+    pub addr: &'a [u8; 16],
+    pub time: u32,
+    pub port: u16,
 }
 
 impl<'a> Serializable<'a> for NetAddr<'a> {
@@ -73,11 +83,11 @@ impl<'a> Serializable<'a> for NetAddr<'a> {
 
 #[derive(Clone)]
 pub struct NetAddrV2<'a> {
-    address: VarStr<'a>,
-    services: VarInt,
-    time: u32,
-    port: u16,
-    network_id: u8,
+    pub address: VarStr<'a>,
+    pub services: VarInt,
+    pub time: u32,
+    pub port: u16,
+    pub network_id: u8,
 }
 
 impl<'a> Serializable<'a> for NetAddrV2<'a> {

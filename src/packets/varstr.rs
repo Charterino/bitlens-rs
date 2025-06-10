@@ -18,7 +18,7 @@ impl<'a> SerializableValue<'a> for VarStr<'a> {
 
         match buffer.get(offset..offset + length as usize) {
             Some(v) => Ok((Some(v), offset + length as usize)),
-            None => Err(anyhow!("not enough bytes")),
+            None => Err(anyhow!("not enough bytes for varstr")),
         }
     }
 
