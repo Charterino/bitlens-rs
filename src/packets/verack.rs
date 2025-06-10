@@ -1,11 +1,11 @@
 use super::packetpayload::{PacketPayload, Serializable};
 
-#[derive(Default, Debug)]
+#[derive(Default, Clone, Debug)]
 pub struct VerAck {}
 
 pub const VERACK_COMMAND: [u8; 12] = *b"verack\0\0\0\0\0\0";
 
-impl PacketPayload<'_> for VerAck {
+impl PacketPayload for VerAck {
     fn command(&self) -> &'static [u8; 12] {
         &VERACK_COMMAND
     }

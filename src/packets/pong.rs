@@ -3,14 +3,14 @@ use super::{
     packetpayload::{PacketPayload, Serializable},
 };
 
-#[derive(Default, Debug)]
+#[derive(Default, Clone, Debug)]
 pub struct Pong {
     pub nonce: u64,
 }
 
 pub const PONG_COMMAND: [u8; 12] = *b"pong\0\0\0\0\0\0\0\0";
 
-impl PacketPayload<'_> for Pong {
+impl PacketPayload for Pong {
     fn command(&self) -> &'static [u8; 12] {
         &PONG_COMMAND
     }

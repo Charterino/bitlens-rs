@@ -17,6 +17,7 @@ pub enum InventoryVectorType {
     FilteredWitnessBlock = 0x40000003,
 }
 
+#[derive(Clone)]
 pub struct InventoryVector<'a> {
     pub inv_type: InventoryVectorType,
     pub hash: &'a [u8; 32],

@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use super::buffer::Buffer;
 use super::packetpayload::{Serializable, SerializableValue};
 use super::varstr::VarStr;
@@ -5,12 +7,12 @@ use super::{netaddr::NetAddrShort, packetpayload::PacketPayload};
 use anyhow::{Result, anyhow};
 use bytes::BufMut;
 
-#[derive(Debug)]
+#[derive(Debug, Default, Clone)]
 pub struct Version<'a> {
     pub services: u64,
     pub timestamp: u64,
-    pub addrrecv: &'a NetAddrShort<'a>,
-    pub addrfrom: &'a NetAddrShort<'a>,
+    pub addrrecv: Cow<'a, NetAddrShort<'a>>,
+    pub addrfrom: Cow<'a, NetAddrShort<'a>>,
     pub nonce: u64,
     pub user_agent: VarStr<'a>,
     pub start_height: u32,
@@ -20,7 +22,7 @@ pub struct Version<'a> {
 
 pub const VERSION_COMMAND: [u8; 12] = *b"version\0\0\0\0\0";
 
-impl<'a> PacketPayload<'a> for Version<'a> {
+impl<'a> PacketPayload for Version<'a> {
     fn command(&self) -> &'static [u8; 12] {
         &VERSION_COMMAND
     }
@@ -42,8 +44,8 @@ impl<'a> Serializable<'a> for Version<'a> {
         let res = allocator.alloc(Version {
             services,
             timestamp,
-            addrrecv,
-            addrfrom,
+            addrrecv: Cow::Borrowed(addrrecv),
+            addrfrom: Cow::Borrowed(addrfrom),
             nonce,
             user_agent: ua,
             start_height,

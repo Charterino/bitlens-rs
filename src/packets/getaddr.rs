@@ -1,11 +1,11 @@
 use super::packetpayload::{PacketPayload, Serializable};
 
-#[derive(Default)]
+#[derive(Default, Clone, Debug)]
 pub struct GetAddr {}
 
 pub const GETADDR_COMMAND: [u8; 12] = *b"getaddr\0\0\0\0\0";
 
-impl PacketPayload<'_> for GetAddr {
+impl PacketPayload for GetAddr {
     fn command(&self) -> &'static [u8; 12] {
         &GETADDR_COMMAND
     }

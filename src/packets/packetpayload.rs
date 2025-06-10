@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use anyhow::{Result, bail};
 use bumpalo::{Bump, collections::Vec};
 use bytes::BufMut;
@@ -5,18 +7,17 @@ use sha2::{Digest, Sha256};
 use tokio::io::AsyncReadExt;
 
 use super::{
-    block::Block, buffer::Buffer, packetheader::PacketHeader, ping::Ping, pong::Pong,
-    sendaddrv2::SendAddrV2, sendheaders::SendHeaders, tx::Tx, varint::VarInt, verack::VerAck,
-    version::Version,
+    addr::Addr, addrv2::AddrV2, block::Block, buffer::Buffer, getaddr::GetAddr, getdata::GetData,
+    packetheader::PacketHeader, ping::Ping, pong::Pong, sendaddrv2::SendAddrV2,
+    sendheaders::SendHeaders, tx::Tx, varint::VarInt, verack::VerAck, version::Version,
 };
 
-#[derive(Debug)]
 pub struct Packet<'a> {
     pub header: PacketHeader,
     pub payload: Option<PacketPayloadType<'a>>,
 }
 
-pub trait PacketPayload<'bump>: Serializable<'bump> {
+pub trait PacketPayload {
     fn command(&self) -> &'static [u8; 12];
 }
 
@@ -46,35 +47,35 @@ pub async fn read_payload<'bump>(
     Ok(match header.command {
         super::version::VERSION_COMMAND => {
             let (v, _) = Version::deserialize(allocator, buffer)?;
-            Some(PacketPayloadType::Version(v))
+            Some(PacketPayloadType::Version(Cow::Borrowed(v)))
         }
         super::verack::VERACK_COMMAND => {
             let (v, _) = VerAck::deserialize(allocator, buffer)?;
-            Some(PacketPayloadType::VerAck(v))
+            Some(PacketPayloadType::VerAck(Cow::Borrowed(v)))
         }
         super::ping::PING_COMMAND => {
             let (v, _) = Ping::deserialize(allocator, buffer)?;
-            Some(PacketPayloadType::Ping(v))
+            Some(PacketPayloadType::Ping(Cow::Borrowed(v)))
         }
         super::pong::PONG_COMMAND => {
             let (v, _) = Pong::deserialize(allocator, buffer)?;
-            Some(PacketPayloadType::Pong(v))
+            Some(PacketPayloadType::Pong(Cow::Borrowed(v)))
         }
         super::sendaddrv2::SENDADDRV2_COMMAND => {
             let (v, _) = SendAddrV2::deserialize(allocator, buffer)?;
-            Some(PacketPayloadType::SendAddrV2(v))
+            Some(PacketPayloadType::SendAddrV2(Cow::Borrowed(v)))
         }
         super::sendheaders::SENDHEADERS_COMMAND => {
             let (v, _) = SendHeaders::deserialize(allocator, buffer)?;
-            Some(PacketPayloadType::SendHeaders(v))
+            Some(PacketPayloadType::SendHeaders(Cow::Borrowed(v)))
         }
         super::tx::TX_COMMAND => {
             let (v, _) = Tx::deserialize(allocator, buffer)?;
-            Some(PacketPayloadType::Tx(v))
+            Some(PacketPayloadType::Tx(Cow::Borrowed(v)))
         }
         super::block::BLOCK_COMMAND => {
             let (v, _) = Block::deserialize(allocator, buffer)?;
-            Some(PacketPayloadType::Block(v))
+            Some(PacketPayloadType::Block(Cow::Borrowed(v)))
         }
         _ => None,
     })
@@ -108,19 +109,20 @@ where
     fn serialize(&self, stream: &mut impl BufMut);
 }
 
-#[derive(Debug)]
+#[derive(Clone)]
 pub enum PacketPayloadType<'a> {
-    Version(&'a Version<'a>),
-    //Addr(&'a Addr<'a>),
-    //AddrV2(Box<'a, AddrV2<'a>>),
-    //GetAddr(Box<'a, GetAddr>),
-    Ping(&'a Ping),
-    Pong(&'a Pong),
-    VerAck(&'a VerAck),
-    SendHeaders(&'a SendHeaders),
-    SendAddrV2(&'a SendAddrV2),
-    Tx(&'a Tx<'a>),
-    Block(&'a Block<'a>),
+    Version(Cow<'a, Version<'a>>),
+    Addr(Cow<'a, Addr<'a>>),
+    AddrV2(Cow<'a, AddrV2<'a>>),
+    GetAddr(Cow<'a, GetAddr>),
+    Ping(Cow<'a, Ping>),
+    Pong(Cow<'a, Pong>),
+    VerAck(Cow<'a, VerAck>),
+    SendHeaders(Cow<'a, SendHeaders>),
+    SendAddrV2(Cow<'a, SendAddrV2>),
+    Tx(Cow<'a, Tx<'a>>),
+    Block(Cow<'a, Block<'a>>),
+    GetData(Cow<'a, GetData<'a>>),
 }
 
 impl<'a> PacketPayloadType<'a> {
@@ -134,6 +136,10 @@ impl<'a> PacketPayloadType<'a> {
             PacketPayloadType::SendAddrV2(send_addr_v2) => send_addr_v2.serialize(stream),
             PacketPayloadType::Tx(tx) => tx.serialize(stream),
             PacketPayloadType::Block(block) => block.serialize(stream),
+            PacketPayloadType::Addr(addr) => addr.serialize(stream),
+            PacketPayloadType::AddrV2(addrv2) => addrv2.serialize(stream),
+            PacketPayloadType::GetAddr(getaddr) => getaddr.serialize(stream),
+            PacketPayloadType::GetData(getdata) => getdata.serialize(stream),
         }
     }
 
@@ -147,75 +153,58 @@ impl<'a> PacketPayloadType<'a> {
             PacketPayloadType::SendAddrV2(send_addr_v2) => send_addr_v2.command(),
             PacketPayloadType::Tx(tx) => tx.command(),
             PacketPayloadType::Block(block) => block.command(),
+            PacketPayloadType::Addr(addr) => addr.command(),
+            PacketPayloadType::AddrV2(addrv2) => addrv2.command(),
+            PacketPayloadType::GetAddr(getaddr) => getaddr.command(),
+            PacketPayloadType::GetData(getdata) => getdata.command(),
         }
     }
 }
 
-impl<'a, T: Serializable<'a>> SerializableValue<'a> for Option<&'a [&'a T]> {
-    fn deserialize(
-        allocator: &'a Bump<1>,
-        buffer: &'a [u8],
-    ) -> Result<(Option<&'a [&'a T]>, usize)> {
+impl<'a, T: Serializable<'a> + ToOwned> SerializableValue<'a> for Cow<'a, [Cow<'a, T>]> {
+    fn deserialize(allocator: &'a Bump<1>, buffer: &'a [u8]) -> Result<(Self, usize)> {
         let (len, mut offset) = VarInt::deserialize(allocator, buffer)?;
-        if len == 0 {
-            return Ok((None, 1));
-        }
 
-        let mut result: Vec<'a, &'a T> = Vec::with_capacity_in(len as usize, allocator);
+        let mut result: Vec<'a, Cow<'a, T>> = Vec::with_capacity_in(len as usize, allocator);
         for _ in 0..len as usize {
             let (value, offset_delta) = T::deserialize(allocator, buffer.with_offset(offset)?)?;
             offset += offset_delta;
-            result.push(value);
+            result.push(Cow::Borrowed(value));
         }
 
-        Ok((Some(result.into_bump_slice()), offset))
+        Ok((Cow::Borrowed(result.into_bump_slice()), offset))
     }
 
     fn serialize(&self, stream: &mut impl BufMut) {
-        match self {
-            Some(array) => {
-                let len = array.len() as VarInt;
-                len.serialize(stream);
-                for i in 0..len as usize {
-                    array.get(i).unwrap().serialize(stream);
-                }
-            }
-            None => stream.put_u8(0),
+        let len = self.len() as VarInt;
+        len.serialize(stream);
+        for i in 0..len as usize {
+            self.get(i).unwrap().serialize(stream);
         }
     }
 }
 
-impl<'a, T: Serializable<'a>> Serializable<'a> for Option<&'a [&'a T]> {
-    fn deserialize(
-        allocator: &'a Bump<1>,
-        buffer: &'a [u8],
-    ) -> Result<(&'a Option<&'a [&'a T]>, usize)> {
+/*impl<'a, T: Serializable<'a> + ToOwned> Serializable<'a> for Cow<'a, [Cow<'a, T>]> {
+    fn deserialize(allocator: &'a Bump<1>, buffer: &'a [u8]) -> Result<(&'a Self, usize)> {
         let (len, mut offset) = VarInt::deserialize(allocator, buffer)?;
-        if len == 0 {
-            return Ok((allocator.alloc(None), 1));
-        }
 
-        let mut result: Vec<'a, &'a T> = Vec::with_capacity_in(len as usize, allocator);
+        let mut result: Vec<'a, Cow<'a, T>> = Vec::with_capacity_in(len as usize, allocator);
         for _ in 0..len as usize {
             let (value, offset_delta) = T::deserialize(allocator, buffer.with_offset(offset)?)?;
             offset += offset_delta;
-            result.push(value);
+            result.push(Cow::Borrowed(value));
         }
 
-        let res = allocator.alloc(Some(result.into_bump_slice()));
-        Ok((res, offset))
+        let res = Cow::Owned(result.into_bump_slice());
+        Ok((&res, offset))
     }
 
     fn serialize(&self, stream: &mut impl BufMut) {
-        match self {
-            Some(array) => {
-                let len = array.len() as VarInt;
-                len.serialize(stream);
-                for i in 0..len as usize {
-                    array.get(i).unwrap().serialize(stream);
-                }
-            }
-            None => stream.put_u8(0),
+        let len = self.len() as VarInt;
+        len.serialize(stream);
+        for i in 0..len as usize {
+            self.get(i).unwrap().serialize(stream);
         }
     }
 }
+*/

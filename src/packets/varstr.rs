@@ -1,10 +1,12 @@
+use std::borrow::Cow;
+
 use anyhow::{Result, anyhow};
 use bytes::BufMut;
 
 use super::{packetpayload::SerializableValue, varint::VarInt};
 
 // not necessarily valid UTF-8
-pub type VarStr<'a> = Option<&'a [u8]>;
+pub type VarStr<'a> = Option<Cow<'a, [u8]>>;
 
 impl<'a> SerializableValue<'a> for VarStr<'a> {
     fn deserialize(
@@ -17,7 +19,7 @@ impl<'a> SerializableValue<'a> for VarStr<'a> {
         }
 
         match buffer.get(offset..offset + length as usize) {
-            Some(v) => Ok((Some(v), offset + length as usize)),
+            Some(v) => Ok((Some(Cow::Borrowed(v)), offset + length as usize)),
             None => Err(anyhow!("not enough bytes for varstr")),
         }
     }
@@ -27,7 +29,10 @@ impl<'a> SerializableValue<'a> for VarStr<'a> {
             Some(ua) => {
                 let len = ua.len() as VarInt;
                 len.serialize(stream);
-                stream.put(*ua);
+                match ua {
+                    Cow::Borrowed(ua) => stream.put(*ua),
+                    Cow::Owned(ua) => stream.put(ua.as_slice()),
+                }
             }
             None => {
                 stream.put_u8(0);

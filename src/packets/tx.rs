@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use anyhow::{Result, anyhow, bail};
 use bumpalo::{Bump, collections::Vec};
 use sha2::{Digest, Sha256};
@@ -9,20 +11,20 @@ use super::{
     varstr::VarStr,
 };
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Tx<'a> {
     pub version: u32,
     pub locktime: u32,
-    pub txins: Option<&'a [&'a TxIn<'a>]>,
-    pub txouts: Option<&'a [&'a TxOut<'a>]>,
-    pub witness_data: Option<&'a [&'a [VarStr<'a>]]>,
+    pub txins: Cow<'a, [Cow<'a, TxIn<'a>>]>,
+    pub txouts: Cow<'a, [Cow<'a, TxOut<'a>>]>,
+    pub witness_data: Option<Cow<'a, [Cow<'a, [VarStr<'a>]>]>>,
 
     pub hash: [u8; 32],
 }
 
 pub const TX_COMMAND: [u8; 12] = *b"tx\0\0\0\0\0\0\0\0\0\0";
 
-impl<'a> PacketPayload<'a> for Tx<'a> {
+impl<'a> PacketPayload for Tx<'a> {
     fn command(&self) -> &'static [u8; 12] {
         &TX_COMMAND
     }
@@ -39,26 +41,23 @@ impl<'a> Serializable<'a> for Tx<'a> {
 
         let mut offset = if has_witness_data { 6 } else { 4 };
 
-        let (txins, offset_delta) = <Option<&'a [&'a TxIn<'a>]> as SerializableValue>::deserialize(
-            allocator,
-            buffer.with_offset(offset)?,
-        )?;
+        let (txins, offset_delta) =
+            <Cow<'a, [Cow<'a, TxIn<'a>>]> as SerializableValue>::deserialize(
+                allocator,
+                buffer.with_offset(offset)?,
+            )?;
         offset += offset_delta;
-        let txins_count = match &txins {
-            Some(a) => a.len(),
-            None => 0,
-        };
-        if txins_count == 0 {
+        if txins.len() == 0 {
             bail!("0 txins")
         }
         let (txouts, offset_delta) =
-            <Option<_> as SerializableValue>::deserialize(allocator, buffer.with_offset(offset)?)?;
+            <Cow<_> as SerializableValue>::deserialize(allocator, buffer.with_offset(offset)?)?;
         offset += offset_delta;
 
         let (witnesses, witnesses_start) = if has_witness_data {
             let start = offset;
-            let mut wits = Vec::with_capacity_in(txins_count, allocator);
-            for _ in 0..txins_count {
+            let mut wits = Vec::with_capacity_in(txins.len(), allocator);
+            for _ in 0..txins.len() {
                 let (components_count, offset_delta) =
                     VarInt::deserialize(allocator, buffer.with_offset(offset)?)?;
                 offset += offset_delta;
@@ -69,9 +68,9 @@ impl<'a> Serializable<'a> for Tx<'a> {
                     offset += offset_delta;
                     components.push(component);
                 }
-                wits.push(components.into_bump_slice());
+                wits.push(Cow::Borrowed(components.into_bump_slice()));
             }
-            (Some(wits.into_bump_slice()), start)
+            (Some(Cow::Borrowed(wits.into_bump_slice())), start)
         } else {
             (None, 0)
         };
@@ -108,30 +107,16 @@ impl<'a> Serializable<'a> for Tx<'a> {
         if self.witness_data.is_some() {
             stream.put_u16(0x0001);
         }
-        match &self.txins {
-            Some(txins) => {
-                let length = txins.len() as VarInt;
-                length.serialize(stream);
-                for n in 0..length as usize {
-                    txins.get(n).unwrap().serialize(stream);
-                }
-            }
-            None => {
-                stream.put_u8(0);
-            }
+        let length = self.txins.len() as VarInt;
+        length.serialize(stream);
+        for n in 0..length as usize {
+            self.txins.get(n).unwrap().serialize(stream);
         }
 
-        match &self.txouts {
-            Some(txouts) => {
-                let length = txouts.len() as VarInt;
-                length.serialize(stream);
-                for n in 0..length as usize {
-                    txouts.get(n).unwrap().serialize(stream);
-                }
-            }
-            None => {
-                stream.put_u8(0);
-            }
+        let length = self.txouts.len() as VarInt;
+        length.serialize(stream);
+        for n in 0..length as usize {
+            self.txouts.get(n).unwrap().serialize(stream);
         }
 
         if let Some(witnesses) = &self.witness_data {
@@ -150,9 +135,9 @@ impl<'a> Serializable<'a> for Tx<'a> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct TxIn<'a> {
-    pub prevout_hash: &'a [u8; 32],
+    pub prevout_hash: Cow<'a, [u8; 32]>,
     pub prevout_index: u32,
     pub sequence: u32,
     pub sig_script: VarStr<'a>,
@@ -169,7 +154,7 @@ impl<'a> Serializable<'a> for TxIn<'a> {
         let sequence = buffer.get_u32_le(offset + 36)?;
         Ok((
             allocator.alloc(TxIn {
-                prevout_hash: hash,
+                prevout_hash: Cow::Borrowed(hash),
                 prevout_index: index,
                 sequence,
                 sig_script: script,

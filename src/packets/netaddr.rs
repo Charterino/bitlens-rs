@@ -1,4 +1,6 @@
-use anyhow::{Result, anyhow};
+use std::borrow::Cow;
+
+use anyhow::{Result, anyhow, bail};
 use bytes::BufMut;
 
 use super::{
@@ -8,10 +10,12 @@ use super::{
     varstr::VarStr,
 };
 
-#[derive(Clone, Copy, Debug)]
+const EMPTY_ADDR: &'static [u8; 16] = &[0u8; 16];
+
+#[derive(Clone, Debug)]
 pub struct NetAddrShort<'a> {
     pub services: u64,
-    pub addr: &'a [u8; 16],
+    pub addr: Cow<'a, [u8; 16]>,
     pub port: u16,
 }
 
@@ -19,7 +23,7 @@ impl<'a> Default for NetAddrShort<'a> {
     fn default() -> Self {
         Self {
             services: Default::default(),
-            addr: &[0u8; 16],
+            addr: Cow::Borrowed(EMPTY_ADDR),
             port: Default::default(),
         }
     }
@@ -30,15 +34,17 @@ impl<'a> Serializable<'a> for NetAddrShort<'a> {
         allocator: &'a bumpalo::Bump<1>,
         buffer: &'a [u8],
     ) -> Result<(&'a NetAddrShort<'a>, usize)> {
-        let res = allocator.alloc(NetAddrShort {
-            services: buffer.get_u64_le(0)?,
-            addr: buffer
-                .get(8..24)
-                .ok_or(anyhow!("not enough bytes for netaddrshort"))?
-                .try_into()?,
-            port: buffer.get_u16(24)?,
-        });
-        Ok((res, 26))
+        match buffer.get(8..24) {
+            Some(b) => {
+                let res = allocator.alloc(NetAddrShort {
+                    services: buffer.get_u64_le(0)?,
+                    addr: Cow::Borrowed(b.try_into().unwrap()),
+                    port: buffer.get_u16(24)?,
+                });
+                Ok((res, 26))
+            }
+            None => bail!("not enough bytes for netaddrshort"),
+        }
     }
 
     fn serialize(&self, stream: &mut impl BufMut) {

@@ -3,14 +3,14 @@ use super::{
     packetpayload::{PacketPayload, Serializable},
 };
 
-#[derive(Default, Debug)]
+#[derive(Default, Clone, Debug)]
 pub struct Ping {
     pub nonce: u64,
 }
 
 pub const PING_COMMAND: [u8; 12] = *b"ping\0\0\0\0\0\0\0\0";
 
-impl PacketPayload<'_> for Ping {
+impl PacketPayload for Ping {
     fn command(&self) -> &'static [u8; 12] {
         &PING_COMMAND
     }
