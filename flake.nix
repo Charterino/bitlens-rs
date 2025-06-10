@@ -36,6 +36,7 @@
               clippy
               rustc
               cargo-flamegraph
+              sqlite
             ];
           };
         }
