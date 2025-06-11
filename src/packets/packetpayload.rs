@@ -120,7 +120,7 @@ where
     fn serialize(&self, stream: &mut impl BufMut);
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum PacketPayloadType<'a> {
     Version(Cow<'a, Version<'a>>),
     VerAck(Cow<'a, VerAck>),
