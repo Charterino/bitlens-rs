@@ -6,7 +6,7 @@ use std::{
 
 use super::network_id::NetworkId;
 
-#[derive(Default, Clone, Debug, Hash, PartialEq, Eq)]
+#[derive(Default, Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct AddressPortNetwork {
     pub network_id: NetworkId,
     pub port: u16,
