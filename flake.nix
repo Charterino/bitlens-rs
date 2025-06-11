@@ -37,6 +37,8 @@
               rustc
               cargo-flamegraph
               sqlite
+              pprof
+              graphviz
             ];
           };
         }
