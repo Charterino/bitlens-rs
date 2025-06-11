@@ -53,7 +53,6 @@ async fn main() -> Result<()> {
     tokio::spawn(resolve_dns_and_add_to_addrman(DNS_SEEDS));
     let c = tokio::spawn(crawler::crawl_forever());
 
-    println!("waiting");
     ctrl_c_events.recv().unwrap();
 
     println!("received a ctrl+c");
@@ -72,22 +71,26 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn resolve_dns_and_add_to_addrman(peers: &[&str]) {
+async fn resolve_dns_and_add_to_addrman(peers: &[&'static str]) {
     let mut resolved_peers = Vec::new();
     let mut handles = Vec::with_capacity(peers.len());
     for peer in peers {
-        handles.push(resolve_dns_with_timeout(peer, Duration::from_secs(1)));
+        handles.push(tokio::spawn(resolve_dns_with_timeout(
+            peer,
+            Duration::from_secs(1),
+        )));
     }
-    for i in handles.len()..0 {
+    for i in 0..handles.len() {
         let handle = handles.pop().unwrap();
-        let addy = peers[i - 1];
-        match handle.await {
+        let addy = peers[peers.len() - i - 1];
+        match handle.await.unwrap() {
             Ok(addys) => resolved_peers.extend_from_slice(&addys),
             Err(e) => println!("failed to resolve {}: {}", addy, e),
         }
     }
     resolved_peers.sort();
     resolved_peers.dedup();
+    println!("resolved {} seed peers", resolved_peers.len());
     addrman::peers_seen(
         resolved_peers,
         SystemTime::now()
@@ -116,7 +119,7 @@ async fn resolve_dns_with_timeout(
 }
 
 fn resolve_dns(peer: String) -> Result<Vec<AddressPortNetwork>> {
-    match (peer, 8333).to_socket_addrs() {
+    match (peer, 80).to_socket_addrs() {
         Ok(addresses) => Ok(addresses
             .map(|x| AddressPortNetwork {
                 network_id: if x.is_ipv4() {
@@ -124,7 +127,7 @@ fn resolve_dns(peer: String) -> Result<Vec<AddressPortNetwork>> {
                 } else {
                     NetworkId::IPv6
                 },
-                port: x.port(),
+                port: 8333,
                 address: match x.ip().to_canonical() {
                     std::net::IpAddr::V4(ipv4_addr) => ipv4_addr.octets().into(),
                     std::net::IpAddr::V6(ipv6_addr) => ipv6_addr.octets().into(),
