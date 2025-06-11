@@ -2,9 +2,15 @@ use std::{
     collections::HashMap,
     mem,
     sync::{LazyLock, Mutex},
+    time::{Duration, SystemTime},
 };
 
-use crate::{db, types::addressportnetwork::AddressPortNetwork};
+use crate::{
+    db::{self, ban_peer, delete_peer},
+    types::addressportnetwork::AddressPortNetwork,
+};
+
+const BAN_PEER_DURATION: Duration = Duration::from_secs(3600 * 24 * 14); // two weeks
 
 static PEERS_TO_CHECK: LazyLock<Mutex<Vec<AddressPortNetwork>>> =
     LazyLock::new(|| Mutex::new(Vec::new()));
@@ -51,4 +57,24 @@ pub async fn peers_seen(apns: Vec<AddressPortNetwork>, time: u64) {
     for apn in should_pass_to_sqlite {
         db::insert_peer(apn.clone(), time).await;
     }
+}
+
+pub async fn delete_and_ban_peer(apn: AddressPortNetwork) {
+    let rn = SystemTime::now();
+    let banned_until = rn.checked_add(BAN_PEER_DURATION).unwrap();
+    delete_peer(apn.clone()).await;
+    ban_peer(apn.clone(), rn, banned_until).await;
+}
+
+pub async fn update_peer_online(apn: AddressPortNetwork, services: u64) {
+    todo!()
+}
+
+pub async fn update_peer_from_version(
+    apn: AddressPortNetwork,
+    services: u64,
+    block_height: u32,
+    user_agent: Vec<u8>,
+) {
+    db::update_peer_from_version(apn, services, block_height, user_agent).await;
 }

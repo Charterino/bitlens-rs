@@ -2,10 +2,7 @@
 
 use std::{
     net::ToSocketAddrs,
-    sync::{
-        Mutex,
-        mpsc::{Receiver, channel},
-    },
+    sync::mpsc::{Receiver, channel},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -26,6 +23,7 @@ pub mod crawler;
 pub mod db;
 pub mod packets;
 pub mod types;
+pub mod util;
 
 const DNS_SEEDS: &[&'static str] = &[
     "seed.bitcoin.sipa.be",
