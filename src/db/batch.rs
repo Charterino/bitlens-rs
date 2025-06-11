@@ -3,7 +3,7 @@ use std::{mem::swap, time::Duration};
 use deadpool_sqlite::rusqlite::Params;
 use tokio::{
     select,
-    sync::mpsc::Receiver,
+    sync::mpsc::{Receiver, Sender, channel},
     time::{Instant, sleep_until},
 };
 
@@ -14,6 +14,12 @@ const BATCH_TIMEOUT: Duration = Duration::from_secs(5); // Flush the updates at 
 
 pub trait Request: Send + Sync {
     fn into_params(self) -> impl Params;
+}
+
+pub fn start_batcher<T: Request + 'static>(query: &'static str) -> Sender<T> {
+    let (sender, receiver) = channel(1);
+    tokio::spawn(batch_process_requests(query, receiver));
+    sender
 }
 
 pub async fn batch_process_requests(

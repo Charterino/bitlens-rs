@@ -1,11 +1,14 @@
-use std::sync::LazyLock;
+use std::{sync::LazyLock, time::SystemTime};
 
 use anyhow::{Ok, Result};
-use batched::{InsertPeerRequest, start_insert_peer_batcher};
+use batch::start_batcher;
+use batched::{
+    BanPeerRequest, DeletePeerRequest, InsertHeaderRequest, InsertPeerRequest,
+    UpdatePeerBlockHeightRequest, UpdatePeerFromVersionRequest,
+};
 use deadpool_sqlite::{Config, Pool, Runtime};
 use migrations::MIGRATIONS;
 use tokio::sync::mpsc::Sender;
-//..use sqlite::{Connection, ConnectionThreadSafe};
 
 use crate::types::addressportnetwork::AddressPortNetwork;
 
@@ -14,8 +17,36 @@ static POOL: LazyLock<Pool> = LazyLock::new(|| {
     config.create_pool(Runtime::Tokio1).unwrap()
 });
 
-static INSERT_PEER_QUEUE: LazyLock<Sender<InsertPeerRequest>> =
-    LazyLock::new(|| start_insert_peer_batcher());
+static INSERT_PEER_QUEUE: LazyLock<Sender<InsertPeerRequest>> = LazyLock::new(|| {
+    start_batcher(
+        "INSERT INTO peers (network_id, address, port, first_seen, services) VALUES (?, ?, ?, ?, 0);",
+    )
+});
+
+static BAN_PEER_QUEUE: LazyLock<Sender<BanPeerRequest>> = LazyLock::new(|| {
+    start_batcher(
+        "INSERT INTO banned_peers (network_id, address, port, banned_at, banned_until) VALUES (?, ?, ?, ?, ?);",
+    )
+});
+
+static DELETE_PEER_QUEUE: LazyLock<Sender<DeletePeerRequest>> =
+    LazyLock::new(|| start_batcher("DELETE FROM peers WHERE address = ? AND port = ?;"));
+
+static UPDATE_PEER_BLOCK_HEIGHT_QUEUE: LazyLock<Sender<UpdatePeerBlockHeightRequest>> =
+    LazyLock::new(|| start_batcher("UPDATE peers SET height = ? WHERE address = ? AND port = ?;"));
+
+static INSERT_HEADER_QUEUE: LazyLock<Sender<InsertHeaderRequest>> = LazyLock::new(|| {
+    start_batcher(
+        "INSERT INTO headers (version, previous_block, merkle_root, timestamp, bits, nonce, block_number, block_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?);",
+    )
+});
+
+static UPDATE_PEER_FROM_VERSION_QUEUE: LazyLock<Sender<UpdatePeerFromVersionRequest>> =
+    LazyLock::new(|| {
+        start_batcher(
+            "UPDATE peers SET services = ?, height = ?, user_agent = ? WHERE address = ? AND port = ?;",
+        )
+    });
 
 mod batch;
 mod batched;
@@ -60,6 +91,51 @@ pub async fn insert_peer(peer: AddressPortNetwork, first_seen: u64) {
         .send(InsertPeerRequest {
             apn: peer,
             first_seen,
+        })
+        .await
+        .unwrap();
+}
+
+pub async fn ban_peer(peer: AddressPortNetwork, banned_at: SystemTime, banned_until: SystemTime) {
+    BAN_PEER_QUEUE
+        .send(BanPeerRequest {
+            apn: peer,
+            banned_at,
+            banned_until,
+        })
+        .await
+        .unwrap();
+}
+
+pub async fn delete_peer(peer: AddressPortNetwork) {
+    DELETE_PEER_QUEUE
+        .send(DeletePeerRequest { apn: peer })
+        .await
+        .unwrap();
+}
+
+pub async fn update_peer_block_height(peer: AddressPortNetwork, new_height: u32) {
+    UPDATE_PEER_BLOCK_HEIGHT_QUEUE
+        .send(UpdatePeerBlockHeightRequest {
+            apn: peer,
+            new_height,
+        })
+        .await
+        .unwrap();
+}
+
+pub async fn update_peer_from_version(
+    peer: AddressPortNetwork,
+    services: u64,
+    block_height: u32,
+    user_agent: Vec<u8>,
+) {
+    UPDATE_PEER_FROM_VERSION_QUEUE
+        .send(UpdatePeerFromVersionRequest {
+            apn: peer,
+            services,
+            block_height,
+            user_agent,
         })
         .await
         .unwrap();
