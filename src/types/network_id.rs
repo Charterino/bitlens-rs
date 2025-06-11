@@ -7,7 +7,7 @@ use deadpool_sqlite::rusqlite::{
 use num::{FromPrimitive, ToPrimitive};
 use num_derive::{FromPrimitive, ToPrimitive};
 
-#[derive(FromPrimitive, ToPrimitive, Clone, Default, Debug)]
+#[derive(FromPrimitive, ToPrimitive, Clone, Default, Debug, Hash, PartialEq, Eq)]
 pub enum NetworkId {
     #[default]
     Error = 0,
