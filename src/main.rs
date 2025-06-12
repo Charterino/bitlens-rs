@@ -14,6 +14,7 @@ use tokio::{
     time::{Instant, sleep_until},
 };
 
+use pprof::ProfilerGuard;
 use pprof::protos::Message;
 use types::{addressportnetwork::AddressPortNetwork, network_id::NetworkId};
 
@@ -39,13 +40,13 @@ const DNS_SEEDS: &[&'static str] = &[
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    #[cfg(debug_assertions)]
+    let guard = start_profiling();
+
     let ctrl_c_events = ctrl_channel()?;
 
-    let guard = pprof::ProfilerGuardBuilder::default()
-        .frequency(1000)
-        .blocklist(&["libc", "libgcc", "pthread", "vdso"])
-        .build()
-        .unwrap();
+    println!("starting bitlens..");
+
     db::setup().await;
     addrman::start().await;
     tokio::spawn(resolve_dns_and_add_to_addrman(DNS_SEEDS));
@@ -53,11 +54,26 @@ async fn main() -> Result<()> {
 
     ctrl_c_events.recv().unwrap();
 
-    println!("received a ctrl+c");
+    println!("stopping bitlens..");
 
     c.abort();
 
-    let report = guard.report().build()?;
+    #[cfg(debug_assertions)]
+    stop_profiling(guard).await;
+
+    Ok(())
+}
+
+fn start_profiling() -> ProfilerGuard<'static> {
+    pprof::ProfilerGuardBuilder::default()
+        .frequency(1000)
+        .blocklist(&["libc", "libgcc", "pthread", "vdso"])
+        .build()
+        .unwrap()
+}
+
+async fn stop_profiling(guard: ProfilerGuard<'static>) {
+    let report = guard.report().build().unwrap();
     let mut file = File::create("profile.pb").await.unwrap();
     let profile = report.pprof().unwrap();
 
@@ -65,8 +81,6 @@ async fn main() -> Result<()> {
     profile.write_to_vec(&mut content).unwrap();
 
     file.write_all(&content).await.unwrap();
-
-    Ok(())
 }
 
 async fn resolve_dns_and_add_to_addrman(peers: &[&'static str]) {
