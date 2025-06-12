@@ -14,7 +14,7 @@ use crate::{
 };
 
 const NO_PEERS_SLEEP_DURATION: Duration = Duration::from_secs(1);
-const SLEEP_BETWEEN_CRAWLS_DURATION: Duration = Duration::from_millis(50);
+const SLEEP_BETWEEN_CRAWLS_DURATION: Duration = Duration::from_millis(20);
 
 pub async fn crawl_forever() {
     loop {
@@ -109,6 +109,7 @@ fn evaluate_crawl_result(
 }
 
 async fn crawl(peer: &AddressPortNetwork, res: &mut CrawlResult) -> Result<()> {
+    res.packets_received_total = 0;
     match peer.network_id {
         NetworkId::IPv4 => {}
         NetworkId::IPv6 => {}
@@ -124,40 +125,47 @@ async fn crawl(peer: &AddressPortNetwork, res: &mut CrawlResult) -> Result<()> {
         bail!("failed to connect/handshake")
     }
     let mut connection = connection.unwrap();
-    println!(
-        "yay the remote user agent is {}",
-        String::from_utf8_lossy(&connection.remote_version.user_agent.inner)
-    );
+    addrman::update_peer_from_version(
+        peer.clone(),
+        connection.remote_version.services,
+        connection.remote_version.start_height,
+        connection.remote_version.user_agent.inner.to_vec(),
+    )
+    .await;
     connection
         .inner
         .write_packet(&PacketPayloadType::GetAddr(Cow::Owned(GetAddr {})))
         .await?;
     loop {
         let header = connection.inner.read_header().await?;
-        let mut allocator = connection.inner.prepare_for_read().await;
-        let packet = connection.inner.read_packet(header, &mut allocator).await?;
-        if let Some(payload) = packet.payload {
-            if let PacketPayloadType::Addr(addys) = payload {
-                let time = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs();
-                let mut apns = Vec::with_capacity(addys.inner.len());
-                for addy in addys.inner.iter() {
-                    let (network_id, addy_bytes) = match *addy.addr {
-                        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, a, b, c, d] => {
-                            (NetworkId::IPv4, vec![a, b, c, d])
-                        }
-                        other => (NetworkId::IPv6, other.to_vec()),
-                    };
-                    apns.push(AddressPortNetwork {
-                        network_id: network_id,
-                        port: addy.port,
-                        address: addy_bytes,
-                    });
+        {
+            let mut allocator = connection.inner.prepare_for_read().await;
+            let packet = connection.inner.read_packet(header, &mut allocator).await?;
+            if let Some(payload) = &packet.payload {
+                if let PacketPayloadType::Addr(addys) = payload {
+                    let time = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap()
+                        .as_secs();
+                    let mut apns = Vec::with_capacity(addys.inner.len());
+                    for addy in addys.inner.iter() {
+                        let (network_id, addy_bytes) = match *addy.addr {
+                            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, a, b, c, d] => {
+                                (NetworkId::IPv4, vec![a, b, c, d])
+                            }
+                            other => (NetworkId::IPv6, other.to_vec()),
+                        };
+                        apns.push(AddressPortNetwork {
+                            network_id: network_id,
+                            port: addy.port,
+                            address: addy_bytes,
+                        });
+                    }
+                    peers_seen(apns, time).await;
                 }
-                peers_seen(apns, time).await;
             }
+            res.packets_received_total += 1;
         }
+        addrman::update_peer_online(peer.clone(), connection.remote_version.services).await;
     }
 }

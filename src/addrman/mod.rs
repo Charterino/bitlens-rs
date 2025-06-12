@@ -1,13 +1,14 @@
 use std::{
     collections::HashMap,
     mem,
-    sync::{LazyLock, Mutex},
+    sync::{LazyLock, Mutex, RwLock},
     time::{Duration, SystemTime},
 };
 
 use crate::{
     db::{self, ban_peer, delete_peer},
     types::addressportnetwork::AddressPortNetwork,
+    util::online_list::OnlineList,
 };
 
 const BAN_PEER_DURATION: Duration = Duration::from_secs(3600 * 24 * 14); // two weeks
@@ -17,6 +18,9 @@ static PEERS_TO_CHECK: LazyLock<Mutex<Vec<AddressPortNetwork>>> =
 
 static KNOWN_PEERS: LazyLock<Mutex<HashMap<AddressPortNetwork, ()>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
+
+static ONLINE_PEERS: LazyLock<RwLock<OnlineList>> =
+    LazyLock::new(|| RwLock::new(OnlineList::new(Duration::from_secs(60 * 3))));
 
 pub async fn start() {
     let all_peers = db::get_all_peers().await;
@@ -67,7 +71,9 @@ pub async fn delete_and_ban_peer(apn: AddressPortNetwork) {
 }
 
 pub async fn update_peer_online(apn: AddressPortNetwork, services: u64) {
-    todo!()
+    let rn = SystemTime::now();
+    let mut w = ONLINE_PEERS.write().unwrap();
+    w.peer_online(apn, services, rn);
 }
 
 pub async fn update_peer_from_version(
