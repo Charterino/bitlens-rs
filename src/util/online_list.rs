@@ -98,7 +98,6 @@ impl OnlineList {
             self.peers = new_peers;
             self.start = 0;
             self.end = old_size;
-            println!("doubling cap of online_list to {}", old_size * 2);
         }
     }
 

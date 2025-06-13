@@ -7,6 +7,8 @@ use std::{
 };
 
 use anyhow::{Result, bail};
+use log::setup_logging;
+use slog_scope::{debug, info};
 use tokio::{
     fs::File,
     io::AsyncWriteExt,
@@ -22,6 +24,7 @@ pub mod addrman;
 pub mod connect;
 pub mod crawler;
 pub mod db;
+pub mod log;
 pub mod packets;
 pub mod types;
 pub mod util;
@@ -40,12 +43,13 @@ const DNS_SEEDS: &[&'static str] = &[
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let _guard = setup_logging();
     #[cfg(debug_assertions)]
     let guard = start_profiling();
 
     let ctrl_c_events = ctrl_channel()?;
 
-    println!("starting bitlens..");
+    info!("starting bitlens..");
 
     db::setup().await;
     addrman::start().await;
@@ -54,7 +58,7 @@ async fn main() -> Result<()> {
 
     ctrl_c_events.recv().unwrap();
 
-    println!("stopping bitlens..");
+    info!("stopping bitlens..");
 
     c.abort();
 
@@ -97,12 +101,12 @@ async fn resolve_dns_and_add_to_addrman(peers: &[&'static str]) {
         let addy = peers[peers.len() - i - 1];
         match handle.await.unwrap() {
             Ok(addys) => resolved_peers.extend_from_slice(&addys),
-            Err(e) => println!("failed to resolve {}: {}", addy, e),
+            Err(e) => debug!("failed to resolve dns"; "address" => addy, "err" => e.to_string()),
         }
     }
     resolved_peers.sort();
     resolved_peers.dedup();
-    println!("resolved {} seed peers", resolved_peers.len());
+    info!("resolved seed peers"; "count" => resolved_peers.len());
     addrman::peers_seen(
         resolved_peers,
         SystemTime::now()

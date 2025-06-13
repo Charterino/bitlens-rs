@@ -4,6 +4,7 @@ use std::{
 };
 
 use anyhow::{Error, Result, bail};
+use slog_scope::info;
 use tokio::time::{self, Instant, sleep};
 
 use crate::{
@@ -24,7 +25,7 @@ pub async fn crawl_forever() {
             continue;
         }
 
-        println!("finna crawl {} peers", peers_to_check.len());
+        info!("will scrape peers"; "count" => peers_to_check.len());
 
         for peer in peers_to_check {
             time::sleep(SLEEP_BETWEEN_CRAWLS_DURATION).await;
