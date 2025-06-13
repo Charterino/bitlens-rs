@@ -28,7 +28,7 @@ impl<'old, 'new: 'old> DeepClone<'old, 'new> for AddrV2<'old> {
         let addys = (&*self.inner)
             .deep_clone()
             .into_iter()
-            .map(|x| Cow::Owned(x))
+            .map(Cow::Owned)
             .collect();
         Self::WithLifetime { inner: addys }
     }

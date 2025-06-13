@@ -29,7 +29,7 @@ pub mod packets;
 pub mod types;
 pub mod util;
 
-const DNS_SEEDS: &[&'static str] = &[
+const DNS_SEEDS: &[&str] = &[
     "seed.bitcoin.sipa.be",
     "dnsseed.bluematt.me",
     "dnsseed.bitcoin.dashjr-list-of-p2p-nodes.us",

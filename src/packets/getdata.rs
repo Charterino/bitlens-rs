@@ -28,7 +28,7 @@ impl<'old, 'new: 'old> DeepClone<'old, 'new> for GetData<'old> {
         let data = (&*self.inner)
             .deep_clone()
             .into_iter()
-            .map(|x| Cow::Owned(x))
+            .map(Cow::Owned)
             .collect();
         Self::WithLifetime { inner: data }
     }

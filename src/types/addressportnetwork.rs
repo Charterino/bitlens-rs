@@ -4,6 +4,7 @@ use std::{
     str::FromStr,
 };
 
+
 use super::network_id::NetworkId;
 
 #[derive(Default, Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
@@ -35,20 +36,22 @@ impl Display for AddressPortNetwork {
     }
 }
 
-impl AddressPortNetwork {
-    pub fn from_str(data: &str) -> AddressPortNetwork {
-        let addy = SocketAddr::from_str(data).unwrap();
+impl FromStr for AddressPortNetwork {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let addy = SocketAddr::from_str(s)?;
         match addy.ip() {
-            IpAddr::V4(ipv4_addr) => AddressPortNetwork {
+            IpAddr::V4(ipv4_addr) => Ok(AddressPortNetwork {
                 network_id: NetworkId::IPv4,
                 port: addy.port(),
                 address: ipv4_addr.octets().to_vec(),
-            },
-            IpAddr::V6(ipv6_addr) => AddressPortNetwork {
+            }),
+            IpAddr::V6(ipv6_addr) => Ok(AddressPortNetwork {
                 network_id: NetworkId::IPv6,
                 port: addy.port(),
                 address: ipv6_addr.octets().to_vec(),
-            },
+            }),
         }
     }
 }

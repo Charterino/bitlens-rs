@@ -24,9 +24,9 @@ pub async fn read_header(stream: &mut (impl AsyncRead + Unpin)) -> Result<Packet
     }
 
     Ok(PacketHeader {
-        magic: magic,
-        command: command,
-        length: length,
+        magic,
+        command,
+        length,
         checksum: u32::from_le_bytes(checksum),
     })
 }

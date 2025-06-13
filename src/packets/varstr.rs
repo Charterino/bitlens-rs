@@ -55,3 +55,11 @@ impl<'a> SerializableValue<'a> for VarStr<'a> {
         }
     }
 }
+
+impl From<&str> for VarStr<'_> {
+    fn from(value: &str) -> Self {
+        Self {
+            inner: Cow::Owned(value.as_bytes().to_vec()),
+        }
+    }
+}

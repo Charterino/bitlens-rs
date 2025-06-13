@@ -136,7 +136,7 @@ pub enum PacketPayloadType<'a> {
     GetData(Cow<'a, GetData<'a>>),
 }
 
-impl<'a> PacketPayloadType<'a> {
+impl PacketPayloadType<'_> {
     pub fn serialize(&self, stream: &mut std::vec::Vec<u8>) {
         match self {
             PacketPayloadType::Version(version) => version.serialize(stream),

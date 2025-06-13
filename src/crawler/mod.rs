@@ -53,7 +53,7 @@ async fn crawl_with_backoff(peer: AddressPortNetwork) {
         let disconnect_reason = crawl(&peer, &mut crawl_result).await.unwrap_err();
         crawl_result.connection_time = Instant::now().duration_since(start);
         if let Some(reason) =
-            evaluate_crawl_result(&mut crawl_result, disconnect_reason, &mut failed_times)
+            evaluate_crawl_result(&crawl_result, disconnect_reason, &mut failed_times)
         {
             fail_reasons.push(reason);
         } else {
@@ -68,7 +68,7 @@ fn backoff_from_failed(failed_times: u32) -> Duration {
     } else if failed_times <= 12 {
         return Duration::from_secs(2u64.pow(failed_times));
     }
-    return Duration::from_secs(3600 * 2);
+    Duration::from_secs(3600 * 2)
 }
 
 fn evaluate_crawl_result(
@@ -142,28 +142,26 @@ async fn crawl(peer: &AddressPortNetwork, res: &mut CrawlResult) -> Result<()> {
         {
             let mut allocator = connection.inner.prepare_for_read().await;
             let packet = connection.inner.read_packet(header, &mut allocator).await?;
-            if let Some(payload) = &packet.payload {
-                if let PacketPayloadType::Addr(addys) = payload {
-                    let time = SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .unwrap()
-                        .as_secs();
-                    let mut apns = Vec::with_capacity(addys.inner.len());
-                    for addy in addys.inner.iter() {
-                        let (network_id, addy_bytes) = match *addy.addr {
-                            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, a, b, c, d] => {
-                                (NetworkId::IPv4, vec![a, b, c, d])
-                            }
-                            other => (NetworkId::IPv6, other.to_vec()),
-                        };
-                        apns.push(AddressPortNetwork {
-                            network_id: network_id,
-                            port: addy.port,
-                            address: addy_bytes,
-                        });
-                    }
-                    peers_seen(apns, time).await;
+            if let Some(PacketPayloadType::Addr(addys)) = &packet.payload {
+                let time = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs();
+                let mut apns = Vec::with_capacity(addys.inner.len());
+                for addy in addys.inner.iter() {
+                    let (network_id, addy_bytes) = match *addy.addr {
+                        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, a, b, c, d] => {
+                            (NetworkId::IPv4, vec![a, b, c, d])
+                        }
+                        other => (NetworkId::IPv6, other.to_vec()),
+                    };
+                    apns.push(AddressPortNetwork {
+                        network_id,
+                        port: addy.port,
+                        address: addy_bytes,
+                    });
                 }
+                peers_seen(apns, time).await;
             }
             res.packets_received_total += 1;
         }

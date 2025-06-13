@@ -37,7 +37,7 @@ impl Connection {
         self.write_stream.write_all(packet.command()).await?;
         self.write_stream.write_u32_le(buf.len() as u32).await?;
         self.write_stream.write_all(shorthash).await?;
-        self.write_stream.write_all(&buf).await?;
+        self.write_stream.write_all(buf).await?;
 
         self.write_stream.flush().await?;
 
@@ -62,10 +62,7 @@ impl Connection {
         allocator: &'a mut Object<Bump>,
     ) -> Result<Packet<'a>> {
         let payload = read_payload(&mut self.read_stream, allocator, &header).await?;
-        Ok(Packet {
-            header: header,
-            payload: payload,
-        })
+        Ok(Packet { header, payload })
     }
 }
 

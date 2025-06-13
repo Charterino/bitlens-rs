@@ -39,7 +39,7 @@ impl<'old, 'new: 'old> DeepClone<'old, 'new> for Block<'old> {
         let txs = (&*self.txs)
             .deep_clone()
             .into_iter()
-            .map(|x| Cow::Owned(x))
+            .map(Cow::Owned)
             .collect();
         Self::WithLifetime {
             version: self.version,
@@ -77,7 +77,7 @@ impl<'a> Serializable<'a> for Block<'a> {
             nonce,
             parent,
             merkle_root,
-            txs: txs,
+            txs,
         });
         Ok((result, offset + 80))
     }

@@ -41,12 +41,12 @@ impl<'old, 'new: 'old> DeepClone<'old, 'new> for Tx<'old> {
         let txins = (&*self.txins)
             .deep_clone()
             .into_iter()
-            .map(|x| Cow::Owned(x))
+            .map(Cow::Owned)
             .collect();
         let txouts = (&*self.txouts)
             .deep_clone()
             .into_iter()
-            .map(|x| Cow::Owned(x))
+            .map(Cow::Owned)
             .collect();
 
         Self::WithLifetime {
@@ -77,7 +77,7 @@ impl<'a> Serializable<'a> for Tx<'a> {
                 buffer.with_offset(offset)?,
             )?;
         offset += offset_delta;
-        if txins.len() == 0 {
+        if txins.is_empty() {
             bail!("0 txins")
         }
         let (txouts, offset_delta) =

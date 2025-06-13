@@ -58,24 +58,24 @@ pub async fn connect_and_handshake(peer: &AddressPortNetwork) -> Result<Handshak
         handshake_result = handshake(&mut conn) => {
             match handshake_result {
                 Err(e) => Err(e),
-                Ok(remote_version) => Ok(HandshakedConnection { inner: conn, remote_version: remote_version })
+                Ok(remote_version) => Ok(HandshakedConnection { inner: conn, remote_version })
             }
         }
     }
 }
 
 async fn handshake<'a>(conn: &mut Connection) -> Result<Version<'a>> {
-    let mut version = Version::default();
-    version.services = 9;
-    version.timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
-    version.nonce = rand::rng().next_u64();
-    version.user_agent = VarStr {
-        inner: Cow::Borrowed(b"semikek"),
+    let version = Version {
+        services: 9,
+        timestamp: SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs(),
+        nonce: rand::rng().next_u64(),
+        user_agent: VarStr::from("semikek"),
+        version: 70016,
+        ..Default::default()
     };
-    version.version = 70016;
     conn.write_packet(&PacketPayloadType::Version(Cow::Owned(version)))
         .await?;
 
@@ -92,7 +92,7 @@ async fn handshake<'a>(conn: &mut Connection) -> Result<Version<'a>> {
             drop(allocator);
             if let Some(responses) = responses {
                 for r in &responses {
-                    conn.write_packet(&r).await?;
+                    conn.write_packet(r).await?;
                 }
             }
         }
@@ -113,9 +113,7 @@ fn handle_packet_during_handshaking<'a, 'c, 'b: 'c>(
         }
         PacketPayloadType::VerAck(_) => {
             *success = true;
-            let mut responses = Vec::with_capacity(1);
-            responses.push(PacketPayloadType::VerAck(Cow::Owned(VerAck {})));
-            return Some(responses);
+            return Some(vec![PacketPayloadType::VerAck(Cow::Owned(VerAck {}))]);
         }
         _ => {}
     }
