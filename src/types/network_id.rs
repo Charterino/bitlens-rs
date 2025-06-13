@@ -8,7 +8,7 @@ use num::{FromPrimitive, ToPrimitive};
 use num_derive::{FromPrimitive, ToPrimitive};
 
 #[derive(
-    FromPrimitive, ToPrimitive, Clone, Default, Debug, Hash, PartialEq, Eq, PartialOrd, Ord,
+    FromPrimitive, ToPrimitive, Clone, Copy, Default, Debug, Hash, PartialEq, Eq, PartialOrd, Ord,
 )]
 pub enum NetworkId {
     #[default]

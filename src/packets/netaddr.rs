@@ -2,6 +2,9 @@ use std::borrow::Cow;
 
 use anyhow::{Result, anyhow, bail};
 use bytes::BufMut;
+use num::{FromPrimitive, ToPrimitive};
+
+use crate::types::network_id::NetworkId;
 
 use super::{
     buffer::Buffer,
@@ -115,7 +118,7 @@ pub struct NetAddrV2<'a> {
     pub services: VarInt,
     pub time: u32,
     pub port: u16,
-    pub network_id: u8,
+    pub network_id: NetworkId,
 }
 
 impl<'old> MustOutlive<'old> for NetAddrV2<'old> {
@@ -145,6 +148,7 @@ impl<'a> Serializable<'a> for NetAddrV2<'a> {
         let network_id = *buffer
             .get(offset)
             .ok_or(anyhow!("not enough bytes for netaddrv2"))?;
+        let network_id = NetworkId::from_u8(network_id).ok_or(anyhow!("invalid network_id"))?;
         offset += 1;
         let (address, offset_delta) = VarStr::deserialize(allocator, buffer.with_offset(offset)?)?;
         offset += offset_delta;
@@ -162,7 +166,7 @@ impl<'a> Serializable<'a> for NetAddrV2<'a> {
     fn serialize(&self, stream: &mut impl BufMut) {
         stream.put_u32_le(self.time);
         self.services.serialize(stream);
-        stream.put_u8(self.network_id);
+        stream.put_u8(self.network_id.to_u8().unwrap());
         self.address.serialize(stream);
         stream.put_u16(self.port);
     }
