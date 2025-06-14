@@ -10,8 +10,8 @@ use tokio::time::{self, Instant, sleep};
 use crate::{
     addrman::{self, peers_seen},
     connect::connect_and_handshake,
-    packets::{getaddr::GetAddr, packetpayload::PacketPayloadType},
-    types::{addressportnetwork::AddressPortNetwork, network_id::NetworkId},
+    packets::{getaddr::GetAddr, network_id::NetworkId, packetpayload::PacketPayloadType},
+    types::addressportnetwork::AddressPortNetwork,
 };
 
 const NO_PEERS_SLEEP_DURATION: Duration = Duration::from_secs(1);
