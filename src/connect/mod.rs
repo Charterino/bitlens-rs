@@ -17,8 +17,9 @@ use tokio::{
 
 use crate::{
     packets::{
-        MAX_PACKET_SIZE, deepclone::DeepClone, packetpayload::PacketPayloadType, varstr::VarStr,
-        verack::VerAck, version::Version,
+        MAX_PACKET_SIZE, deepclone::DeepClone, packetpayload::PacketPayloadType,
+        sendaddrv2::SendAddrV2, sendheaders::SendHeaders, varstr::VarStr, verack::VerAck,
+        version::Version,
     },
     types::addressportnetwork::AddressPortNetwork,
 };
@@ -88,7 +89,7 @@ async fn handshake<'a>(conn: &mut Connection) -> Result<Version<'a>> {
         let packet = conn.read_packet(header, &mut allocator).await?;
         if let Some(payload) = packet.payload {
             let responses =
-                handle_packet_during_handshaking(payload, &mut finished, &mut remote_version);
+                handle_packet_during_handshaking(payload, &mut finished, &mut remote_version)?;
             drop(allocator);
             if let Some(responses) = responses {
                 for r in &responses {
@@ -105,19 +106,36 @@ fn handle_packet_during_handshaking<'a, 'c, 'b: 'c>(
     packet: PacketPayloadType<'c>,
     success: &mut bool,
     remote_version: &mut Option<Version<'b>>,
-) -> Option<Vec<PacketPayloadType<'a>>> {
+) -> Result<Option<Vec<PacketPayloadType<'a>>>> {
     match packet {
         PacketPayloadType::Version(v) => {
+            if remote_version.is_some() {
+                bail!("sent the version packet more than once")
+            }
             let n: Version<'b> = v.deep_clone();
             *remote_version = Some(n)
         }
         PacketPayloadType::VerAck(_) => {
+            if remote_version.is_none() {
+                bail!("sent verack before version")
+            }
+            let rv = remote_version.as_ref().unwrap();
+            let mut res = vec![];
+            // BIP 155
+            if rv.version > 70016 {
+                res.push(PacketPayloadType::SendAddrV2(Cow::Owned(SendAddrV2 {})));
+            }
+            res.push(PacketPayloadType::VerAck(Cow::Owned(VerAck {})));
+            // BIP 130
+            if rv.version > 70012 {
+                res.push(PacketPayloadType::SendHeaders(Cow::Owned(SendHeaders {})));
+            }
             *success = true;
-            return Some(vec![PacketPayloadType::VerAck(Cow::Owned(VerAck {}))]);
+            return Ok(Some(res));
         }
         _ => {}
     }
-    None
+    Ok(None)
 }
 
 async fn connect(peer: &AddressPortNetwork) -> Result<Connection> {
