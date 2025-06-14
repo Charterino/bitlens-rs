@@ -5,7 +5,10 @@ use std::{
     time::{Duration, SystemTime},
 };
 
+use tokio::time::sleep;
+
 use crate::{
+    connect::{connect_and_handshake, connection::HandshakedConnection},
     db::{self, ban_peer, delete_peer},
     types::addressportnetwork::AddressPortNetwork,
     util::online_list::OnlineList,
@@ -83,4 +86,26 @@ pub async fn update_peer_from_version(
     user_agent: Vec<u8>,
 ) {
     db::update_peer_from_version(apn, services, block_height, user_agent).await;
+}
+
+pub fn get_alive_peer(services: Option<u64>) -> Option<AddressPortNetwork> {
+    let r = ONLINE_PEERS.read().unwrap();
+    r.random(services)
+}
+
+pub async fn connect_to_good_peer<'a>(services: Option<u64>) -> HandshakedConnection<'a> {
+    loop {
+        let peer = get_alive_peer(services);
+        match peer {
+            Some(peer) => match connect_and_handshake(&peer).await {
+                Ok(conn) => return conn,
+                Err(_) => {
+                    // Failed to connect, try another peer
+                }
+            },
+            None => {
+                sleep(Duration::from_secs(1)).await;
+            }
+        }
+    }
 }
