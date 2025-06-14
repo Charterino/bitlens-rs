@@ -6,6 +6,8 @@ pub mod buffer;
 pub mod deepclone;
 pub mod getaddr;
 pub mod getdata;
+pub mod getheaders;
+pub mod headers;
 pub mod inv;
 pub mod invvector;
 pub mod magic;

@@ -48,6 +48,8 @@ impl<'a> Serializable<'a> for Block<'a> {
         buffer: &'a [u8],
     ) -> anyhow::Result<(&'a Block<'a>, usize)> {
         let (header, _) = BlockHeader::deserialize(allocator, buffer)?;
+        // the header deserialization will read the number of txs, but the `txs` deserializer will also read it.
+        // Start deserializing from offset 80 instead of the offset returned by header deserializer, because the header's size is 80+txlenlen
 
         let (txs, offset) = <Cow<'a, [Cow<'a, Tx<'a>>]> as SerializableValue>::deserialize(
             allocator,
@@ -63,6 +65,8 @@ impl<'a> Serializable<'a> for Block<'a> {
 
     fn serialize(&self, stream: &mut impl bytes::BufMut) {
         self.header.serialize(stream);
-        self.txs.serialize(stream);
+        for tx in self.txs.iter() {
+            tx.serialize(stream);
+        }
     }
 }

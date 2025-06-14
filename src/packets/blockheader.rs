@@ -6,18 +6,21 @@ use super::{
     buffer::Buffer,
     deepclone::{DeepClone, MustOutlive},
     packetpayload::Serializable,
+    packetpayload::SerializableValue,
+    varint::VarInt,
 };
 
 #[derive(Clone, Debug, Default)]
 pub struct BlockHeader<'a> {
     pub version: u32,
-    parent: Cow<'a, [u8; 32]>,
-    merkle_root: Cow<'a, [u8; 32]>,
-    timestamp: u32,
-    bits: u32,
-    nonce: u32,
+    pub parent: Cow<'a, [u8; 32]>,
+    pub merkle_root: Cow<'a, [u8; 32]>,
+    pub timestamp: u32,
+    pub bits: u32,
+    pub nonce: u32,
+    pub txs_count: VarInt, // Always present
 
-    hash: [u8; 32], // calculated during deserialization
+    pub hash: [u8; 32], // calculated during deserialization
 }
 
 impl<'old> MustOutlive<'old> for BlockHeader<'old> {
@@ -34,6 +37,7 @@ impl<'old, 'new: 'old> DeepClone<'old, 'new> for BlockHeader<'old> {
             bits: self.bits,
             nonce: self.nonce,
             hash: self.hash,
+            txs_count: self.txs_count,
         }
     }
 }
@@ -50,6 +54,8 @@ impl<'a> Serializable<'a> for BlockHeader<'a> {
         let bits = buffer.get_u32_le(72)?;
         let nonce = buffer.get_u32_le(76)?;
 
+        let (txs_count, offset) = VarInt::deserialize(allocator, buffer.with_offset(80)?)?;
+
         let hash = Sha256::digest(buffer.get(0..80).unwrap());
         let hash = Sha256::digest(hash).into();
 
@@ -62,8 +68,9 @@ impl<'a> Serializable<'a> for BlockHeader<'a> {
                 bits,
                 nonce,
                 hash,
+                txs_count,
             }),
-            80,
+            80 + offset,
         ))
     }
 
@@ -74,5 +81,6 @@ impl<'a> Serializable<'a> for BlockHeader<'a> {
         stream.put_u32_le(self.timestamp);
         stream.put_u32_le(self.bits);
         stream.put_u32_le(self.nonce);
+        self.txs_count.serialize(stream);
     }
 }
