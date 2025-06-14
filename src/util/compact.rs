@@ -1,3 +1,4 @@
+
 use primitive_types::U256;
 
 pub fn u256_from_compact(compact: u32) -> U256 {
@@ -5,9 +6,9 @@ pub fn u256_from_compact(compact: u32) -> U256 {
     let word = compact & 0x007FFFFF;
     let mut ret = U256::from(word);
     if size <= 3 {
-        ret = ret >> 8 * (3 - size);
+        ret = ret >> (8 * (3 - size));
     } else {
-        ret = ret << 8 * (size - 3);
+        ret = ret << (8 * (size - 3));
     }
     return ret;
 }
@@ -19,7 +20,7 @@ pub fn compact_from_u256(mut value: U256) -> u32 {
     if size <= 3 {
         compact = value.as_u32() << (8 * (3 - size));
     } else {
-        value = value >> 8 * (size - 3);
+        value = value >> (8 * (size - 3));
         compact = value.as_u32();
     }
 

@@ -71,6 +71,13 @@ impl BlockHeader<'_> {
         let result = inverted / (uncompacted + 1);
         result + 1
     }
+
+    // Checks whether the hash has at least `bits` amount of work.
+    pub fn is_valid(&self) -> bool {
+        let target = u256_from_compact(self.bits);
+        let hash_number = U256::from_little_endian(&self.hash);
+        return hash_number < target;
+    }
 }
 
 impl<'old> MustOutlive<'old> for BlockHeader<'old> {
@@ -119,7 +126,13 @@ impl<'a> Serializable<'a> for BlockHeader<'a> {
             hash,
             txs_count,
         }) {
-            Ok(result) => Ok((result, 80 + offset)),
+            Ok(result) => {
+                if result.is_valid() {
+                    Ok((result, 80 + offset))
+                } else {
+                    bail!("invalid header")
+                }
+            }
             Err(e) => bail!(e),
         }
     }

@@ -1,6 +1,6 @@
-use std::{sync::LazyLock, time::SystemTime};
+use std::{borrow::Cow, collections::HashMap, sync::LazyLock, time::SystemTime};
 
-use anyhow::{Ok, Result};
+use anyhow::Result;
 use batch::start_batcher;
 use batched::{
     BanPeerRequest, DeletePeerRequest, InsertHeaderRequest, InsertPeerRequest,
@@ -10,7 +10,10 @@ use deadpool_sqlite::{Config, Pool, Runtime};
 use migrations::MIGRATIONS;
 use tokio::sync::mpsc::Sender;
 
-use crate::types::addressportnetwork::AddressPortNetwork;
+use crate::{
+    packets::blockheader::BlockHeader,
+    types::{addressportnetwork::AddressPortNetwork, blockheaderwithnumber::BlockHeaderWithNumber}, util::genesis::GENESIS_HEADER,
+};
 
 static POOL: LazyLock<Pool> = LazyLock::new(|| {
     let config = Config::new("bitlens.db");
@@ -75,14 +78,12 @@ pub async fn get_all_peers() -> Vec<AddressPortNetwork> {
                 port: row.get(2)?,
                 address: row.get(1)?,
             })
-        })?;
-        let c = iter
+        }).unwrap();
+        iter
             .map(|x| x.unwrap())
-            .collect::<Vec<AddressPortNetwork>>();
-        Ok(c)
+            .collect::<Vec<AddressPortNetwork>>()
     })
     .await
-    .unwrap()
     .unwrap()
 }
 
@@ -139,4 +140,56 @@ pub async fn update_peer_from_version(
         })
         .await
         .unwrap();
+}
+
+pub async fn get_all_headers() -> Vec<BlockHeaderWithNumber<'static>> {
+    let conn = POOL.get().await.unwrap();
+    conn.interact(|conn| {
+        let mut stmt = conn.prepare_cached("SELECT version, previous_block, merkle_root, timestamp, bits, nonce, block_number, block_hash, fetched_full FROM headers ORDER BY block_number ASC;").unwrap();
+        let mut work_totals = HashMap::new();
+        work_totals.insert(GENESIS_HEADER.hash, GENESIS_HEADER.get_work());
+        let iter = stmt.query_map([], |row| {
+            let header = BlockHeader {
+                version: row.get(0)?,
+                parent: Cow::Owned(row.get(1)?),
+                merkle_root: Cow::Owned(row.get(2)?),
+                timestamp: row.get(3)?,
+                bits: row.get(4)?,
+                nonce: row.get(5)?,
+                txs_count: 0,
+                hash: row.get(7)?,
+            };
+            let parent_work = match work_totals.get(header.parent.as_slice()) {
+                Some(w) => w,
+                None => return Err(deadpool_sqlite::rusqlite::Error::ExecuteReturnedResults)
+            };
+            let our_work = *parent_work + header.get_work();
+            work_totals.insert(header.hash, our_work);
+            Ok(BlockHeaderWithNumber {
+                header, 
+                number: row.get(6)?,
+                fetched_full: row.get(8)?,
+                total_work: our_work
+            })
+        }).unwrap();
+        let c = iter
+            .map(|x| x.unwrap())
+            .collect::<Vec<BlockHeaderWithNumber>>();
+        c
+    })
+    .await
+    .unwrap()
+}
+
+pub async fn insert_header(header: &BlockHeaderWithNumber<'_>) {
+    INSERT_HEADER_QUEUE.send(InsertHeaderRequest { 
+        parent: header.header.parent.clone().into_owned(), 
+        merkle_root: header.header.merkle_root.clone().into_owned(), 
+        timestamp: header.header.timestamp, 
+        bits: header.header.bits, 
+        nonce: header.header.nonce, 
+        version: header.header.version, 
+        number: header.number, 
+        hash: header.header.hash 
+    }).await.unwrap();
 }

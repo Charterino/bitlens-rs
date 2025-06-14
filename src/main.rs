@@ -8,6 +8,7 @@ use std::{
 
 use anyhow::{Result, bail};
 use log::setup_logging;
+use packets::network_id::NetworkId;
 use slog_scope::{debug, info};
 use tokio::{
     fs::File,
@@ -18,9 +19,10 @@ use tokio::{
 
 use pprof::ProfilerGuard;
 use pprof::protos::Message;
-use types::{addressportnetwork::AddressPortNetwork, network_id::NetworkId};
+use types::addressportnetwork::AddressPortNetwork;
 
 pub mod addrman;
+pub mod chainman;
 pub mod connect;
 pub mod crawler;
 pub mod db;
@@ -53,6 +55,7 @@ async fn main() -> Result<()> {
 
     db::setup().await;
     addrman::start().await;
+    chainman::start().await;
     tokio::spawn(resolve_dns_and_add_to_addrman(DNS_SEEDS));
     let c = tokio::spawn(crawler::crawl_forever());
 

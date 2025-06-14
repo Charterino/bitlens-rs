@@ -89,7 +89,7 @@ pub struct InsertHeaderRequest {
     pub timestamp: u32,
     pub bits: u32,
     pub nonce: u32,
-    pub version: i32,
+    pub version: u32,
     pub number: u64,
     pub hash: [u8; 32],
 }
