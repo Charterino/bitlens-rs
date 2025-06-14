@@ -1,7 +1,10 @@
 use std::borrow::Cow;
 
 use anyhow::bail;
+use primitive_types::U256;
 use sha2::{Digest, Sha256};
+
+use crate::util::compact::u256_from_compact;
 
 use super::{
     buffer::Buffer,
@@ -56,6 +59,17 @@ impl BlockHeader<'_> {
         let mut h = self.hash;
         h.reverse();
         hex::encode(h)
+    }
+
+    pub fn get_work(&self) -> U256 {
+        let uncompacted = u256_from_compact(self.bits);
+        let mut inverted = uncompacted;
+        inverted.0[0] = !inverted.0[0];
+        inverted.0[1] = !inverted.0[1];
+        inverted.0[2] = !inverted.0[2];
+        inverted.0[3] = !inverted.0[3];
+        let result = inverted / (uncompacted + 1);
+        result + 1
     }
 }
 
