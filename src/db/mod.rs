@@ -172,10 +172,9 @@ pub async fn get_all_headers() -> Vec<BlockHeaderWithNumber<'static>> {
                 total_work: our_work
             })
         }).unwrap();
-        let c = iter
+        iter
             .map(|x| x.unwrap())
-            .collect::<Vec<BlockHeaderWithNumber>>();
-        c
+            .collect::<Vec<BlockHeaderWithNumber>>()
     })
     .await
     .unwrap()

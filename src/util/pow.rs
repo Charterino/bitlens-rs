@@ -5,15 +5,13 @@ use super::compact::{compact_from_u256, u256_from_compact};
 // These consts are from src/kernel/chainparams.cpp
 pub const POW_TARGET_TIMESPAN: u64 = 14 * 24 * 60 * 60; // target: 2 weeks between difficulty adjustment
 pub const POW_TARGET_SPACING: u64 = 10 * 60; // target: 10 minutes between blocks
-pub static POW_LIMIT: U256 = U256 {
-    0: [
-        // little endian
-        0xffffffffffffffff,
-        0xffffffffffffffff,
-        0xffffffffffffffff,
-        0x00000000ffffffff,
-    ],
-}; // 0x00000000ffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+pub static POW_LIMIT: U256 = U256([
+    // little endian
+    0xffffffffffffffff,
+    0xffffffffffffffff,
+    0xffffffffffffffff,
+    0x00000000ffffffff,
+]); // 0x00000000ffffffffffffffffffffffffffffffffffffffffffffffffffffffff
 pub const DIFFICULTY_ADJUSTMENT_INTERVAL: u64 = POW_TARGET_TIMESPAN / POW_TARGET_SPACING;
 
 // These functions are from src/pow.cpp

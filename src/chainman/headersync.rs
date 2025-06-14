@@ -75,43 +75,38 @@ fn handle_packet_during_headersync<'a, 'c, 'b: 'c>(
     need_break: &mut bool,
     deadline: &mut Instant,
 ) -> Result<Option<Vec<PacketPayloadType<'a>>>> {
-    match packet {
-        PacketPayloadType::Headers(headers) => {
-            if headers.inner.len() == 0 {
-                *need_break = true;
-                return Ok(None);
-            }
-            if validate_and_apply_headers(
-                &headers
-                    .inner
-                    .iter()
-                    .map(|x| x.as_ref())
-                    .collect::<Vec<&BlockHeader>>(),
-            )
-            .is_err()
-            {
-                *need_break = true;
-                return Ok(None);
-            }
-            let r = CHAIN.read().unwrap();
-            info!("chainman: header sync progress"; "top hash" => r.top_header.header.human_hash(), "top number" => r.top_header.number);
-            *deadline = Instant::now().checked_add(HEADERS_TIMEOUT).unwrap();
-            if need_ihd() {
-                return Ok(Some(vec![PacketPayloadType::GetHeaders(Cow::Owned(
-                    GetHeaders {
-                        version: 70016,
-                        block_locator: Cow::Owned(vec![Cow::Owned(
-                            headers.inner.last().unwrap().hash,
-                        )]),
-                        hash_stop: Cow::Owned([0u8; 32]),
-                    },
-                ))]));
-            } else {
-                *need_break = true;
-                return Ok(None);
-            }
+    if let PacketPayloadType::Headers(headers) = packet {
+        if headers.inner.is_empty() {
+            *need_break = true;
+            return Ok(None);
         }
-        _ => {}
+        if validate_and_apply_headers(
+            &headers
+                .inner
+                .iter()
+                .map(|x| x.as_ref())
+                .collect::<Vec<&BlockHeader>>(),
+        )
+        .is_err()
+        {
+            *need_break = true;
+            return Ok(None);
+        }
+        let r = CHAIN.read().unwrap();
+        info!("chainman: header sync progress"; "top hash" => r.top_header.header.human_hash(), "top number" => r.top_header.number);
+        *deadline = Instant::now().checked_add(HEADERS_TIMEOUT).unwrap();
+        if need_ihd() {
+            return Ok(Some(vec![PacketPayloadType::GetHeaders(Cow::Owned(
+                GetHeaders {
+                    version: 70016,
+                    block_locator: Cow::Owned(vec![Cow::Owned(headers.inner.last().unwrap().hash)]),
+                    hash_stop: Cow::Owned([0u8; 32]),
+                },
+            ))]));
+        } else {
+            *need_break = true;
+            return Ok(None);
+        }
     }
     Ok(None)
 }

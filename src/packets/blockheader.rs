@@ -76,7 +76,7 @@ impl BlockHeader<'_> {
     pub fn is_valid(&self) -> bool {
         let target = u256_from_compact(self.bits);
         let hash_number = U256::from_little_endian(&self.hash);
-        return hash_number < target;
+        hash_number < target
     }
 }
 
