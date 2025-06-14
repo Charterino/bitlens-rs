@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 
 use super::{
+    blockheader::BlockHeader,
     buffer::Buffer,
     deepclone::{DeepClone, MustOutlive},
     packetpayload::{PacketPayload, Serializable, SerializableValue},
@@ -9,13 +10,7 @@ use super::{
 
 #[derive(Debug, Clone, Default)]
 pub struct Block<'a> {
-    pub version: u32,
-    pub timestamp: u32,
-    pub bits: u32,
-    pub nonce: u32,
-    pub parent: Cow<'a, [u8; 32]>,
-    pub merkle_root: Cow<'a, [u8; 32]>,
-
+    pub header: Cow<'a, BlockHeader<'a>>,
     pub txs: Cow<'a, [Cow<'a, Tx<'a>>]>,
 }
 
@@ -33,8 +28,7 @@ impl<'old> MustOutlive<'old> for Block<'old> {
 
 impl<'old, 'new: 'old> DeepClone<'old, 'new> for Block<'old> {
     fn deep_clone(&self) -> Self::WithLifetime<'new> {
-        let parent = self.parent.clone().into_owned();
-        let merkle_root = self.merkle_root.clone().into_owned();
+        let header = self.header.deep_clone();
         // once again suboptimal but it will do for now
         let txs = (&*self.txs)
             .deep_clone()
@@ -42,12 +36,7 @@ impl<'old, 'new: 'old> DeepClone<'old, 'new> for Block<'old> {
             .map(Cow::Owned)
             .collect();
         Self::WithLifetime {
-            version: self.version,
-            timestamp: self.timestamp,
-            bits: self.bits,
-            nonce: self.nonce,
-            parent: Cow::Owned(parent),
-            merkle_root: Cow::Owned(merkle_root),
+            header: Cow::Owned(header),
             txs: Cow::Owned(txs),
         }
     }
@@ -58,12 +47,7 @@ impl<'a> Serializable<'a> for Block<'a> {
         allocator: &'a bumpalo::Bump<1>,
         buffer: &'a [u8],
     ) -> anyhow::Result<(&'a Block<'a>, usize)> {
-        let version = buffer.get_u32_le(0)?;
-        let parent = Cow::Borrowed(buffer.get_hash(4)?);
-        let merkle_root = Cow::Borrowed(buffer.get_hash(36)?);
-        let timestamp = buffer.get_u32_le(68)?;
-        let bits = buffer.get_u32_le(72)?;
-        let nonce = buffer.get_u32_le(76)?;
+        let (header, _) = BlockHeader::deserialize(allocator, buffer)?;
 
         let (txs, offset) = <Cow<'a, [Cow<'a, Tx<'a>>]> as SerializableValue>::deserialize(
             allocator,
@@ -71,16 +55,14 @@ impl<'a> Serializable<'a> for Block<'a> {
         )?;
 
         let result = allocator.alloc(Block {
-            version,
-            timestamp,
-            bits,
-            nonce,
-            parent,
-            merkle_root,
+            header: Cow::Borrowed(header),
             txs,
         });
         Ok((result, offset + 80))
     }
 
-    fn serialize(&self, _: &mut impl bytes::BufMut) {}
+    fn serialize(&self, stream: &mut impl bytes::BufMut) {
+        self.header.serialize(stream);
+        self.txs.serialize(stream);
+    }
 }

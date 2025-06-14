@@ -1,6 +1,7 @@
 pub mod addr;
 pub mod addrv2;
 pub mod block;
+pub mod blockheader;
 pub mod buffer;
 pub mod deepclone;
 pub mod getaddr;

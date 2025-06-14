@@ -20,7 +20,7 @@ pub struct Tx<'a> {
     pub txouts: Cow<'a, [Cow<'a, TxOut<'a>>]>,
     pub witness_data: Option<Cow<'a, [Cow<'a, [VarStr<'a>]>]>>,
 
-    pub hash: [u8; 32],
+    pub hash: [u8; 32], // calculated during deserialization
 }
 
 pub const TX_COMMAND: [u8; 12] = *b"tx\0\0\0\0\0\0\0\0\0\0";
