@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use super::{
     deepclone::{DeepClone, MustOutlive},
-    inv::InventoryVector,
+    invvector::InventoryVector,
     packetpayload::{PacketPayload, Serializable, SerializableValue},
 };
 

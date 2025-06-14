@@ -1,72 +1,54 @@
 use std::borrow::Cow;
 
-use anyhow::bail;
-use num::{FromPrimitive, ToPrimitive};
-use num_derive::{FromPrimitive, ToPrimitive};
 
 use super::{
-    buffer::Buffer,
     deepclone::{DeepClone, MustOutlive},
-    packetpayload::Serializable,
+    packetpayload::{PacketPayload, Serializable, SerializableValue},
 };
 
-#[derive(FromPrimitive, ToPrimitive, Clone, Default, Debug)]
-pub enum InventoryVectorType {
-    #[default]
-    Error = 0,
-    Tx = 1,
-    Block = 2,
-    FilteredBlock = 3,
-    CmpctBlock = 4,
-    WitnessTx = 0x40000001,
-    WitnessBlock = 0x40000002,
-    FilteredWitnessBlock = 0x40000003,
+#[derive(Debug, Clone, Default)]
+pub struct Inv<'a> {
+    pub inner: Cow<'a, [Cow<'a, Inv<'a>>]>,
 }
 
-#[derive(Clone, Debug)]
-pub struct InventoryVector<'a> {
-    pub inv_type: InventoryVectorType,
-    pub hash: Cow<'a, [u8; 32]>,
+pub const INV_COMMAND: [u8; 12] = *b"inv\0\0\0\0\0\0\0\0\0";
+
+impl<'old, 'new: 'old> PacketPayload<'old, 'new> for Inv<'old> {
+    fn command(&self) -> &'static [u8; 12] {
+        &INV_COMMAND
+    }
 }
 
-impl<'a> Serializable<'a> for InventoryVector<'a> {
+impl<'old> MustOutlive<'old> for Inv<'old> {
+    type WithLifetime<'new: 'old> = Inv<'new>;
+}
+
+impl<'old, 'new: 'old> DeepClone<'old, 'new> for Inv<'old> {
+    fn deep_clone(&self) -> Self::WithLifetime<'new> {
+        let invs = (&*self.inner)
+            .deep_clone()
+            .into_iter()
+            .map(Cow::Owned)
+            .collect();
+        Self::WithLifetime { inner: invs }
+    }
+}
+
+impl<'a> Serializable<'a> for Inv<'a> {
     fn deserialize(
         allocator: &'a bumpalo::Bump<1>,
         buffer: &'a [u8],
-    ) -> anyhow::Result<(&'a InventoryVector<'a>, usize)> {
-        let raw_type = buffer.get_u32_le(0)?;
-        let inv_type = match InventoryVectorType::from_u32(raw_type) {
-            Some(inv_type) => inv_type,
-            None => {
-                bail!("unknown inventory type: {:x}", raw_type)
-            }
-        };
-        let hash = buffer.get_hash(4)?;
+    ) -> anyhow::Result<(&'a Self, usize)> {
+        let (deserialized, consumed) = Cow::deserialize(allocator, buffer)?;
         Ok((
-            allocator.alloc(InventoryVector {
-                inv_type,
-                hash: Cow::Borrowed(hash),
+            allocator.alloc(Inv {
+                inner: deserialized,
             }),
-            36,
+            consumed,
         ))
     }
 
     fn serialize(&self, stream: &mut impl bytes::BufMut) {
-        stream.put_u32_le(self.inv_type.to_u32().unwrap());
-        stream.put(self.hash.as_slice());
-    }
-}
-
-impl<'old> MustOutlive<'old> for InventoryVector<'old> {
-    type WithLifetime<'new: 'old> = InventoryVector<'new>;
-}
-
-impl<'old, 'new: 'old> DeepClone<'old, 'new> for InventoryVector<'old> {
-    fn deep_clone(&self) -> Self::WithLifetime<'new> {
-        let hash = self.hash.clone().into_owned();
-        Self::WithLifetime {
-            inv_type: self.inv_type.clone(),
-            hash: Cow::Owned(hash),
-        }
+        self.inner.serialize(stream);
     }
 }

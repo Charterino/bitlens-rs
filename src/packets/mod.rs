@@ -6,6 +6,7 @@ pub mod deepclone;
 pub mod getaddr;
 pub mod getdata;
 pub mod inv;
+pub mod invvector;
 pub mod magic;
 pub mod netaddr;
 pub mod packetheader;

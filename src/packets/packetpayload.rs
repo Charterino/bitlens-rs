@@ -8,9 +8,9 @@ use tokio::io::AsyncReadExt;
 
 use super::{
     addr::Addr, addrv2::AddrV2, block::Block, buffer::Buffer, deepclone::DeepClone,
-    getaddr::GetAddr, getdata::GetData, packetheader::PacketHeader, ping::Ping, pong::Pong,
-    sendaddrv2::SendAddrV2, sendheaders::SendHeaders, tx::Tx, varint::VarInt, verack::VerAck,
-    version::Version,
+    getaddr::GetAddr, getdata::GetData, inv::Inv, packetheader::PacketHeader, ping::Ping,
+    pong::Pong, sendaddrv2::SendAddrV2, sendheaders::SendHeaders, tx::Tx, varint::VarInt,
+    verack::VerAck, version::Version,
 };
 
 pub struct Packet<'a> {
@@ -88,6 +88,10 @@ pub async fn read_payload<'bump>(
             let (v, _) = AddrV2::deserialize(allocator, buffer)?;
             Some(PacketPayloadType::AddrV2(Cow::Borrowed(v)))
         }
+        super::inv::INV_COMMAND => {
+            let (v, _) = Inv::deserialize(allocator, buffer)?;
+            Some(PacketPayloadType::Inv(Cow::Borrowed(v)))
+        }
         _ => None,
     })
 }
@@ -134,6 +138,7 @@ pub enum PacketPayloadType<'a> {
     Tx(Cow<'a, Tx<'a>>),
     Block(Cow<'a, Block<'a>>),
     GetData(Cow<'a, GetData<'a>>),
+    Inv(Cow<'a, Inv<'a>>),
 }
 
 impl PacketPayloadType<'_> {
@@ -151,6 +156,7 @@ impl PacketPayloadType<'_> {
             PacketPayloadType::AddrV2(addrv2) => addrv2.serialize(stream),
             PacketPayloadType::GetAddr(getaddr) => getaddr.serialize(stream),
             PacketPayloadType::GetData(getdata) => getdata.serialize(stream),
+            PacketPayloadType::Inv(inv) => inv.serialize(stream),
         }
     }
 
@@ -168,6 +174,7 @@ impl PacketPayloadType<'_> {
             PacketPayloadType::AddrV2(addrv2) => addrv2.command(),
             PacketPayloadType::GetAddr(getaddr) => getaddr.command(),
             PacketPayloadType::GetData(getdata) => getdata.command(),
+            PacketPayloadType::Inv(inv) => inv.command(),
         }
     }
 }
