@@ -46,7 +46,9 @@ static DESERIALIZE_POOL: LazyLock<Pool<Bump<1>>> = LazyLock::new(|| {
     Pool::from(pool)
 });
 
-pub async fn connect_and_handshake(peer: &AddressPortNetwork) -> Result<HandshakedConnection> {
+pub async fn connect_and_handshake<'a>(
+    peer: &AddressPortNetwork,
+) -> Result<HandshakedConnection<'a>> {
     let mut conn = connect(peer).await?;
 
     let deadline = Instant::now().checked_add(HANDSHAKE_TIMEOUT).unwrap();
