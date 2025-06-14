@@ -2,8 +2,8 @@ use std::{borrow::Cow, sync::atomic::Ordering, time::Duration};
 
 use crate::{
     addrman,
-    chainman::{CHAIN, validate_and_apply_header},
-    packets::{getheaders::GetHeaders, packetpayload::PacketPayloadType},
+    chainman::{CHAIN, validate_and_apply_headers},
+    packets::{blockheader::BlockHeader, getheaders::GetHeaders, packetpayload::PacketPayloadType},
     with_deadline,
 };
 use anyhow::Result;
@@ -12,7 +12,7 @@ use tokio::{select, time::Instant};
 
 use super::{SYNCING_HEADERS, build_get_headers, need_ihd};
 
-const HEADERS_TIMEOUT: Duration = Duration::from_secs(3);
+const HEADERS_TIMEOUT: Duration = Duration::from_millis(500);
 
 pub async fn sync_headers() {
     SYNCING_HEADERS.store(true, Ordering::Relaxed);
@@ -81,11 +81,17 @@ fn handle_packet_during_headersync<'a, 'c, 'b: 'c>(
                 *need_break = true;
                 return Ok(None);
             }
-            for header in headers.inner.iter() {
-                if validate_and_apply_header(header).is_err() {
-                    *need_break = true;
-                    return Ok(None);
-                }
+            if validate_and_apply_headers(
+                &headers
+                    .inner
+                    .iter()
+                    .map(|x| x.as_ref())
+                    .collect::<Vec<&BlockHeader>>(),
+            )
+            .is_err()
+            {
+                *need_break = true;
+                return Ok(None);
             }
             let r = CHAIN.read().unwrap();
             info!("chainman: header sync progress"; "top hash" => r.top_header.header.human_hash(), "top number" => r.top_header.number);

@@ -1,7 +1,7 @@
 use std::{
     borrow::Cow,
     sync::{
-        LazyLock, RwLock,
+        LazyLock, RwLock, RwLockWriteGuard,
         atomic::{AtomicBool, AtomicUsize},
     },
     time::{SystemTime, UNIX_EPOCH},
@@ -114,8 +114,10 @@ fn build_get_headers<'a>() -> PacketPayloadType<'a> {
     }))
 }
 
-fn validate_and_apply_header(header: &BlockHeader) -> Result<()> {
-    let mut w = CHAIN.write().unwrap();
+fn validate_and_apply_header_inner(
+    header: &BlockHeader,
+    w: &mut RwLockWriteGuard<'_, Chain>,
+) -> Result<()> {
     let duplicate = w.known_headers.contains_key(&header.hash);
     let parent = match w.known_headers.get(header.parent.as_slice()) {
         Some(parent) => parent,
@@ -153,10 +155,18 @@ fn validate_and_apply_header(header: &BlockHeader) -> Result<()> {
 
     w.known_headers
         .insert(new_header.header.hash, new_header.clone());
-    drop(w);
     tokio::spawn(async move {
         db::insert_header(&new_header).await;
     });
+
+    Ok(())
+}
+
+fn validate_and_apply_headers(headers: &[&BlockHeader]) -> Result<()> {
+    let mut w = CHAIN.write().unwrap();
+    for header in headers {
+        validate_and_apply_header_inner(header, &mut w)?;
+    }
 
     Ok(())
 }
