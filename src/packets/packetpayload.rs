@@ -197,7 +197,10 @@ impl<'a, T: Serializable<'a> + ToOwned> SerializableValue<'a> for Cow<'a, [Cow<'
     fn deserialize(allocator: &'a Bump<1>, buffer: &'a [u8]) -> Result<(Self, usize)> {
         let (len, mut offset) = VarInt::deserialize(allocator, buffer)?;
 
-        let mut result: Vec<'a, Cow<'a, T>> = Vec::with_capacity_in(len as usize, allocator);
+        let mut result: Vec<'a, Cow<'a, T>> = Vec::new_in(allocator);
+        if result.try_reserve_exact(len as usize).is_err() {
+            bail!("allocation failed");
+        }
         for _ in 0..len as usize {
             let (value, offset_delta) = T::deserialize(allocator, buffer.with_offset(offset)?)?;
             offset += offset_delta;

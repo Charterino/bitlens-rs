@@ -5,7 +5,7 @@ use super::deepclone::{DeepClone, MustOutlive};
 use super::packetpayload::{Serializable, SerializableValue};
 use super::varstr::VarStr;
 use super::{netaddr::NetAddrShort, packetpayload::PacketPayload};
-use anyhow::{Result, anyhow};
+use anyhow::{Result, anyhow, bail};
 use bytes::BufMut;
 
 #[derive(Debug, Clone, Default)]
@@ -62,7 +62,7 @@ impl<'a> Serializable<'a> for Version<'a> {
         let nonce = buffer.get_u64_le(72)?;
         let (ua, offset) = VarStr::deserialize(allocator, buffer.with_offset(80)?)?;
         let start_height = buffer.get_u32_le(80 + offset)?;
-        let res = allocator.alloc(Version {
+        match allocator.try_alloc(Version {
             services,
             timestamp,
             addrrecv: Cow::Borrowed(addrrecv),
@@ -72,15 +72,19 @@ impl<'a> Serializable<'a> for Version<'a> {
             start_height,
             version,
             announce_relayed_transactions: false,
-        });
-        if version >= 70001 {
-            res.announce_relayed_transactions = *buffer
-                .get(84 + offset)
-                .ok_or(anyhow!("missing last byte in version"))?
-                != 0;
-            return Ok((res, offset + 85));
+        }) {
+            Ok(result) => {
+                if version >= 70001 {
+                    result.announce_relayed_transactions = *buffer
+                        .get(84 + offset)
+                        .ok_or(anyhow!("missing last byte in version"))?
+                        != 0;
+                    return Ok((result, offset + 85));
+                }
+                Ok((result, offset + 84))
+            }
+            Err(e) => bail!(e),
         }
-        Ok((res, offset + 84))
     }
 
     fn serialize(&self, stream: &mut impl BufMut) {

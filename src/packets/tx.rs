@@ -86,12 +86,21 @@ impl<'a> Serializable<'a> for Tx<'a> {
 
         let (witnesses, witnesses_start) = if has_witness_data {
             let start = offset;
-            let mut wits = Vec::with_capacity_in(txins.len(), allocator);
+            let mut wits = Vec::new_in(allocator);
+            if wits.try_reserve_exact(txins.len()).is_err() {
+                bail!("allocation failed");
+            }
             for _ in 0..txins.len() {
                 let (components_count, offset_delta) =
                     VarInt::deserialize(allocator, buffer.with_offset(offset)?)?;
                 offset += offset_delta;
-                let mut components = Vec::with_capacity_in(components_count as usize, allocator);
+                let mut components = Vec::new_in(allocator);
+                if components
+                    .try_reserve_exact(components_count as usize)
+                    .is_err()
+                {
+                    bail!("allocation failed");
+                }
                 for _ in 0..components_count as usize {
                     let (component, offset_delta) =
                         VarStr::deserialize(allocator, buffer.with_offset(offset)?)?;
@@ -119,16 +128,17 @@ impl<'a> Serializable<'a> for Tx<'a> {
         };
         let second_pass = Sha256::digest(first_pass);
 
-        let result = allocator.alloc(Tx {
+        match allocator.try_alloc(Tx {
             version,
             locktime,
             txins,
             txouts,
             witness_data: witnesses,
             hash: second_pass.into(),
-        });
-
-        Ok((result, offset + 4))
+        }) {
+            Ok(result) => Ok((result, offset + 4)),
+            Err(e) => bail!(e),
+        }
     }
 
     fn serialize(&self, stream: &mut impl bytes::BufMut) {
@@ -199,15 +209,15 @@ impl<'a> Serializable<'a> for TxIn<'a> {
         let index = buffer.get_u32_le(32)?;
         let (script, offset) = VarStr::deserialize(allocator, buffer.with_offset(36)?)?;
         let sequence = buffer.get_u32_le(offset + 36)?;
-        Ok((
-            allocator.alloc(TxIn {
-                prevout_hash: Cow::Borrowed(hash),
-                prevout_index: index,
-                sequence,
-                sig_script: script,
-            }),
-            offset + 40,
-        ))
+        match allocator.try_alloc(TxIn {
+            prevout_hash: Cow::Borrowed(hash),
+            prevout_index: index,
+            sequence,
+            sig_script: script,
+        }) {
+            Ok(result) => Ok((result, offset + 40)),
+            Err(e) => bail!(e),
+        }
     }
 
     fn serialize(&self, stream: &mut impl bytes::BufMut) {
@@ -245,7 +255,10 @@ impl<'a> Serializable<'a> for TxOut<'a> {
     ) -> anyhow::Result<(&'a TxOut<'a>, usize)> {
         let value = buffer.get_u64_le(0)?;
         let (script, offset) = VarStr::deserialize(allocator, buffer.with_offset(8)?)?;
-        Ok((allocator.alloc(TxOut { value, script }), offset + 8))
+        match allocator.try_alloc(TxOut { value, script }) {
+            Ok(result) => Ok((result, offset + 8)),
+            Err(e) => bail!(e),
+        }
     }
 
     fn serialize(&self, stream: &mut impl bytes::BufMut) {

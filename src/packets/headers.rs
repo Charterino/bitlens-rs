@@ -1,5 +1,7 @@
 use std::borrow::Cow;
 
+use anyhow::bail;
+
 use super::{
     blockheader::BlockHeader,
     deepclone::{DeepClone, MustOutlive},
@@ -40,12 +42,12 @@ impl<'a> Serializable<'a> for Headers<'a> {
         buffer: &'a [u8],
     ) -> anyhow::Result<(&'a Self, usize)> {
         let (deserialized, consumed) = Cow::deserialize(allocator, buffer)?;
-        Ok((
-            allocator.alloc(Self {
-                inner: deserialized,
-            }),
-            consumed,
-        ))
+        match allocator.try_alloc(Self {
+            inner: deserialized,
+        }) {
+            Ok(result) => Ok((result, consumed)),
+            Err(e) => bail!(e),
+        }
     }
 
     fn serialize(&self, stream: &mut impl bytes::BufMut) {

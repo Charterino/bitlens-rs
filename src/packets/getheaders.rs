@@ -1,5 +1,7 @@
 use std::borrow::Cow;
 
+use anyhow::bail;
+
 use super::{
     buffer::Buffer,
     deepclone::{DeepClone, MustOutlive},
@@ -55,14 +57,14 @@ impl<'a> Serializable<'a> for GetHeaders<'a> {
             offset += 32;
         }
         let hash_stop = buffer.get_hash(offset)?;
-        Ok((
-            allocator.alloc(Self {
-                version,
-                block_locator: Cow::Owned(block_locator),
-                hash_stop: Cow::Borrowed(hash_stop),
-            }),
-            offset + 32,
-        ))
+        match allocator.try_alloc(Self {
+            version,
+            block_locator: Cow::Owned(block_locator),
+            hash_stop: Cow::Borrowed(hash_stop),
+        }) {
+            Ok(result) => Ok((result, offset + 32)),
+            Err(e) => bail!(e),
+        }
     }
 
     fn serialize(&self, stream: &mut impl bytes::BufMut) {

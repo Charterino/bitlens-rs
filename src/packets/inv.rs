@@ -1,14 +1,16 @@
 use std::borrow::Cow;
 
+use anyhow::bail;
 
 use super::{
     deepclone::{DeepClone, MustOutlive},
+    invvector::InventoryVector,
     packetpayload::{PacketPayload, Serializable, SerializableValue},
 };
 
 #[derive(Debug, Clone, Default)]
 pub struct Inv<'a> {
-    pub inner: Cow<'a, [Cow<'a, Inv<'a>>]>,
+    pub inner: Cow<'a, [Cow<'a, InventoryVector<'a>>]>,
 }
 
 pub const INV_COMMAND: [u8; 12] = *b"inv\0\0\0\0\0\0\0\0\0";
@@ -40,12 +42,12 @@ impl<'a> Serializable<'a> for Inv<'a> {
         buffer: &'a [u8],
     ) -> anyhow::Result<(&'a Self, usize)> {
         let (deserialized, consumed) = Cow::deserialize(allocator, buffer)?;
-        Ok((
-            allocator.alloc(Inv {
-                inner: deserialized,
-            }),
-            consumed,
-        ))
+        match allocator.try_alloc(Inv {
+            inner: deserialized,
+        }) {
+            Ok(result) => Ok((result, consumed)),
+            Err(e) => bail!(e),
+        }
     }
 
     fn serialize(&self, stream: &mut impl bytes::BufMut) {

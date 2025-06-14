@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 
+use anyhow::bail;
 use sha2::{Digest, Sha256};
 
 use super::{
@@ -59,19 +60,19 @@ impl<'a> Serializable<'a> for BlockHeader<'a> {
         let hash = Sha256::digest(buffer.get(0..80).unwrap());
         let hash = Sha256::digest(hash).into();
 
-        Ok((
-            allocator.alloc(Self {
-                version,
-                parent,
-                merkle_root,
-                timestamp,
-                bits,
-                nonce,
-                hash,
-                txs_count,
-            }),
-            80 + offset,
-        ))
+        match allocator.try_alloc(Self {
+            version,
+            parent,
+            merkle_root,
+            timestamp,
+            bits,
+            nonce,
+            hash,
+            txs_count,
+        }) {
+            Ok(result) => Ok((result, 80 + offset)),
+            Err(e) => bail!(e),
+        }
     }
 
     fn serialize(&self, stream: &mut impl bytes::BufMut) {

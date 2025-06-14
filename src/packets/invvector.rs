@@ -42,13 +42,13 @@ impl<'a> Serializable<'a> for InventoryVector<'a> {
             }
         };
         let hash = buffer.get_hash(4)?;
-        Ok((
-            allocator.alloc(InventoryVector {
-                inv_type,
-                hash: Cow::Borrowed(hash),
-            }),
-            36,
-        ))
+        match allocator.try_alloc(InventoryVector {
+            inv_type,
+            hash: Cow::Borrowed(hash),
+        }) {
+            Ok(result) => Ok((result, 36)),
+            Err(e) => bail!(e),
+        }
     }
 
     fn serialize(&self, stream: &mut impl bytes::BufMut) {

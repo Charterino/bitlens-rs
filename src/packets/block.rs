@@ -1,5 +1,7 @@
 use std::borrow::Cow;
 
+use anyhow::bail;
+
 use super::{
     blockheader::BlockHeader,
     buffer::Buffer,
@@ -56,11 +58,13 @@ impl<'a> Serializable<'a> for Block<'a> {
             buffer.with_offset(80)?,
         )?;
 
-        let result = allocator.alloc(Block {
+        match allocator.try_alloc(Block {
             header: Cow::Borrowed(header),
             txs,
-        });
-        Ok((result, offset + 80))
+        }) {
+            Ok(result) => Ok((result, offset + 80)),
+            Err(e) => bail!(e),
+        }
     }
 
     fn serialize(&self, stream: &mut impl bytes::BufMut) {

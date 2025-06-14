@@ -43,12 +43,14 @@ impl<'a> Serializable<'a> for NetAddrShort<'a> {
     ) -> Result<(&'a NetAddrShort<'a>, usize)> {
         match buffer.get(8..24) {
             Some(b) => {
-                let res = allocator.alloc(NetAddrShort {
+                match allocator.try_alloc(NetAddrShort {
                     services: buffer.get_u64_le(0)?,
                     addr: Cow::Borrowed(b.try_into().unwrap()),
                     port: buffer.get_u16(24)?,
-                });
-                Ok((res, 26))
+                }) {
+                    Ok(result) => Ok((result, 26)),
+                    Err(e) => bail!(e),
+                }
             }
             None => bail!("not enough bytes for netaddrshort"),
         }
@@ -90,7 +92,7 @@ impl<'a> Serializable<'a> for NetAddr<'a> {
         allocator: &'a bumpalo::Bump<1>,
         buffer: &'a [u8],
     ) -> Result<(&'a NetAddr<'a>, usize)> {
-        let res = allocator.alloc(NetAddr {
+        match allocator.try_alloc(NetAddr {
             time: buffer.get_u32_le(0)?,
             services: buffer.get_u64_le(4)?,
             addr: Cow::Borrowed(
@@ -100,8 +102,10 @@ impl<'a> Serializable<'a> for NetAddr<'a> {
                     .try_into()?,
             ),
             port: buffer.get_u16(28)?,
-        });
-        Ok((res, 30))
+        }) {
+            Ok(result) => Ok((result, 30)),
+            Err(e) => bail!(e),
+        }
     }
 
     fn serialize(&self, stream: &mut impl BufMut) {
@@ -153,14 +157,16 @@ impl<'a> Serializable<'a> for NetAddrV2<'a> {
         let (address, offset_delta) = VarStr::deserialize(allocator, buffer.with_offset(offset)?)?;
         offset += offset_delta;
         let port = buffer.get_u16(offset)?;
-        let res = allocator.alloc(NetAddrV2 {
+        match allocator.try_alloc(NetAddrV2 {
             address,
             services,
             time,
             port,
             network_id,
-        });
-        Ok((res, offset + 2))
+        }) {
+            Ok(result) => Ok((result, offset + 2)),
+            Err(e) => bail!(e),
+        }
     }
 
     fn serialize(&self, stream: &mut impl BufMut) {
