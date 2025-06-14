@@ -142,29 +142,71 @@ async fn crawl(peer: &AddressPortNetwork, res: &mut CrawlResult) -> Result<()> {
         {
             let mut allocator = connection.inner.prepare_for_read().await;
             let packet = connection.inner.read_packet(header, &mut allocator).await?;
-            if let Some(PacketPayloadType::Addr(addys)) = &packet.payload {
-                let time = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs();
-                let mut apns = Vec::with_capacity(addys.inner.len());
-                for addy in addys.inner.iter() {
-                    let (network_id, addy_bytes) = match *addy.addr {
-                        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, a, b, c, d] => {
-                            (NetworkId::IPv4, vec![a, b, c, d])
-                        }
-                        other => (NetworkId::IPv6, other.to_vec()),
-                    };
-                    apns.push(AddressPortNetwork {
-                        network_id,
-                        port: addy.port,
-                        address: addy_bytes,
-                    });
-                }
-                peers_seen(apns, time).await;
+            if let Some(payload) = &packet.payload {
+                handle_payload(payload);
             }
             res.packets_received_total += 1;
         }
         addrman::update_peer_online(peer.clone(), connection.remote_version.services).await;
+    }
+}
+
+fn handle_payload(payload: &PacketPayloadType) {
+    match payload {
+        PacketPayloadType::Addr(addys) => {
+            let time = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
+            let mut apns = Vec::with_capacity(addys.inner.len());
+            for addy in addys.inner.iter() {
+                let (network_id, addy_bytes) = match *addy.addr {
+                    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, a, b, c, d] => {
+                        (NetworkId::IPv4, vec![a, b, c, d])
+                    }
+                    other => (NetworkId::IPv6, other.to_vec()),
+                };
+                apns.push(AddressPortNetwork {
+                    network_id,
+                    port: addy.port,
+                    address: addy_bytes,
+                });
+            }
+            tokio::spawn(peers_seen(apns, time));
+        }
+        PacketPayloadType::AddrV2(addys) => {
+            let time = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
+            let mut apns = Vec::with_capacity(addys.inner.len());
+            for addy in addys.inner.iter() {
+                let (network_id, addy_bytes) = match (addy.network_id, addy.address.inner.len()) {
+                    (NetworkId::IPv4, 4) => (NetworkId::IPv4, addy.address.inner.to_vec()),
+                    (NetworkId::IPv6, 16) => match addy.address.inner.get(0..16).unwrap() {
+                        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, a, b, c, d] => {
+                            (NetworkId::IPv4, vec![*a, *b, *c, *d])
+                        }
+                        other => (NetworkId::IPv6, other.to_vec()),
+                    },
+                    _ => {
+                        continue;
+                    }
+                };
+                apns.push(AddressPortNetwork {
+                    network_id,
+                    port: addy.port,
+                    address: addy_bytes,
+                });
+            }
+            tokio::spawn(peers_seen(apns, time));
+        }
+        PacketPayloadType::Block(_block) => {
+            // TODO
+        }
+        PacketPayloadType::Inv(_inv) => {
+            // TODO
+        }
+        _ => {}
     }
 }
