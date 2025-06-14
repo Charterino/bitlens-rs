@@ -24,6 +24,41 @@ pub struct BlockHeader<'a> {
     pub hash: [u8; 32], // calculated during deserialization
 }
 
+impl BlockHeader<'_> {
+    pub fn construct(
+        version: u32,
+        parent: [u8; 32],
+        merkle_root: [u8; 32],
+        timestamp: u32,
+        bits: u32,
+        nonce: u32,
+        txs_count: VarInt,
+    ) -> Self {
+        let mut s = Self {
+            version,
+            parent: Cow::Owned(parent),
+            merkle_root: Cow::Owned(merkle_root),
+            timestamp,
+            bits,
+            nonce,
+            txs_count,
+            hash: [0u8; 32],
+        };
+        let mut b = Vec::with_capacity(88);
+        s.serialize(&mut b);
+        let hash = Sha256::digest(b.get(0..80).unwrap());
+        let hash = Sha256::digest(hash).into();
+        s.hash = hash;
+        s
+    }
+
+    pub fn human_hash(&self) -> String {
+        let mut h = self.hash;
+        h.reverse();
+        hex::encode(h)
+    }
+}
+
 impl<'old> MustOutlive<'old> for BlockHeader<'old> {
     type WithLifetime<'new: 'old> = BlockHeader<'new>;
 }
