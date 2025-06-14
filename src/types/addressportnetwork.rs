@@ -4,8 +4,7 @@ use std::{
     str::FromStr,
 };
 
-
-use super::network_id::NetworkId;
+use crate::packets::network_id::NetworkId;
 
 #[derive(Default, Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct AddressPortNetwork {

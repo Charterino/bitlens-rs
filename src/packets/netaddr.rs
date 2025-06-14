@@ -4,11 +4,10 @@ use anyhow::{Result, anyhow, bail};
 use bytes::BufMut;
 use num::{FromPrimitive, ToPrimitive};
 
-use crate::types::network_id::NetworkId;
-
 use super::{
     buffer::Buffer,
     deepclone::{DeepClone, MustOutlive},
+    network_id::NetworkId,
     packetpayload::{Serializable, SerializableValue},
     varint::VarInt,
     varstr::VarStr,

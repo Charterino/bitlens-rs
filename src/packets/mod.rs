@@ -12,6 +12,7 @@ pub mod inv;
 pub mod invvector;
 pub mod magic;
 pub mod netaddr;
+pub mod network_id;
 pub mod packetheader;
 pub mod packetpayload;
 pub mod ping;
