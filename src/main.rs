@@ -17,8 +17,6 @@ use tokio::{
     time::{Instant, sleep_until},
 };
 
-use pprof::ProfilerGuard;
-use pprof::protos::Message;
 use types::addressportnetwork::AddressPortNetwork;
 
 pub mod addrman;
@@ -46,8 +44,6 @@ const DNS_SEEDS: &[&str] = &[
 #[tokio::main]
 async fn main() -> Result<()> {
     let _guard = setup_logging();
-    #[cfg(debug_assertions)]
-    let guard = start_profiling();
 
     let ctrl_c_events = ctrl_channel()?;
 
@@ -65,29 +61,7 @@ async fn main() -> Result<()> {
 
     c.abort();
 
-    #[cfg(debug_assertions)]
-    stop_profiling(guard).await;
-
     Ok(())
-}
-
-fn start_profiling() -> ProfilerGuard<'static> {
-    pprof::ProfilerGuardBuilder::default()
-        .frequency(1000)
-        .blocklist(&["libc", "libgcc", "pthread", "vdso"])
-        .build()
-        .unwrap()
-}
-
-async fn stop_profiling(guard: ProfilerGuard<'static>) {
-    let report = guard.report().build().unwrap();
-    let mut file = File::create("profile.pb").await.unwrap();
-    let profile = report.pprof().unwrap();
-
-    let mut content = Vec::new();
-    profile.write_to_vec(&mut content).unwrap();
-
-    file.write_all(&content).await.unwrap();
 }
 
 async fn resolve_dns_and_add_to_addrman(peers: &[&'static str]) {
