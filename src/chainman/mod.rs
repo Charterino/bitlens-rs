@@ -1,8 +1,8 @@
 use std::{
     borrow::Cow,
     sync::{
-        LazyLock, RwLock, RwLockWriteGuard,
-        atomic::{AtomicBool, AtomicUsize},
+        LazyLock, RwLock, RwLockReadGuard, RwLockWriteGuard,
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -22,8 +22,9 @@ use crate::{
 };
 
 static SYNCING_HEADERS: AtomicBool = AtomicBool::new(false); // are we currently in the process of initial header sync?
+#[allow(dead_code)]
 static SYNCING_BODIES: AtomicBool = AtomicBool::new(false); // are we currently in the process of downloading blocks?
-static DOWNLOADED_BLOCKS: AtomicUsize = AtomicUsize::new(0); // It's important that this number only counts downloaded blocks from the main chain.
+static DOWNLOADED_BLOCKS: AtomicU64 = AtomicU64::new(0); // It's important that this number only counts downloaded blocks from the main chain.
 
 static CHAIN: LazyLock<RwLock<Chain>> = LazyLock::new(|| RwLock::new(Chain::default()));
 
@@ -53,6 +54,9 @@ async fn load_headers_from_sqlite() {
         w.known_headers
             .insert(new_header.header.hash, new_header.clone());
     }
+
+    // After loading all headers from sqlite, figure out how many blocks we have downloaded
+    DOWNLOADED_BLOCKS.store(calculate_downloaded_blocks_w(&w), Ordering::Relaxed);
 }
 
 // Do we need to sync headers?
@@ -150,7 +154,13 @@ fn validate_and_apply_header_inner(
     };
 
     if new_header.total_work > w.top_header.total_work {
+        // since top_header is changing, we might need to adjust DOWNLOADED_BLOCKS
+        let should_recount = *new_header.header.parent != w.top_header.header.hash;
         w.top_header = new_header.clone();
+        if should_recount {
+            let new_count = calculate_downloaded_blocks_w(w);
+            DOWNLOADED_BLOCKS.store(new_count, Ordering::Relaxed);
+        }
     }
 
     w.known_headers
@@ -169,4 +179,39 @@ fn validate_and_apply_headers(headers: &[&BlockHeader]) -> Result<()> {
     }
 
     Ok(())
+}
+
+#[allow(dead_code)]
+fn calculate_downloaded_blocks_r(r: &RwLockReadGuard<'_, Chain>) -> u64 {
+    // Since blocks are applied sequentially, if we see a block that has FetchedFull set to true, we know all of the blocks before it are also downloaded
+    if r.top_header.fetched_full {
+        return r.top_header.number + 1;
+    }
+    let mut last = &r.top_header;
+    loop {
+        last = r.known_headers.get(last.header.parent.as_slice()).unwrap();
+        if last.fetched_full {
+            return last.number + 1;
+        }
+        if last.number == 0 {
+            return 0;
+        }
+    }
+}
+
+fn calculate_downloaded_blocks_w(r: &RwLockWriteGuard<'_, Chain>) -> u64 {
+    // Since blocks are applied sequentially, if we see a block that has FetchedFull set to true, we know all of the blocks before it are also downloaded
+    if r.top_header.fetched_full {
+        return r.top_header.number + 1;
+    }
+    let mut last = &r.top_header;
+    loop {
+        last = r.known_headers.get(last.header.parent.as_slice()).unwrap();
+        if last.fetched_full {
+            return last.number + 1;
+        }
+        if last.number == 0 {
+            return 0;
+        }
+    }
 }
