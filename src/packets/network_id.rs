@@ -1,11 +1,11 @@
 use std::fmt::Display;
 
-use deadpool_sqlite::rusqlite::{
+use num::{FromPrimitive, ToPrimitive};
+use num_derive::{FromPrimitive, ToPrimitive};
+use rusqlite::{
     Result, ToSql,
     types::{FromSql, FromSqlError, FromSqlResult, ToSqlOutput, Value, ValueRef},
 };
-use num::{FromPrimitive, ToPrimitive};
-use num_derive::{FromPrimitive, ToPrimitive};
 
 #[derive(
     FromPrimitive, ToPrimitive, Clone, Copy, Default, Debug, Hash, PartialEq, Eq, PartialOrd, Ord,

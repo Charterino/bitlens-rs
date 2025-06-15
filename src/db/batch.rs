@@ -1,13 +1,13 @@
 use std::{mem::swap, time::Duration};
 
-use deadpool_sqlite::rusqlite::Params;
+use rusqlite::Params;
 use tokio::{
     select,
     sync::mpsc::{Receiver, Sender, channel},
     time::{Instant, sleep_until},
 };
 
-use super::POOL;
+use super::CONNECTION;
 
 const BATCH_SIZE: usize = 2048; // batch a lot of inserts/updates together because it doesn't matter if it executes 5 seconds later
 const BATCH_TIMEOUT: Duration = Duration::from_secs(5); // Flush the updates at least every 5 seconds
@@ -55,26 +55,19 @@ pub async fn batch_process_requests(
         let mut requests = Vec::with_capacity(BATCH_SIZE);
         swap(&mut requests, &mut pending_requests);
         // Flush all the requests yay!
-        let pool = POOL.get().await.unwrap();
-        pool.interact(move |conn| {
-            let tx = conn.transaction().unwrap();
+        let mut conn = CONNECTION.lock().unwrap();
+        let tx = conn.transaction().unwrap();
+        {
             let mut stmt = tx.prepare_cached(query).unwrap();
             for request in requests {
                 stmt.execute(request.into_params()).unwrap();
             }
-            drop(stmt);
-            tx.commit().unwrap()
-        })
-        .await
-        .unwrap();
+        }
+        tx.commit().unwrap();
     }
 }
 
 async fn ensure_stmt_prepared(query: &'static str) {
-    let conn = POOL.get().await.unwrap();
-    conn.interact(|conn| {
-        conn.prepare_cached(query).unwrap(); // ensure this statement is valid
-    })
-    .await
-    .unwrap();
+    let conn = CONNECTION.lock().unwrap();
+    conn.prepare_cached(query).unwrap(); // ensure this statement is valid
 }

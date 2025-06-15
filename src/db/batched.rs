@@ -1,6 +1,6 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use deadpool_sqlite::rusqlite::Params;
+use rusqlite::Params;
 
 use crate::types::addressportnetwork::AddressPortNetwork;
 

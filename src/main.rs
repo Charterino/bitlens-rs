@@ -11,8 +11,6 @@ use log::setup_logging;
 use packets::network_id::NetworkId;
 use slog_scope::{debug, info};
 use tokio::{
-    fs::File,
-    io::AsyncWriteExt,
     select,
     time::{Instant, sleep_until},
 };
