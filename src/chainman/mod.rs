@@ -201,17 +201,14 @@ fn calculate_downloaded_blocks_r(r: &RwLockReadGuard<'_, Chain>) -> u64 {
 
 fn calculate_downloaded_blocks_w(r: &RwLockWriteGuard<'_, Chain>) -> u64 {
     // Since blocks are applied sequentially, if we see a block that has FetchedFull set to true, we know all of the blocks before it are also downloaded
-    if r.top_header.fetched_full {
-        return r.top_header.number + 1;
-    }
     let mut last = &r.top_header;
     loop {
-        last = r.known_headers.get(last.header.parent.as_slice()).unwrap();
         if last.fetched_full {
             return last.number + 1;
         }
         if last.number == 0 {
             return 0;
         }
+        last = r.known_headers.get(last.header.parent.as_slice()).unwrap();
     }
 }
