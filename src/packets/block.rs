@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use anyhow::bail;
 
-use crate::util::merkle::compute_merkle_root;
+use crate::util::merkle::MerkleTree;
 
 use super::{
     blockheader::BlockHeader,
@@ -63,7 +63,11 @@ impl<'a> Serializable<'a> for Block<'a> {
         // Verify that this block is `correct`, as in the transactions inside actually correspond to the merkle tree in the header.
 
         // Compute the merkle root and make sure it's the same as in the header
-        let (merkle_root, mutated) = compute_merkle_root(txs.iter().map(|x| x.hash).collect());
+        let mut merkle_tree = MerkleTree::with_capacity(txs.len());
+        for tx in txs.iter() {
+            merkle_tree.append_hash(&tx.hash);
+        }
+        let (merkle_root, mutated) = merkle_tree.into_root();
         if mutated {
             bail!("merkle root mutated")
         }
