@@ -1,7 +1,7 @@
 use std::{
     borrow::Cow,
     sync::{
-        LazyLock, RwLock, RwLockReadGuard, RwLockWriteGuard,
+        LazyLock, RwLock,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::{SystemTime, UNIX_EPOCH},
@@ -118,10 +118,7 @@ fn build_get_headers<'a>() -> PacketPayloadType<'a> {
     }))
 }
 
-fn validate_and_apply_header_inner(
-    header: &BlockHeader,
-    w: &mut RwLockWriteGuard<'_, Chain>,
-) -> Result<()> {
+fn validate_and_apply_header_inner(header: &BlockHeader, w: &mut Chain) -> Result<()> {
     let duplicate = w.known_headers.contains_key(&header.hash);
     let parent = match w.known_headers.get(header.parent.as_slice()) {
         Some(parent) => parent,
@@ -181,25 +178,7 @@ fn validate_and_apply_headers(headers: &[&BlockHeader]) -> Result<()> {
     Ok(())
 }
 
-#[allow(dead_code)]
-fn calculate_downloaded_blocks_r(r: &RwLockReadGuard<'_, Chain>) -> u64 {
-    // Since blocks are applied sequentially, if we see a block that has FetchedFull set to true, we know all of the blocks before it are also downloaded
-    if r.top_header.fetched_full {
-        return r.top_header.number + 1;
-    }
-    let mut last = &r.top_header;
-    loop {
-        last = r.known_headers.get(last.header.parent.as_slice()).unwrap();
-        if last.fetched_full {
-            return last.number + 1;
-        }
-        if last.number == 0 {
-            return 0;
-        }
-    }
-}
-
-fn calculate_downloaded_blocks_w(r: &RwLockWriteGuard<'_, Chain>) -> u64 {
+fn calculate_downloaded_blocks_w(r: &Chain) -> u64 {
     // Since blocks are applied sequentially, if we see a block that has FetchedFull set to true, we know all of the blocks before it are also downloaded
     let mut last = &r.top_header;
     loop {
