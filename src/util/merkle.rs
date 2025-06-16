@@ -1,5 +1,7 @@
 use sha2::{Digest, Sha256};
 
+// from bitcoin:src/consensus/merkle.cpp:46
+// returns (root hash, modified)
 pub fn compute_merkle_root(mut hashes: Vec<[u8; 32]>) -> ([u8; 32], bool) {
     let mut mutation = false;
     while hashes.len() > 1 {

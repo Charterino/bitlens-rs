@@ -2,6 +2,8 @@ use std::borrow::Cow;
 
 use anyhow::bail;
 
+use crate::util::merkle::compute_merkle_root;
+
 use super::{
     blockheader::BlockHeader,
     buffer::Buffer,
@@ -57,6 +59,17 @@ impl<'a> Serializable<'a> for Block<'a> {
             allocator,
             buffer.with_offset(80)?,
         )?;
+
+        // Verify that this block is `correct`, as in the transactions inside actually correspond to the merkle tree in the header.
+
+        // Compute the merkle root and make sure it's the same as in the header
+        let (merkle_root, mutated) = compute_merkle_root(txs.iter().map(|x| x.hash).collect());
+        if mutated {
+            bail!("merkle root mutated")
+        }
+        if merkle_root != *header.merkle_root {
+            bail!("merkle root does not match")
+        }
 
         match allocator.try_alloc(Block {
             header: Cow::Borrowed(header),
