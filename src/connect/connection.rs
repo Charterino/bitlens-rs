@@ -25,7 +25,7 @@ pub struct Connection {
 }
 
 impl Connection {
-    pub async fn write_packet<'a>(&mut self, packet: &'a PacketPayloadType<'a>) -> Result<()> {
+    pub async fn write_packet<'a>(&mut self, packet: &PacketPayloadType<'_>) -> Result<()> {
         let mut serialize_buffer = SERIALIZE_POOL.get().await.unwrap();
         let buf = serialize_buffer.deref_mut();
         packet.serialize(buf);
