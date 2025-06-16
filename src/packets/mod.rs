@@ -13,6 +13,7 @@ pub mod invvector;
 pub mod magic;
 pub mod netaddr;
 pub mod network_id;
+pub mod packet;
 pub mod packetheader;
 pub mod packetpayload;
 pub mod ping;
@@ -24,5 +25,3 @@ pub mod varint;
 pub mod varstr;
 pub mod verack;
 pub mod version;
-
-pub const MAX_PACKET_SIZE: usize = 4 * 1024 * 1024;

@@ -1,8 +1,6 @@
 use std::ops::DerefMut;
 
 use anyhow::Result;
-use bumpalo::Bump;
-use deadpool::unmanaged::Object;
 use sha2::{Digest, Sha256};
 use tokio::{
     io::{AsyncWriteExt, BufReader, BufWriter},
@@ -11,12 +9,10 @@ use tokio::{
 
 use crate::packets::{
     magic::ACTIVE_MAGIC,
-    packetheader::{PacketHeader, read_header},
-    packetpayload::{Packet, PacketPayloadType, read_payload},
+    packet::{Packet, SERIALIZE_POOL, read_packet},
+    packetpayload::PacketPayloadType,
     version::Version,
 };
-
-use super::{DESERIALIZE_POOL, SERIALIZE_POOL};
 
 #[derive(Debug)]
 pub struct Connection {
@@ -25,7 +21,7 @@ pub struct Connection {
 }
 
 impl Connection {
-    pub async fn write_packet<'a>(&mut self, packet: &PacketPayloadType<'_>) -> Result<()> {
+    pub async fn write_packet(&mut self, packet: &PacketPayloadType<'_>) -> Result<()> {
         let mut serialize_buffer = SERIALIZE_POOL.get().await.unwrap();
         let buf = serialize_buffer.deref_mut();
         packet.serialize(buf);
@@ -46,23 +42,8 @@ impl Connection {
         Ok(())
     }
 
-    pub async fn read_header(&mut self) -> Result<PacketHeader> {
-        read_header(&mut self.read_stream).await
-    }
-
-    pub async fn prepare_for_read(&self) -> Object<Bump> {
-        let mut v = DESERIALIZE_POOL.get().await.unwrap();
-        v.reset();
-        v
-    }
-
-    pub async fn read_packet<'a>(
-        &mut self,
-        header: PacketHeader,
-        allocator: &'a mut Object<Bump>,
-    ) -> Result<Packet<'a>> {
-        let payload = read_payload(&mut self.read_stream, allocator, &header).await?;
-        Ok(Packet { header, payload })
+    pub async fn read_packet(&mut self) -> Result<Packet> {
+        read_packet(&mut self.read_stream).await
     }
 }
 

@@ -1,7 +1,7 @@
 use anyhow::{Result, bail};
 use tokio::io::{AsyncRead, AsyncReadExt};
 
-use super::{MAX_PACKET_SIZE, magic::Magic};
+use super::{magic::Magic, packet::MAX_PACKET_SIZE};
 
 #[derive(Debug)]
 pub struct PacketHeader {

@@ -9,14 +9,9 @@ use tokio::io::AsyncReadExt;
 use super::{
     addr::Addr, addrv2::AddrV2, block::Block, buffer::Buffer, deepclone::DeepClone,
     getaddr::GetAddr, getdata::GetData, getheaders::GetHeaders, headers::Headers, inv::Inv,
-    packetheader::PacketHeader, ping::Ping, pong::Pong, sendaddrv2::SendAddrV2,
+    packet::AllocatorWithBuffer, ping::Ping, pong::Pong, sendaddrv2::SendAddrV2,
     sendheaders::SendHeaders, tx::Tx, varint::VarInt, verack::VerAck, version::Version,
 };
-
-pub struct Packet<'a> {
-    pub header: PacketHeader,
-    pub payload: Option<PacketPayloadType<'a>>,
-}
 
 pub trait PacketPayload<'a, 'b: 'a>:
     Clone + Debug + Default + DeepClone<'a, 'b> + Serializable<'a>
@@ -24,30 +19,32 @@ pub trait PacketPayload<'a, 'b: 'a>:
     fn command(&self) -> &'static [u8; 12];
 }
 
-pub async fn read_payload<'bump>(
+pub async fn read_payload(
     stream: &mut (impl AsyncReadExt + Unpin),
-    allocator: &'bump mut Bump,
-    header: &PacketHeader,
-) -> Result<Option<PacketPayloadType<'bump>>> {
-    let buffer = allocator.alloc_slice_fill_default::<u8>(header.length as usize);
-
+    buffer: &mut [u8],
+) -> Result<()> {
     // Read the entire packet into buffer
     stream.read_exact(buffer).await?;
+    Ok(())
+}
 
-    let mut hash = Sha256::digest(&buffer);
+pub fn deserialize_payload(
+    allocator_with_buffer: &AllocatorWithBuffer,
+    checksum: u32,
+    command: [u8; 12],
+) -> Result<Option<PacketPayloadType<'_>>> {
+    let buffer = allocator_with_buffer.borrow_buffer();
+    let allocator = allocator_with_buffer.borrow_allocator();
+    let mut hash = Sha256::digest(buffer);
     hash = Sha256::digest(hash);
     let shorthash = hash.as_slice()[..4].try_into().unwrap();
     let shorthash = u32::from_le_bytes(shorthash);
 
-    if shorthash != header.checksum {
-        bail!(
-            "invalid checksum, expected {} got {}",
-            header.checksum,
-            shorthash
-        )
+    if shorthash != checksum {
+        bail!("invalid checksum, expected {} got {}", checksum, shorthash)
     }
 
-    Ok(match header.command {
+    Ok(match command {
         super::version::VERSION_COMMAND => {
             let (v, _) = Version::deserialize(allocator, buffer)?;
             Some(PacketPayloadType::Version(Cow::Borrowed(v)))

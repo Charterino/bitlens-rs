@@ -3,12 +3,12 @@ use std::{borrow::Cow, sync::atomic::Ordering, time::Duration};
 use crate::{
     addrman,
     chainman::{CHAIN, validate_and_apply_headers},
+    ok_or_continue,
     packets::{blockheader::BlockHeader, getheaders::GetHeaders, packetpayload::PacketPayloadType},
     with_deadline,
 };
-use anyhow::Result;
 use slog_scope::info;
-use tokio::{select, time::Instant};
+use tokio::time::Instant;
 
 use super::{SYNCING_HEADERS, build_get_headers, need_ihd};
 
@@ -25,43 +25,21 @@ pub async fn sync_headers() {
         let mut deadline = Instant::now().checked_add(HEADERS_TIMEOUT).unwrap();
         let mut need_break = false;
         while !need_break {
-            let header = match with_deadline!(connection.inner.read_header(), deadline) {
-                Ok(h) => h,
-                Err(_) => {
-                    need_break = true;
-                    continue;
+            let packet = ok_or_continue!(with_deadline!(connection.inner.read_packet(), deadline));
+            let responses = packet.payload.with_payload(|payload| {
+                if let Some(p) = payload {
+                    handle_packet_during_headersync(p, &mut need_break, &mut deadline)
+                } else {
+                    None
                 }
-            };
-            let mut allocator = connection.inner.prepare_for_read().await;
-            let packet = match with_deadline!(
-                connection.inner.read_packet(header, &mut allocator),
-                deadline
-            ) {
-                Ok(p) => p,
-                Err(_) => {
-                    need_break = true;
-                    continue;
-                }
-            };
-            if let Some(payload) = packet.payload {
-                let responses = match handle_packet_during_headersync(
-                    payload,
-                    &mut need_break,
-                    &mut deadline,
-                ) {
-                    Ok(responses) => responses,
-                    Err(_) => {
+            });
+            drop(packet);
+
+            if let Some(responses) = responses {
+                for r in &responses {
+                    if connection.inner.write_packet(r).await.is_err() {
                         need_break = true;
                         continue;
-                    }
-                };
-                drop(allocator);
-                if let Some(responses) = responses {
-                    for r in &responses {
-                        if connection.inner.write_packet(r).await.is_err() {
-                            need_break = true;
-                            continue;
-                        }
                     }
                 }
             }
@@ -70,15 +48,15 @@ pub async fn sync_headers() {
     SYNCING_HEADERS.store(false, Ordering::Relaxed);
 }
 
-fn handle_packet_during_headersync<'a, 'c, 'b: 'c>(
-    packet: PacketPayloadType<'c>,
+fn handle_packet_during_headersync<'packet, 'ret: 'packet, 'params: 'ret>(
+    packet: &PacketPayloadType<'packet>,
     need_break: &mut bool,
     deadline: &mut Instant,
-) -> Result<Option<Vec<PacketPayloadType<'a>>>> {
+) -> Option<Vec<PacketPayloadType<'ret>>> {
     if let PacketPayloadType::Headers(headers) = packet {
         if headers.inner.is_empty() {
             *need_break = true;
-            return Ok(None);
+            return None;
         }
         if validate_and_apply_headers(
             &headers
@@ -90,23 +68,23 @@ fn handle_packet_during_headersync<'a, 'c, 'b: 'c>(
         .is_err()
         {
             *need_break = true;
-            return Ok(None);
+            return None;
         }
         let r = CHAIN.read().unwrap();
         info!("chainman: header sync progress"; "top hash" => r.top_header.header.human_hash(), "top number" => r.top_header.number);
         *deadline = Instant::now().checked_add(HEADERS_TIMEOUT).unwrap();
         if need_ihd() {
-            return Ok(Some(vec![PacketPayloadType::GetHeaders(Cow::Owned(
+            return Some(vec![PacketPayloadType::GetHeaders(Cow::Owned(
                 GetHeaders {
                     version: 70016,
                     block_locator: Cow::Owned(vec![Cow::Owned(headers.inner.last().unwrap().hash)]),
                     hash_stop: Cow::Owned([0u8; 32]),
                 },
-            ))]));
+            ))]);
         } else {
             *need_break = true;
-            return Ok(None);
+            return None;
         }
     }
-    Ok(None)
+    None
 }

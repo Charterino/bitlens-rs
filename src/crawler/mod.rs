@@ -138,14 +138,14 @@ async fn crawl(peer: &AddressPortNetwork, res: &mut CrawlResult) -> Result<()> {
         .write_packet(&PacketPayloadType::GetAddr(Cow::Owned(GetAddr {})))
         .await?;
     loop {
-        let header = connection.inner.read_header().await?;
         {
-            let mut allocator = connection.inner.prepare_for_read().await;
-            let packet = connection.inner.read_packet(header, &mut allocator).await?;
-            if let Some(payload) = &packet.payload {
-                handle_payload(payload);
-            }
-            res.packets_received_total += 1;
+            let packet = connection.inner.read_packet().await?;
+            packet.payload.with_payload(|payload| {
+                if let Some(payload) = payload {
+                    handle_payload(payload);
+                }
+                res.packets_received_total += 1;
+            });
         }
         addrman::update_peer_online(peer.clone(), connection.remote_version.services).await;
     }
