@@ -1,4 +1,7 @@
-use std::{borrow::Cow, fmt::Debug};
+use std::{
+    borrow::Cow,
+    fmt::{Debug, Display},
+};
 
 use anyhow::{Result, bail};
 use bumpalo::{Bump, collections::Vec};
@@ -28,6 +31,22 @@ pub async fn read_payload(
     Ok(())
 }
 
+#[derive(Debug)]
+pub struct InvalidChecksum {
+    pub reported_in_header: u32,
+    pub calculated_from_body: u32,
+}
+
+impl Display for InvalidChecksum {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "expected {:#X} got {:#X}",
+            self.reported_in_header, self.calculated_from_body
+        )
+    }
+}
+
 pub fn deserialize_payload(
     allocator_with_buffer: &AllocatorWithBuffer,
     checksum: u32,
@@ -41,7 +60,10 @@ pub fn deserialize_payload(
     let shorthash = u32::from_le_bytes(shorthash);
 
     if shorthash != checksum {
-        bail!("invalid checksum, expected {} got {}", checksum, shorthash)
+        bail!(InvalidChecksum {
+            reported_in_header: checksum,
+            calculated_from_body: shorthash
+        })
     }
 
     Ok(match command {
