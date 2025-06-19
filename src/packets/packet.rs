@@ -84,8 +84,7 @@ pub async fn read_packet(stream: &mut BufReader<OwnedReadHalf>) -> Result<Packet
                     allocator = Some(p);
                     break;
                 }
-                let rng_permit = rand::rng().random::<f64>() < 0.001; // 0.1% chance to drop this arena if we are currently over the limit
-                while rng_permit && current_size < limit {
+                while current_size < limit {
                     match CURRENT_POOL_SIZE.compare_exchange_weak(
                         current_size,
                         current_size - 1,
