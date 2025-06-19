@@ -27,6 +27,7 @@ pub static SERIALIZE_POOL: LazyLock<Pool<Vec<u8>>> = LazyLock::new(|| {
 });
 
 // So we start off with 128 4mb arenas. During block download we can have as many as 2k of them. After that, it's gonna go back to 128.
+// See deserializearenas.png for a drawing explaining this process.
 pub const DESERIALIZE_POOL_TIMEOUT: Duration = Duration::from_millis(100);
 pub const INITIAL_DESERIALIZE_ARENA_COUNT: usize = 128;
 pub const MAX_DESERIALIZE_ARENA_COUNT_DURING_BLOCKSYNC: usize = 2048;
