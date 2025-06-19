@@ -11,7 +11,6 @@ use bumpalo::{Bump, vec};
 use deadpool::unmanaged::Pool;
 use deadpool::unmanaged::{Object, PoolConfig};
 use ouroboros::self_referencing;
-use rand::Rng;
 use slog_scope::debug;
 use tokio::io::BufReader;
 use tokio::net::tcp::OwnedReadHalf;
@@ -84,7 +83,7 @@ pub async fn read_packet(stream: &mut BufReader<OwnedReadHalf>) -> Result<Packet
                     allocator = Some(p);
                     break;
                 }
-                while current_size < limit {
+                while current_size > limit {
                     match CURRENT_POOL_SIZE.compare_exchange_weak(
                         current_size,
                         current_size - 1,
