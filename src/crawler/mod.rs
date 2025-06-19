@@ -4,13 +4,17 @@ use std::{
 };
 
 use anyhow::{Error, Result, bail};
-use slog_scope::info;
+use slog_scope::{debug, info};
 use tokio::time::{self, Instant, sleep};
 
 use crate::{
     addrman::{self, peers_seen},
     connect::connect_and_handshake,
-    packets::{getaddr::GetAddr, network_id::NetworkId, packetpayload::PacketPayloadType},
+    packets::{
+        getaddr::GetAddr,
+        network_id::NetworkId,
+        packetpayload::{InvalidChecksum, PacketPayloadType},
+    },
     types::addressportnetwork::AddressPortNetwork,
 };
 
@@ -60,6 +64,8 @@ async fn crawl_with_backoff(peer: AddressPortNetwork) {
             fail_reasons.clear();
         }
     }
+    debug!("banning peer"; "peer" => peer.to_string(), "reasons" => fail_reasons.join(","));
+    addrman::delete_and_ban_peer(peer).await;
 }
 
 fn backoff_from_failed(failed_times: u32) -> Duration {
@@ -77,11 +83,33 @@ fn evaluate_crawl_result(
     failed_times: &mut u32,
 ) -> Option<String> {
     if result.connect_handshake_error.is_some() {
-        *failed_times += 1;
+        match result
+            .connect_handshake_error
+            .as_ref()
+            .unwrap()
+            .downcast_ref::<InvalidChecksum>()
+        {
+            Some(_) => {
+                // Instantly bad peers that do not follow the checksum requirements
+                *failed_times += 14;
+            }
+            None => {
+                *failed_times += 1;
+            }
+        }
         return Some(format!(
             "connect/handshake failed: {}",
             result.connect_handshake_error.as_ref().unwrap()
         ));
+    }
+
+    if disconnect_reason
+        .downcast_ref::<InvalidChecksum>()
+        .is_some()
+    {
+        // Instantly bad peers that do not follow the checksum requirements
+        *failed_times = 14;
+        return Some("invalid checksum".to_owned());
     }
 
     if result.should_insta_ban {
