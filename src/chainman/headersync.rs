@@ -3,7 +3,7 @@ use std::{borrow::Cow, sync::atomic::Ordering, time::Duration};
 use crate::{
     addrman,
     chainman::{CHAIN, validate_and_apply_headers},
-    ok_or_continue,
+    ok_or_break,
     packets::{blockheader::BlockHeader, getheaders::GetHeaders, packetpayload::PacketPayloadType},
     with_deadline,
 };
@@ -25,7 +25,7 @@ pub async fn sync_headers() {
         let mut deadline = Instant::now().checked_add(HEADERS_TIMEOUT).unwrap();
         let mut need_break = false;
         while !need_break {
-            let packet = ok_or_continue!(with_deadline!(connection.inner.read_packet(), deadline));
+            let packet = ok_or_break!(with_deadline!(connection.inner.read_packet(), deadline));
             let responses = packet.payload.with_payload(|payload| {
                 if let Some(p) = payload {
                     handle_packet_during_headersync(p, &mut need_break, &mut deadline)
