@@ -12,7 +12,7 @@ use deadpool::unmanaged::Pool;
 use deadpool::unmanaged::{Object, PoolConfig};
 use ouroboros::self_referencing;
 use rand::Rng;
-use slog_scope::{debug, info};
+use slog_scope::debug;
 use tokio::io::BufReader;
 use tokio::net::tcp::OwnedReadHalf;
 
@@ -152,7 +152,7 @@ pub async fn read_packet(stream: &mut BufReader<OwnedReadHalf>) -> Result<Packet
         ) {
             Ok(a) => Ok(a),
             Err(e) => {
-                info!("payload deserialize"; "e" => e.to_string());
+                debug!("failed to deserialize payload"; "e" => e.to_string());
                 Err(e)
             }
         },
