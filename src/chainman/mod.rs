@@ -8,6 +8,7 @@ use std::{
 };
 
 use anyhow::{Result, bail};
+use blocksync::sync_blocks;
 use chain::Chain;
 use headersync::sync_headers;
 use slog_scope::info;
@@ -18,6 +19,7 @@ use crate::{
         blockheader::BlockHeader, deepclone::DeepClone, getheaders::GetHeaders,
         packetpayload::PacketPayloadType,
     },
+    some_or_break,
     types::blockheaderwithnumber::BlockHeaderWithNumber,
 };
 
@@ -28,6 +30,7 @@ static DOWNLOADED_BLOCKS: AtomicU64 = AtomicU64::new(0); // It's important that 
 
 static CHAIN: LazyLock<RwLock<Chain>> = LazyLock::new(|| RwLock::new(Chain::default()));
 
+mod blocksync;
 mod chain;
 mod headersync;
 
@@ -39,6 +42,10 @@ pub async fn start() {
             sync_headers().await;
             let r = CHAIN.read().unwrap();
             info!("synced headers"; "top number" => r.top_header.number);
+        }
+        if need_ibd() {
+            info!("downloading missing block bodies..");
+            sync_blocks().await;
         }
     });
 }
@@ -68,6 +75,12 @@ fn need_ihd() -> bool {
         .unwrap()
         .as_secs();
     current_time - top_header_time > 24 * 3600
+}
+
+// Do we need to sync block bodies?
+fn need_ibd() -> bool {
+    let r = CHAIN.read().unwrap();
+    return r.top_header.number - DOWNLOADED_BLOCKS.load(Ordering::Relaxed) > 0;
 }
 
 // Constructs a `getheaders` packet with `BlockLocator` that allows the remote peer to detect that we are on the wrong branch
@@ -190,4 +203,32 @@ fn calculate_downloaded_blocks_w(r: &Chain) -> u64 {
         }
         last = r.known_headers.get(last.header.parent.as_slice()).unwrap();
     }
+}
+
+// Option<(all block hashes start from lowest to highest, number of the first block hash)>
+fn get_block_hashes_to_download() -> Option<(Vec<[u8; 32]>, u64)> {
+    let r = CHAIN.read().unwrap();
+    let downloaded = DOWNLOADED_BLOCKS.load(Ordering::Relaxed);
+    if downloaded > r.top_header.number {
+        return None;
+    }
+    let mut all = Vec::with_capacity((r.top_header.number - downloaded) as usize);
+
+    let mut c = &r.top_header;
+    let mut last_added: u64;
+    loop {
+        all.push(c.header.hash);
+        last_added = c.number;
+        if c.number == 0 {
+            break;
+        }
+        c = some_or_break!(r.known_headers.get(c.header.parent.as_slice()));
+
+        if c.fetched_full {
+            break;
+        }
+    }
+
+    all.reverse();
+    Some((all, last_added))
 }
