@@ -29,7 +29,7 @@
       devShells = forAllSystems (
         { pkgs, ... }:
         {
-          default = pkgs.mkShell {
+          default = pkgs.mkShell.override { stdenv = pkgs.clangStdenv; } {
             packages = with pkgs; [
               cargo
               rustfmt
@@ -39,7 +39,12 @@
               sqlite
               pprof
               graphviz
+              libllvm
+              llvmPackages_20.clang-unwrapped.lib
             ];
+            shellHook = ''
+              export LIBCLANG_PATH=${pkgs.libclang.lib}/lib
+            '';
           };
         }
       );
