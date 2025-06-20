@@ -69,55 +69,55 @@ pub fn deserialize_payload(
     Ok(match command {
         super::version::VERSION_COMMAND => {
             let (v, _) = Version::deserialize(allocator, buffer)?;
-            Some(PacketPayloadType::Version(Cow::Borrowed(v)))
+            Some(PacketPayloadType::Version(v))
         }
         super::verack::VERACK_COMMAND => {
             let (v, _) = VerAck::deserialize(allocator, buffer)?;
-            Some(PacketPayloadType::VerAck(Cow::Borrowed(v)))
+            Some(PacketPayloadType::VerAck(v))
         }
         super::ping::PING_COMMAND => {
             let (v, _) = Ping::deserialize(allocator, buffer)?;
-            Some(PacketPayloadType::Ping(Cow::Borrowed(v)))
+            Some(PacketPayloadType::Ping(v))
         }
         super::pong::PONG_COMMAND => {
             let (v, _) = Pong::deserialize(allocator, buffer)?;
-            Some(PacketPayloadType::Pong(Cow::Borrowed(v)))
+            Some(PacketPayloadType::Pong(v))
         }
         super::sendaddrv2::SENDADDRV2_COMMAND => {
             let (v, _) = SendAddrV2::deserialize(allocator, buffer)?;
-            Some(PacketPayloadType::SendAddrV2(Cow::Borrowed(v)))
+            Some(PacketPayloadType::SendAddrV2(v))
         }
         super::sendheaders::SENDHEADERS_COMMAND => {
             let (v, _) = SendHeaders::deserialize(allocator, buffer)?;
-            Some(PacketPayloadType::SendHeaders(Cow::Borrowed(v)))
+            Some(PacketPayloadType::SendHeaders(v))
         }
         super::tx::TX_COMMAND => {
             let (v, _) = Tx::deserialize(allocator, buffer)?;
-            Some(PacketPayloadType::Tx(Cow::Borrowed(v)))
+            Some(PacketPayloadType::Tx(v))
         }
         super::block::BLOCK_COMMAND => {
             let (v, _) = Block::deserialize(allocator, buffer)?;
-            Some(PacketPayloadType::Block(Cow::Borrowed(v)))
+            Some(PacketPayloadType::Block(v))
         }
         super::addr::ADDR_COMMAND => {
             let (v, _) = Addr::deserialize(allocator, buffer)?;
-            Some(PacketPayloadType::Addr(Cow::Borrowed(v)))
+            Some(PacketPayloadType::Addr(v))
         }
         super::addrv2::ADDRV2_COMMAND => {
             let (v, _) = AddrV2::deserialize(allocator, buffer)?;
-            Some(PacketPayloadType::AddrV2(Cow::Borrowed(v)))
+            Some(PacketPayloadType::AddrV2(v))
         }
         super::inv::INV_COMMAND => {
             let (v, _) = Inv::deserialize(allocator, buffer)?;
-            Some(PacketPayloadType::Inv(Cow::Borrowed(v)))
+            Some(PacketPayloadType::Inv(v))
         }
         super::headers::HEADERS_COMMAND => {
             let (v, _) = Headers::deserialize(allocator, buffer)?;
-            Some(PacketPayloadType::Headers(Cow::Borrowed(v)))
+            Some(PacketPayloadType::Headers(v))
         }
         super::getheaders::GETHEADERS_COMMAND => {
             let (v, _) = GetHeaders::deserialize(allocator, buffer)?;
-            Some(PacketPayloadType::GetHeaders(Cow::Borrowed(v)))
+            Some(PacketPayloadType::GetHeaders(v))
         }
         _ => None,
     })
@@ -125,14 +125,14 @@ pub fn deserialize_payload(
 
 pub trait Serializable<'bump>
 where
-    Self: Sized,
+    Self: Sized + Clone,
 {
     // While the structs themselves are going to be allocated in the bump allocator,
     // the scripts and other byte-arrays are going to be referenced and not copied.
     fn deserialize(
         allocator: &'bump bumpalo::Bump<1>,
         buffer: &'bump [u8],
-    ) -> Result<(&'bump Self, usize)>; // returned value is the length consumed
+    ) -> Result<(Cow<'bump, Self>, usize)>; // returned value is the length consumed
 
     fn serialize(&self, stream: &mut impl BufMut);
 }
@@ -140,6 +140,17 @@ where
 pub trait SerializableValue<'bump>
 where
     Self: Sized,
+{
+    // While the structs themselves are going to be allocated in the bump allocator,
+    // the scripts and other byte-arrays are going to be referenced and not copied.
+    fn deserialize(buffer: &'bump [u8]) -> Result<(Self, usize)>; // returned value is the length consumed
+
+    fn serialize(&self, stream: &mut impl BufMut);
+}
+
+pub trait SerializableArrayOfCows<'bump>
+where
+    Self: Sized + Clone,
 {
     // While the structs themselves are going to be allocated in the bump allocator,
     // the scripts and other byte-arrays are going to be referenced and not copied.
@@ -212,9 +223,9 @@ impl PacketPayloadType<'_> {
     }
 }
 
-impl<'a, T: Serializable<'a> + ToOwned> SerializableValue<'a> for Cow<'a, [Cow<'a, T>]> {
+impl<'a, T: Serializable<'a> + ToOwned> SerializableArrayOfCows<'a> for Cow<'a, [Cow<'a, T>]> {
     fn deserialize(allocator: &'a Bump<1>, buffer: &'a [u8]) -> Result<(Self, usize)> {
-        let (len, mut offset) = VarInt::deserialize(allocator, buffer)?;
+        let (len, mut offset) = VarInt::deserialize(buffer)?;
 
         let mut result: Vec<'a, Cow<'a, T>> = Vec::new_in(allocator);
         if result.try_reserve_exact(len as usize).is_err() {
@@ -223,7 +234,7 @@ impl<'a, T: Serializable<'a> + ToOwned> SerializableValue<'a> for Cow<'a, [Cow<'
         for _ in 0..len as usize {
             let (value, offset_delta) = T::deserialize(allocator, buffer.with_offset(offset)?)?;
             offset += offset_delta;
-            result.push(Cow::Borrowed(value));
+            result.push(value);
         }
 
         Ok((Cow::Borrowed(result.into_bump_slice()), offset))

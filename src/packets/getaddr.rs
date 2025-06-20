@@ -1,3 +1,7 @@
+use std::borrow::Cow;
+
+use anyhow::bail;
+
 use super::{
     deepclone::{DeepClone, MustOutlive},
     packetpayload::{PacketPayload, Serializable},
@@ -25,8 +29,14 @@ impl<'old, 'new: 'old> DeepClone<'old, 'new> for GetAddr {
 }
 
 impl<'a> Serializable<'a> for GetAddr {
-    fn deserialize(_: &'a bumpalo::Bump<1>, _: &'a [u8]) -> anyhow::Result<(&'a GetAddr, usize)> {
-        Ok((&GetAddr {}, 0))
+    fn deserialize(
+        a: &'a bumpalo::Bump<1>,
+        _: &'a [u8],
+    ) -> anyhow::Result<(Cow<'a, GetAddr>, usize)> {
+        match a.try_alloc(GetAddr {}) {
+            Ok(v) => Ok((Cow::Borrowed(v), 0)),
+            Err(e) => bail!(e),
+        }
     }
 
     fn serialize(&self, _: &mut impl bytes::BufMut) {}

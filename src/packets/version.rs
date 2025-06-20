@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use super::buffer::Buffer;
 use super::deepclone::{DeepClone, MustOutlive};
-use super::packetpayload::{Serializable, SerializableValue};
+use super::packetpayload::Serializable;
 use super::varstr::VarStr;
 use super::{netaddr::NetAddrShort, packetpayload::PacketPayload};
 use anyhow::{Result, anyhow, bail};
@@ -15,7 +15,7 @@ pub struct Version<'a> {
     pub addrrecv: Cow<'a, NetAddrShort<'a>>,
     pub addrfrom: Cow<'a, NetAddrShort<'a>>,
     pub nonce: u64,
-    pub user_agent: VarStr<'a>,
+    pub user_agent: Cow<'a, VarStr<'a>>,
     pub start_height: u32,
     pub version: u32,
     pub announce_relayed_transactions: bool,
@@ -35,7 +35,7 @@ impl<'old, 'new: 'old> DeepClone<'old, 'new> for Version<'old> {
             addrrecv: Cow::Owned(self.addrrecv.deep_clone()),
             addrfrom: Cow::Owned(self.addrfrom.deep_clone()),
             nonce: self.nonce,
-            user_agent: self.user_agent.deep_clone(),
+            user_agent: Cow::Owned(self.user_agent.deep_clone()),
             start_height: self.start_height,
             version: self.version,
             announce_relayed_transactions: self.announce_relayed_transactions,
@@ -53,20 +53,21 @@ impl<'a> Serializable<'a> for Version<'a> {
     fn deserialize(
         allocator: &'a bumpalo::Bump<1>,
         buffer: &'a [u8],
-    ) -> Result<(&'a Version<'a>, usize)> {
+    ) -> Result<(Cow<'a, Version<'a>>, usize)> {
         let version = buffer.get_u32_le(0)?;
         let services = buffer.get_u64_le(4)?;
         let timestamp = buffer.get_u64_le(12)?;
         let (addrrecv, _) = NetAddrShort::deserialize(allocator, buffer.with_offset(20)?)?;
         let (addrfrom, _) = NetAddrShort::deserialize(allocator, buffer.with_offset(46)?)?;
         let nonce = buffer.get_u64_le(72)?;
-        let (ua, offset) = VarStr::deserialize(allocator, buffer.with_offset(80)?)?;
+        let (ua, offset) =
+            <VarStr as Serializable>::deserialize(allocator, buffer.with_offset(80)?)?;
         let start_height = buffer.get_u32_le(80 + offset)?;
         match allocator.try_alloc(Version {
             services,
             timestamp,
-            addrrecv: Cow::Borrowed(addrrecv),
-            addrfrom: Cow::Borrowed(addrfrom),
+            addrrecv: addrrecv,
+            addrfrom: addrfrom,
             nonce,
             user_agent: ua,
             start_height,
@@ -79,9 +80,9 @@ impl<'a> Serializable<'a> for Version<'a> {
                         .get(84 + offset)
                         .ok_or(anyhow!("missing last byte in version"))?
                         != 0;
-                    return Ok((result, offset + 85));
+                    return Ok((Cow::Borrowed(result), offset + 85));
                 }
-                Ok((result, offset + 84))
+                Ok((Cow::Borrowed(result), offset + 84))
             }
             Err(e) => bail!(e),
         }
@@ -94,7 +95,7 @@ impl<'a> Serializable<'a> for Version<'a> {
         self.addrrecv.serialize(stream);
         self.addrfrom.serialize(stream);
         stream.put_u64_le(self.nonce);
-        self.user_agent.serialize(stream);
+        Serializable::serialize(&*self.user_agent, stream);
         stream.put_u32_le(self.start_height);
         if self.version >= 70001 {
             stream.put_u8(self.announce_relayed_transactions as u8);

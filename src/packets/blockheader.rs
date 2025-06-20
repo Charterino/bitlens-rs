@@ -103,7 +103,7 @@ impl<'a> Serializable<'a> for BlockHeader<'a> {
     fn deserialize(
         allocator: &'a bumpalo::Bump<1>,
         buffer: &'a [u8],
-    ) -> anyhow::Result<(&'a Self, usize)> {
+    ) -> anyhow::Result<(Cow<'a, Self>, usize)> {
         let version = buffer.get_u32_le(0)?;
         let parent = Cow::Borrowed(buffer.get_hash(4)?);
         let merkle_root = Cow::Borrowed(buffer.get_hash(36)?);
@@ -111,7 +111,7 @@ impl<'a> Serializable<'a> for BlockHeader<'a> {
         let bits = buffer.get_u32_le(72)?;
         let nonce = buffer.get_u32_le(76)?;
 
-        let (txs_count, offset) = VarInt::deserialize(allocator, buffer.with_offset(80)?)?;
+        let (txs_count, offset) = VarInt::deserialize(buffer.with_offset(80)?)?;
 
         let hash = Sha256::digest(buffer.get(0..80).unwrap());
         let hash = Sha256::digest(hash).into();
@@ -128,7 +128,7 @@ impl<'a> Serializable<'a> for BlockHeader<'a> {
         }) {
             Ok(result) => {
                 if result.is_valid() {
-                    Ok((result, 80 + offset))
+                    Ok((Cow::Borrowed(result), 80 + offset))
                 } else {
                     bail!("invalid header")
                 }

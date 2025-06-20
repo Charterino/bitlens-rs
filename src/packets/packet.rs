@@ -2,8 +2,10 @@ use std::sync::LazyLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
+use crate::RUNTIME;
 use crate::packets::packetpayload::{deserialize_payload, read_payload};
 
+use super::block::Block;
 use super::packetheader::{PacketHeader, read_header};
 use super::packetpayload::PacketPayloadType;
 use anyhow::Result;
@@ -59,6 +61,38 @@ pub struct PayloadWithAllocator {
     pub payload: Option<PacketPayloadType<'this>>,
 }
 
+impl PayloadWithAllocator {
+    pub fn with_block<F, R>(&self, user: F) -> R
+    where
+        F: FnOnce(&Block) -> R,
+    {
+        self.with_payload(|payload: &Option<PacketPayloadType>| {
+            if let PacketPayloadType::Block(b) =
+                payload.as_ref().expect("the payload to not be empty")
+            {
+                user(b)
+            } else {
+                unreachable!()
+            }
+        })
+    }
+
+    pub async fn with_block_async<F>(&self, user: F)
+    where
+        F: AsyncFnOnce(&Block),
+    {
+        self.with_payload(|payload: &Option<PacketPayloadType>| {
+            if let PacketPayloadType::Block(b) =
+                payload.as_ref().expect("the payload to not be empty")
+            {
+                RUNTIME.block_on(user(b))
+            } else {
+                unreachable!()
+            }
+        });
+    }
+}
+
 #[self_referencing]
 pub struct AllocatorWithBuffer {
     pub allocator: Object<Bump>,
@@ -68,6 +102,7 @@ pub struct AllocatorWithBuffer {
 }
 
 unsafe impl Send for AllocatorWithBuffer {}
+unsafe impl Sync for AllocatorWithBuffer {}
 
 pub async fn read_packet(stream: &mut BufReader<OwnedReadHalf>) -> Result<Packet> {
     let header = read_header(stream).await?;

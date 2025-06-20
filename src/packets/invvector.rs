@@ -33,7 +33,7 @@ impl<'a> Serializable<'a> for InventoryVector<'a> {
     fn deserialize(
         allocator: &'a bumpalo::Bump<1>,
         buffer: &'a [u8],
-    ) -> anyhow::Result<(&'a InventoryVector<'a>, usize)> {
+    ) -> anyhow::Result<(Cow<'a, InventoryVector<'a>>, usize)> {
         let raw_type = buffer.get_u32_le(0)?;
         let inv_type = match InventoryVectorType::from_u32(raw_type) {
             Some(inv_type) => inv_type,
@@ -46,7 +46,7 @@ impl<'a> Serializable<'a> for InventoryVector<'a> {
             inv_type,
             hash: Cow::Borrowed(hash),
         }) {
-            Ok(result) => Ok((result, 36)),
+            Ok(result) => Ok((Cow::Borrowed(result), 36)),
             Err(e) => bail!(e),
         }
     }

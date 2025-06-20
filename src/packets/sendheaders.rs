@@ -1,3 +1,7 @@
+use std::borrow::Cow;
+
+use anyhow::bail;
+
 use super::{
     deepclone::{DeepClone, MustOutlive},
     packetpayload::{PacketPayload, Serializable},
@@ -26,10 +30,13 @@ impl<'old, 'new: 'old> DeepClone<'old, 'new> for SendHeaders {
 
 impl<'a> Serializable<'a> for SendHeaders {
     fn deserialize(
-        _: &'a bumpalo::Bump<1>,
+        a: &'a bumpalo::Bump<1>,
         _: &'a [u8],
-    ) -> anyhow::Result<(&'a SendHeaders, usize)> {
-        Ok((&SendHeaders {}, 0))
+    ) -> anyhow::Result<(Cow<'a, SendHeaders>, usize)> {
+        match a.try_alloc(SendHeaders {}) {
+            Ok(v) => Ok((Cow::Borrowed(v), 0)),
+            Err(e) => bail!(e),
+        }
     }
 
     fn serialize(&self, _: &mut impl bytes::BufMut) {}

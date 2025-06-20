@@ -5,7 +5,7 @@ use anyhow::bail;
 use super::{
     blockheader::BlockHeader,
     deepclone::{DeepClone, MustOutlive},
-    packetpayload::{PacketPayload, Serializable, SerializableValue},
+    packetpayload::{PacketPayload, Serializable, SerializableArrayOfCows},
 };
 
 #[derive(Debug, Clone, Default)]
@@ -40,12 +40,12 @@ impl<'a> Serializable<'a> for Headers<'a> {
     fn deserialize(
         allocator: &'a bumpalo::Bump<1>,
         buffer: &'a [u8],
-    ) -> anyhow::Result<(&'a Self, usize)> {
+    ) -> anyhow::Result<(Cow<'a, Self>, usize)> {
         let (deserialized, consumed) = Cow::deserialize(allocator, buffer)?;
         match allocator.try_alloc(Self {
             inner: deserialized,
         }) {
-            Ok(result) => Ok((result, consumed)),
+            Ok(result) => Ok((Cow::Borrowed(result), consumed)),
             Err(e) => bail!(e),
         }
     }

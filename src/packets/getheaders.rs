@@ -46,9 +46,9 @@ impl<'a> Serializable<'a> for GetHeaders<'a> {
     fn deserialize(
         allocator: &'a bumpalo::Bump<1>,
         buffer: &'a [u8],
-    ) -> anyhow::Result<(&'a Self, usize)> {
+    ) -> anyhow::Result<(Cow<'a, Self>, usize)> {
         let version = buffer.get_u32_le(0)?;
-        let (length, mut offset) = VarInt::deserialize(allocator, buffer.with_offset(4)?)?;
+        let (length, mut offset) = VarInt::deserialize(buffer.with_offset(4)?)?;
         offset += 4;
         let mut block_locator = Vec::with_capacity(length as usize);
         for _ in 0..length as usize {
@@ -62,7 +62,7 @@ impl<'a> Serializable<'a> for GetHeaders<'a> {
             block_locator: Cow::Owned(block_locator),
             hash_stop: Cow::Borrowed(hash_stop),
         }) {
-            Ok(result) => Ok((result, offset + 32)),
+            Ok(result) => Ok((Cow::Borrowed(result), offset + 32)),
             Err(e) => bail!(e),
         }
     }

@@ -8,7 +8,7 @@ use super::{
     blockheader::BlockHeader,
     buffer::Buffer,
     deepclone::{DeepClone, MustOutlive},
-    packetpayload::{PacketPayload, Serializable, SerializableValue},
+    packetpayload::{PacketPayload, Serializable, SerializableArrayOfCows},
     tx::Tx,
 };
 
@@ -50,12 +50,12 @@ impl<'a> Serializable<'a> for Block<'a> {
     fn deserialize(
         allocator: &'a bumpalo::Bump<1>,
         buffer: &'a [u8],
-    ) -> anyhow::Result<(&'a Block<'a>, usize)> {
+    ) -> anyhow::Result<(Cow<'a, Block<'a>>, usize)> {
         let (header, _) = BlockHeader::deserialize(allocator, buffer)?;
         // the header deserialization will read the number of txs, but the `txs` deserializer will also read it.
         // Start deserializing from offset 80 instead of the offset returned by header deserializer, because the header's size is 80+txlenlen
 
-        let (txs, offset) = <Cow<'a, [Cow<'a, Tx<'a>>]> as SerializableValue>::deserialize(
+        let (txs, offset) = <Cow<'a, [Cow<'a, Tx<'a>>]> as SerializableArrayOfCows>::deserialize(
             allocator,
             buffer.with_offset(80)?,
         )?;
@@ -76,10 +76,10 @@ impl<'a> Serializable<'a> for Block<'a> {
         }
 
         match allocator.try_alloc(Block {
-            header: Cow::Borrowed(header),
+            header: header,
             txs,
         }) {
-            Ok(result) => Ok((result, offset + 80)),
+            Ok(result) => Ok((Cow::Borrowed(result), offset + 80)),
             Err(e) => bail!(e),
         }
     }

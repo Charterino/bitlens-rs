@@ -7,7 +7,7 @@ use sha2::{Digest, Sha256};
 use super::{
     buffer::Buffer,
     deepclone::{DeepClone, MustOutlive},
-    packetpayload::{PacketPayload, Serializable, SerializableValue},
+    packetpayload::{PacketPayload, Serializable, SerializableArrayOfCows, SerializableValue},
     varint::VarInt,
     varstr::VarStr,
 };
@@ -18,7 +18,7 @@ pub struct Tx<'a> {
     pub locktime: u32,
     pub txins: Cow<'a, [Cow<'a, TxIn<'a>>]>,
     pub txouts: Cow<'a, [Cow<'a, TxOut<'a>>]>,
-    pub witness_data: Option<Cow<'a, [Cow<'a, [VarStr<'a>]>]>>,
+    pub witness_data: Option<Cow<'a, [Cow<'a, [Cow<'a, VarStr<'a>>]>]>>,
 
     pub hash: [u8; 32], // calculated during deserialization
 }
@@ -61,7 +61,7 @@ impl<'old, 'new: 'old> DeepClone<'old, 'new> for Tx<'old> {
 }
 
 impl<'a> Serializable<'a> for Tx<'a> {
-    fn deserialize(allocator: &'a Bump<1>, buffer: &'a [u8]) -> Result<(&'a Tx<'a>, usize)> {
+    fn deserialize(allocator: &'a Bump<1>, buffer: &'a [u8]) -> Result<(Cow<'a, Tx<'a>>, usize)> {
         let version = buffer.get_u32_le(0)?;
 
         let has_witness_data = match buffer.get(4..6) {
@@ -72,7 +72,7 @@ impl<'a> Serializable<'a> for Tx<'a> {
         let mut offset = if has_witness_data { 6 } else { 4 };
 
         let (txins, offset_delta) =
-            <Cow<'a, [Cow<'a, TxIn<'a>>]> as SerializableValue>::deserialize(
+            <Cow<'a, [Cow<'a, TxIn<'a>>]> as SerializableArrayOfCows>::deserialize(
                 allocator,
                 buffer.with_offset(offset)?,
             )?;
@@ -81,7 +81,7 @@ impl<'a> Serializable<'a> for Tx<'a> {
             bail!("0 txins")
         }
         let (txouts, offset_delta) =
-            <Cow<_> as SerializableValue>::deserialize(allocator, buffer.with_offset(offset)?)?;
+            <Cow<'a, [Cow<'a, TxOut<'a>>]>>::deserialize(allocator, buffer.with_offset(offset)?)?;
         offset += offset_delta;
 
         let (witnesses, witnesses_start) = if has_witness_data {
@@ -92,7 +92,7 @@ impl<'a> Serializable<'a> for Tx<'a> {
             }
             for _ in 0..txins.len() {
                 let (components_count, offset_delta) =
-                    VarInt::deserialize(allocator, buffer.with_offset(offset)?)?;
+                    VarInt::deserialize(buffer.with_offset(offset)?)?;
                 offset += offset_delta;
                 let mut components = Vec::new_in(allocator);
                 if components
@@ -102,8 +102,10 @@ impl<'a> Serializable<'a> for Tx<'a> {
                     bail!("allocation failed");
                 }
                 for _ in 0..components_count as usize {
-                    let (component, offset_delta) =
-                        VarStr::deserialize(allocator, buffer.with_offset(offset)?)?;
+                    let (component, offset_delta) = <VarStr as Serializable>::deserialize(
+                        allocator,
+                        buffer.with_offset(offset)?,
+                    )?;
                     offset += offset_delta;
                     components.push(component);
                 }
@@ -136,7 +138,7 @@ impl<'a> Serializable<'a> for Tx<'a> {
             witness_data: witnesses,
             hash: second_pass.into(),
         }) {
-            Ok(result) => Ok((result, offset + 4)),
+            Ok(result) => Ok((Cow::Borrowed(result), offset + 4)),
             Err(e) => bail!(e),
         }
     }
@@ -156,7 +158,7 @@ impl<'a> Serializable<'a> for Tx<'a> {
         let length = self.txouts.len() as VarInt;
         length.serialize(stream);
         for n in 0..length as usize {
-            self.txouts.get(n).unwrap().serialize(stream);
+            Serializable::serialize(&*self.txouts[n], stream);
         }
 
         if let Some(witnesses) = &self.witness_data {
@@ -166,7 +168,7 @@ impl<'a> Serializable<'a> for Tx<'a> {
                 witness_length.serialize(stream);
                 for j in 0..witness_length as usize {
                     let witness_component = witness.get(j).unwrap();
-                    witness_component.serialize(stream);
+                    Serializable::serialize(&**witness_component, stream);
                 }
             }
         }
@@ -180,7 +182,7 @@ pub struct TxIn<'a> {
     pub prevout_hash: Cow<'a, [u8; 32]>,
     pub prevout_index: u32,
     pub sequence: u32,
-    pub sig_script: VarStr<'a>,
+    pub sig_script: Cow<'a, VarStr<'a>>,
 }
 
 impl<'old> MustOutlive<'old> for TxIn<'old> {
@@ -195,7 +197,7 @@ impl<'old, 'new: 'old> DeepClone<'old, 'new> for TxIn<'old> {
             prevout_hash: Cow::Owned(prevout_hash),
             prevout_index: self.prevout_index,
             sequence: self.sequence,
-            sig_script,
+            sig_script: Cow::Owned(sig_script),
         }
     }
 }
@@ -204,10 +206,11 @@ impl<'a> Serializable<'a> for TxIn<'a> {
     fn deserialize(
         allocator: &'a bumpalo::Bump<1>,
         buffer: &'a [u8],
-    ) -> anyhow::Result<(&'a TxIn<'a>, usize)> {
+    ) -> anyhow::Result<(Cow<'a, TxIn<'a>>, usize)> {
         let hash = buffer.get_hash(0)?;
         let index = buffer.get_u32_le(32)?;
-        let (script, offset) = VarStr::deserialize(allocator, buffer.with_offset(36)?)?;
+        let (script, offset) =
+            <VarStr as Serializable>::deserialize(allocator, buffer.with_offset(36)?)?;
         let sequence = buffer.get_u32_le(offset + 36)?;
         match allocator.try_alloc(TxIn {
             prevout_hash: Cow::Borrowed(hash),
@@ -215,7 +218,7 @@ impl<'a> Serializable<'a> for TxIn<'a> {
             sequence,
             sig_script: script,
         }) {
-            Ok(result) => Ok((result, offset + 40)),
+            Ok(result) => Ok((Cow::Borrowed(result), offset + 40)),
             Err(e) => bail!(e),
         }
     }
@@ -223,7 +226,7 @@ impl<'a> Serializable<'a> for TxIn<'a> {
     fn serialize(&self, stream: &mut impl bytes::BufMut) {
         stream.put(self.prevout_hash.as_slice());
         stream.put_u32_le(self.prevout_index);
-        self.sig_script.serialize(stream);
+        Serializable::serialize(&*self.sig_script, stream);
         stream.put_u32_le(self.sequence);
     }
 }
@@ -231,7 +234,7 @@ impl<'a> Serializable<'a> for TxIn<'a> {
 #[derive(Default, Clone, Debug)]
 pub struct TxOut<'a> {
     pub value: u64,
-    pub script: VarStr<'a>,
+    pub script: Cow<'a, VarStr<'a>>,
 }
 
 impl<'old> MustOutlive<'old> for TxOut<'old> {
@@ -243,7 +246,7 @@ impl<'old, 'new: 'old> DeepClone<'old, 'new> for TxOut<'old> {
         let script = self.script.deep_clone();
         Self::WithLifetime {
             value: self.value,
-            script,
+            script: Cow::Owned(script),
         }
     }
 }
@@ -252,17 +255,43 @@ impl<'a> Serializable<'a> for TxOut<'a> {
     fn deserialize(
         allocator: &'a bumpalo::Bump<1>,
         buffer: &'a [u8],
-    ) -> anyhow::Result<(&'a TxOut<'a>, usize)> {
+    ) -> anyhow::Result<(Cow<'a, TxOut<'a>>, usize)> {
         let value = buffer.get_u64_le(0)?;
-        let (script, offset) = VarStr::deserialize(allocator, buffer.with_offset(8)?)?;
+        let (script, offset) =
+            <VarStr as Serializable>::deserialize(allocator, buffer.with_offset(8)?)?;
         match allocator.try_alloc(TxOut { value, script }) {
-            Ok(result) => Ok((result, offset + 8)),
+            Ok(result) => Ok((Cow::Borrowed(result), offset + 8)),
             Err(e) => bail!(e),
         }
     }
 
     fn serialize(&self, stream: &mut impl bytes::BufMut) {
         stream.put_u64_le(self.value);
-        self.script.serialize(stream);
+        Serializable::serialize(&*self.script, stream);
+    }
+}
+
+impl<'script> SerializableValue<'script> for TxOut<'static> {
+    fn deserialize(buffer: &'script [u8]) -> Result<(Self, usize)> {
+        let value = buffer.get_u64_le(0)?;
+        let (script, offset) = <VarStr as SerializableValue>::deserialize(buffer.with_offset(8)?)?;
+        Ok((
+            TxOut {
+                value,
+                script: Cow::Owned(script),
+            },
+            offset + 8,
+        ))
+    }
+
+    fn serialize(&self, stream: &mut impl bytes::BufMut) {
+        stream.put_u64_le(self.value);
+        Serializable::serialize(&*self.script, stream);
+    }
+}
+
+impl<'short, 'long: 'short> TxOut<'long> {
+    pub fn covariant(&self) -> &TxOut<'short> {
+        unsafe { std::mem::transmute(self) }
     }
 }

@@ -39,7 +39,7 @@ impl<'a> Serializable<'a> for NetAddrShort<'a> {
     fn deserialize(
         allocator: &'a bumpalo::Bump<1>,
         buffer: &'a [u8],
-    ) -> Result<(&'a NetAddrShort<'a>, usize)> {
+    ) -> Result<(Cow<'a, NetAddrShort<'a>>, usize)> {
         match buffer.get(8..24) {
             Some(b) => {
                 match allocator.try_alloc(NetAddrShort {
@@ -47,7 +47,7 @@ impl<'a> Serializable<'a> for NetAddrShort<'a> {
                     addr: Cow::Borrowed(b.try_into().unwrap()),
                     port: buffer.get_u16(24)?,
                 }) {
-                    Ok(result) => Ok((result, 26)),
+                    Ok(result) => Ok((Cow::Borrowed(result), 26)),
                     Err(e) => bail!(e),
                 }
             }
@@ -90,7 +90,7 @@ impl<'a> Serializable<'a> for NetAddr<'a> {
     fn deserialize(
         allocator: &'a bumpalo::Bump<1>,
         buffer: &'a [u8],
-    ) -> Result<(&'a NetAddr<'a>, usize)> {
+    ) -> Result<(Cow<'a, NetAddr<'a>>, usize)> {
         match allocator.try_alloc(NetAddr {
             time: buffer.get_u32_le(0)?,
             services: buffer.get_u64_le(4)?,
@@ -102,7 +102,7 @@ impl<'a> Serializable<'a> for NetAddr<'a> {
             ),
             port: buffer.get_u16(28)?,
         }) {
-            Ok(result) => Ok((result, 30)),
+            Ok(result) => Ok((Cow::Borrowed(result), 30)),
             Err(e) => bail!(e),
         }
     }
@@ -117,7 +117,7 @@ impl<'a> Serializable<'a> for NetAddr<'a> {
 
 #[derive(Clone, Debug)]
 pub struct NetAddrV2<'a> {
-    pub address: VarStr<'a>,
+    pub address: Cow<'a, VarStr<'a>>,
     pub services: VarInt,
     pub time: u32,
     pub port: u16,
@@ -131,7 +131,7 @@ impl<'old> MustOutlive<'old> for NetAddrV2<'old> {
 impl<'old, 'new: 'old> DeepClone<'old, 'new> for NetAddrV2<'old> {
     fn deep_clone(&self) -> Self::WithLifetime<'new> {
         Self::WithLifetime {
-            address: self.address.deep_clone(),
+            address: Cow::Owned(self.address.deep_clone()),
             services: self.services,
             time: self.time,
             port: self.port,
@@ -144,16 +144,17 @@ impl<'a> Serializable<'a> for NetAddrV2<'a> {
     fn deserialize(
         allocator: &'a bumpalo::Bump<1>,
         buffer: &'a [u8],
-    ) -> Result<(&'a NetAddrV2<'a>, usize)> {
+    ) -> Result<(Cow<'a, NetAddrV2<'a>>, usize)> {
         let time = buffer.get_u32_le(0)?;
-        let (services, mut offset) = VarInt::deserialize(allocator, buffer.with_offset(4)?)?;
+        let (services, mut offset) = VarInt::deserialize(buffer.with_offset(4)?)?;
         offset += 4;
         let network_id = *buffer
             .get(offset)
             .ok_or(anyhow!("not enough bytes for netaddrv2"))?;
         let network_id = NetworkId::from_u8(network_id).ok_or(anyhow!("invalid network_id"))?;
         offset += 1;
-        let (address, offset_delta) = VarStr::deserialize(allocator, buffer.with_offset(offset)?)?;
+        let (address, offset_delta) =
+            <VarStr as Serializable>::deserialize(allocator, buffer.with_offset(offset)?)?;
         offset += offset_delta;
         let port = buffer.get_u16(offset)?;
         match allocator.try_alloc(NetAddrV2 {
@@ -163,7 +164,7 @@ impl<'a> Serializable<'a> for NetAddrV2<'a> {
             port,
             network_id,
         }) {
-            Ok(result) => Ok((result, offset + 2)),
+            Ok(result) => Ok((Cow::Borrowed(result), offset + 2)),
             Err(e) => bail!(e),
         }
     }
@@ -172,7 +173,7 @@ impl<'a> Serializable<'a> for NetAddrV2<'a> {
         stream.put_u32_le(self.time);
         self.services.serialize(stream);
         stream.put_u8(self.network_id.to_u8().unwrap());
-        self.address.serialize(stream);
+        Serializable::serialize(&*self.address, stream);
         stream.put_u16(self.port);
     }
 }
