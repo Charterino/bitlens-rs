@@ -2,7 +2,10 @@
 
 use std::{
     net::ToSocketAddrs,
-    sync::mpsc::{Receiver, channel},
+    sync::{
+        LazyLock,
+        mpsc::{Receiver, channel},
+    },
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -11,6 +14,7 @@ use log::setup_logging;
 use packets::network_id::NetworkId;
 use slog_scope::{debug, info};
 use tokio::{
+    runtime::Runtime,
     select,
     time::{Instant, sleep_until},
 };
@@ -24,6 +28,7 @@ pub mod crawler;
 pub mod db;
 pub mod log;
 pub mod packets;
+pub mod tx;
 pub mod types;
 pub mod util;
 
@@ -39,10 +44,19 @@ const DNS_SEEDS: &[&str] = &[
     "seed.mainnet.achownodes.xyz",
 ];
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    let _guard = setup_logging();
+pub static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+});
 
+fn main() -> Result<()> {
+    RUNTIME.block_on(async_main())
+}
+
+async fn async_main() -> Result<()> {
+    let _guard = setup_logging();
     let ctrl_c_events = ctrl_channel()?;
 
     info!("starting bitlens..");
