@@ -1,3 +1,4 @@
+pub mod arena;
 pub mod compact;
 pub mod genesis;
 pub mod merkle;
