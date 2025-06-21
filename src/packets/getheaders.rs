@@ -1,5 +1,5 @@
 use super::{
-    Array,
+    SupercowVec,
     buffer::Buffer,
     deepclone::{DeepClone, MustOutlive},
     packetpayload::{PacketPayload, Serializable, SerializableValue},
@@ -11,7 +11,7 @@ use supercow::Supercow;
 #[derive(Debug, Clone)]
 pub struct GetHeaders<'a> {
     pub version: u32,
-    pub block_locator: Array<'a, [u8; 32]>,
+    pub block_locator: SupercowVec<'a, [u8; 32]>,
     pub hash_stop: Supercow<'a, [u8; 32]>,
 }
 
@@ -46,7 +46,7 @@ impl<'old, 'new: 'old> DeepClone<'old, 'new> for GetHeaders<'old> {
         Self::WithLifetime {
             version: self.version,
             hash_stop: Supercow::owned(*self.hash_stop),
-            block_locator: Array {
+            block_locator: SupercowVec {
                 inner: Supercow::owned(locator),
             },
         }
@@ -71,7 +71,7 @@ impl<'a> Serializable<'a> for GetHeaders<'a> {
         let hash_stop = buffer.get_hash(offset)?;
         match allocator.try_alloc(Self {
             version,
-            block_locator: Array {
+            block_locator: SupercowVec {
                 inner: Supercow::borrowed(block_locator.into_bump_slice()),
             },
             hash_stop: Supercow::borrowed(hash_stop),

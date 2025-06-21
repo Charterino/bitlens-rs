@@ -1,8 +1,10 @@
 use super::{
-    Array,
+    SupercowVec,
     buffer::Buffer,
     deepclone::{DeepClone, MustOutlive},
-    packetpayload::{PacketPayload, Serializable, SerializableArrayOfCows, SerializableValue},
+    packetpayload::{
+        PacketPayload, Serializable, SerializableSupercowVecOfCows, SerializableValue,
+    },
     varint::VarInt,
     varstr::VarStr,
 };
@@ -15,9 +17,9 @@ use supercow::Supercow;
 pub struct Tx<'a> {
     pub version: u32,
     pub locktime: u32,
-    pub txins: Array<'a, TxIn<'a>>,
-    pub txouts: Array<'a, TxOut<'a>>,
-    pub witness_data: Option<Array<'a, Array<'a, VarStr<'a>>>>,
+    pub txins: SupercowVec<'a, TxIn<'a>>,
+    pub txouts: SupercowVec<'a, TxOut<'a>>,
+    pub witness_data: Option<SupercowVec<'a, SupercowVec<'a, VarStr<'a>>>>,
     pub hash: [u8; 32], // calculated during deserialization
 }
 
@@ -50,10 +52,10 @@ impl<'old, 'new: 'old> DeepClone<'old, 'new> for Tx<'old> {
         Self::WithLifetime {
             version: self.version,
             locktime: self.locktime,
-            txins: Array {
+            txins: SupercowVec {
                 inner: Supercow::owned(txins),
             },
-            txouts: Array {
+            txouts: SupercowVec {
                 inner: Supercow::owned(txouts),
             },
             witness_data: None,
@@ -76,13 +78,15 @@ impl<'a> Serializable<'a> for Tx<'a> {
 
         let mut offset = if has_witness_data { 6 } else { 4 };
 
-        let (txins, offset_delta) = Array::deserialize(allocator, buffer.with_offset(offset)?)?;
+        let (txins, offset_delta) =
+            SupercowVec::deserialize(allocator, buffer.with_offset(offset)?)?;
         offset += offset_delta;
         if txins.inner.is_empty() {
             bail!("0 txins")
         }
 
-        let (txouts, offset_delta) = Array::deserialize(allocator, buffer.with_offset(offset)?)?;
+        let (txouts, offset_delta) =
+            SupercowVec::deserialize(allocator, buffer.with_offset(offset)?)?;
         offset += offset_delta;
 
         let (witnesses, witnesses_start) = if has_witness_data {
@@ -90,12 +94,12 @@ impl<'a> Serializable<'a> for Tx<'a> {
             let mut wits = Vec::with_capacity_in(txins.inner.len(), allocator);
             for _ in 0..txins.inner.len() {
                 let (components, offset_delta) =
-                    Array::deserialize(allocator, buffer.with_offset(offset)?)?;
+                    SupercowVec::deserialize(allocator, buffer.with_offset(offset)?)?;
                 offset += offset_delta;
                 wits.push(Supercow::owned(components));
             }
             let bump_slice = wits.into_bump_slice();
-            let wits = Array {
+            let wits = SupercowVec {
                 inner: Supercow::borrowed(bump_slice),
             };
             (Some(wits), start)

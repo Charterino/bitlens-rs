@@ -29,11 +29,11 @@ pub mod verack;
 pub mod version;
 
 #[derive(Debug)]
-pub struct Array<'a, T> {
+pub struct SupercowVec<'a, T> {
     pub inner: Supercow<'a, Vec<Supercow<'a, T>>, [Supercow<'a, T>]>,
 }
 
-impl<T> Default for Array<'_, T> {
+impl<T> Default for SupercowVec<'_, T> {
     fn default() -> Self {
         Self {
             inner: Supercow::owned(vec![]),
@@ -41,7 +41,7 @@ impl<T> Default for Array<'_, T> {
     }
 }
 
-impl<T: Clone> Clone for Array<'_, T> {
+impl<T: Clone> Clone for SupercowVec<'_, T> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),

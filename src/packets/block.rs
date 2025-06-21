@@ -1,9 +1,9 @@
 use super::{
-    Array,
+    SupercowVec,
     blockheader::BlockHeader,
     buffer::Buffer,
     deepclone::{DeepClone, MustOutlive},
-    packetpayload::{PacketPayload, Serializable, SerializableArrayOfCows},
+    packetpayload::{PacketPayload, Serializable, SerializableSupercowVecOfCows},
     tx::Tx,
 };
 use crate::util::merkle::MerkleTree;
@@ -13,7 +13,7 @@ use supercow::Supercow;
 #[derive(Debug, Clone)]
 pub struct Block<'a> {
     pub header: Supercow<'a, BlockHeader<'a>>,
-    pub txs: Array<'a, Tx<'a>>,
+    pub txs: SupercowVec<'a, Tx<'a>>,
 }
 
 impl Default for Block<'_> {
@@ -48,7 +48,7 @@ impl<'old, 'new: 'old> DeepClone<'old, 'new> for Block<'old> {
             .collect();
         Self::WithLifetime {
             header: Supercow::owned(header),
-            txs: Array {
+            txs: SupercowVec {
                 inner: Supercow::owned(txs),
             },
         }
@@ -64,7 +64,7 @@ impl<'a> Serializable<'a> for Block<'a> {
         // the header deserialization will read the number of txs, but the `txs` deserializer will also read it.
         // Start deserializing from offset 80 instead of the offset returned by header deserializer, because the header's size is 80+txlenlen
 
-        let (txs, offset) = Array::<Tx<'a>>::deserialize(allocator, buffer.with_offset(80)?)?;
+        let (txs, offset) = SupercowVec::<Tx<'a>>::deserialize(allocator, buffer.with_offset(80)?)?;
 
         // Verify that this block is `correct`, as in the transactions inside actually correspond to the merkle tree in the header.
         // Compute the merkle root and make sure it's the same as in the header

@@ -1,8 +1,8 @@
 use super::{
-    Array,
+    SupercowVec,
     deepclone::{DeepClone, MustOutlive},
     invvector::InventoryVector,
-    packetpayload::{PacketPayload, Serializable, SerializableArrayOfCows},
+    packetpayload::{PacketPayload, Serializable, SerializableSupercowVecOfCows},
 };
 use anyhow::bail;
 use supercow::Supercow;
@@ -10,7 +10,7 @@ use supercow::Supercow;
 #[derive(Clone, Debug, Default)]
 pub struct Inv<'a> {
     //pub inner: Supercow<'a, std::vec::Vec<InventoryVector<'a>>, [InventoryVector<'a>]>,
-    pub inner: Array<'a, InventoryVector<'a>>,
+    pub inner: SupercowVec<'a, InventoryVector<'a>>,
 }
 
 pub const INV_COMMAND: [u8; 12] = *b"inv\0\0\0\0\0\0\0\0\0";
@@ -33,7 +33,7 @@ impl<'old, 'new: 'old> DeepClone<'old, 'new> for Inv<'old> {
             .map(Supercow::owned)
             .collect();
         Self::WithLifetime {
-            inner: Array {
+            inner: SupercowVec {
                 inner: Supercow::owned(invs),
             },
         }
@@ -45,7 +45,7 @@ impl<'a> Serializable<'a> for Inv<'a> {
         allocator: &'a bumpalo::Bump<1>,
         buffer: &'a [u8],
     ) -> anyhow::Result<(Supercow<'a, Self>, usize)> {
-        let (deserialized, consumed) = Array::deserialize(allocator, buffer)?;
+        let (deserialized, consumed) = SupercowVec::deserialize(allocator, buffer)?;
         match allocator.try_alloc(Inv {
             inner: deserialized,
         }) {

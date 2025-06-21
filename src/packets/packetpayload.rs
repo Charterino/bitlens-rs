@@ -7,7 +7,7 @@ use supercow::Supercow;
 use tokio::io::AsyncReadExt;
 
 use super::{
-    Array, addr::Addr, addrv2::AddrV2, block::Block, buffer::Buffer, deepclone::DeepClone,
+    SupercowVec, addr::Addr, addrv2::AddrV2, block::Block, buffer::Buffer, deepclone::DeepClone,
     getaddr::GetAddr, getdata::GetData, getheaders::GetHeaders, headers::Headers, inv::Inv,
     packet::AllocatorWithBuffer, ping::Ping, pong::Pong, sendaddrv2::SendAddrV2,
     sendheaders::SendHeaders, tx::Tx, varint::VarInt, verack::VerAck, version::Version,
@@ -145,7 +145,7 @@ where
     fn serialize(&self, stream: &mut impl BufMut);
 }
 
-pub trait SerializableArrayOfCows<'bump> {
+pub trait SerializableSupercowVecOfCows<'bump> {
     // While the structs themselves are going to be allocated in the bump allocator,
     // the scripts and other byte-arrays are going to be referenced and not copied.
     fn deserialize(
@@ -219,7 +219,7 @@ impl PacketPayloadType<'_> {
     }
 }
 
-impl<'a, T: Serializable<'a>> SerializableArrayOfCows<'a> for Array<'a, T> {
+impl<'a, T: Serializable<'a>> SerializableSupercowVecOfCows<'a> for SupercowVec<'a, T> {
     fn deserialize(allocator: &'a Bump<1>, buffer: &'a [u8]) -> Result<(Self, usize)> {
         let (len, mut offset) = VarInt::deserialize(buffer)?;
 
@@ -233,7 +233,7 @@ impl<'a, T: Serializable<'a>> SerializableArrayOfCows<'a> for Array<'a, T> {
             result.push(value);
         }
 
-        let array = Array {
+        let array = SupercowVec {
             inner: Supercow::borrowed(result.into_bump_slice()),
         };
         Ok((array, offset))

@@ -1,15 +1,15 @@
 use super::{
-    Array,
+    SupercowVec,
     deepclone::{DeepClone, MustOutlive},
     netaddr::NetAddrV2,
-    packetpayload::{PacketPayload, Serializable, SerializableArrayOfCows},
+    packetpayload::{PacketPayload, Serializable, SerializableSupercowVecOfCows},
 };
 use anyhow::bail;
 use supercow::Supercow;
 
 #[derive(Debug, Clone, Default)]
 pub struct AddrV2<'a> {
-    pub inner: Array<'a, NetAddrV2<'a>>,
+    pub inner: SupercowVec<'a, NetAddrV2<'a>>,
 }
 
 pub const ADDRV2_COMMAND: [u8; 12] = *b"addrv2\0\0\0\0\0\0";
@@ -32,7 +32,7 @@ impl<'old, 'new: 'old> DeepClone<'old, 'new> for AddrV2<'old> {
             .map(Supercow::owned)
             .collect();
         Self::WithLifetime {
-            inner: Array {
+            inner: SupercowVec {
                 inner: Supercow::owned(addys),
             },
         }
@@ -44,7 +44,7 @@ impl<'a> Serializable<'a> for AddrV2<'a> {
         allocator: &'a bumpalo::Bump<1>,
         buffer: &'a [u8],
     ) -> anyhow::Result<(Supercow<'a, Self>, usize)> {
-        let (deserialized, consumed) = Array::deserialize(allocator, buffer)?;
+        let (deserialized, consumed) = SupercowVec::deserialize(allocator, buffer)?;
         match allocator.try_alloc(AddrV2 {
             inner: deserialized,
         }) {
