@@ -1,12 +1,10 @@
-use std::borrow::Cow;
-
-use anyhow::bail;
-
 use super::{
     buffer::Buffer,
     deepclone::{DeepClone, MustOutlive},
     packetpayload::{PacketPayload, Serializable},
 };
+use anyhow::bail;
+use supercow::Supercow;
 
 #[derive(Default, Clone, Debug)]
 pub struct Pong {
@@ -35,11 +33,11 @@ impl<'a> Serializable<'a> for Pong {
     fn deserialize(
         allocator: &'a bumpalo::Bump<1>,
         buffer: &[u8],
-    ) -> anyhow::Result<(Cow<'a, Pong>, usize)> {
+    ) -> anyhow::Result<(Supercow<'a, Pong>, usize)> {
         match allocator.try_alloc(Pong {
             nonce: buffer.get_u64_le(0)?,
         }) {
-            Ok(result) => Ok((Cow::Borrowed(result), 8)),
+            Ok(result) => Ok((Supercow::borrowed(result), 8)),
             Err(e) => bail!(e),
         }
     }

@@ -1,5 +1,3 @@
-use std::borrow::Cow;
-
 use super::buffer::Buffer;
 use super::deepclone::{DeepClone, MustOutlive};
 use super::packetpayload::Serializable;
@@ -7,18 +5,35 @@ use super::varstr::VarStr;
 use super::{netaddr::NetAddrShort, packetpayload::PacketPayload};
 use anyhow::{Result, anyhow, bail};
 use bytes::BufMut;
+use supercow::Supercow;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct Version<'a> {
     pub services: u64,
     pub timestamp: u64,
-    pub addrrecv: Cow<'a, NetAddrShort<'a>>,
-    pub addrfrom: Cow<'a, NetAddrShort<'a>>,
+    pub addrrecv: Supercow<'a, NetAddrShort<'a>>,
+    pub addrfrom: Supercow<'a, NetAddrShort<'a>>,
     pub nonce: u64,
-    pub user_agent: Cow<'a, VarStr<'a>>,
+    pub user_agent: Supercow<'a, VarStr<'a>>,
     pub start_height: u32,
     pub version: u32,
     pub announce_relayed_transactions: bool,
+}
+
+impl Default for Version<'_> {
+    fn default() -> Self {
+        Self {
+            services: Default::default(),
+            timestamp: Default::default(),
+            addrrecv: Supercow::owned(NetAddrShort::default()),
+            addrfrom: Supercow::owned(NetAddrShort::default()),
+            nonce: Default::default(),
+            user_agent: Supercow::owned(VarStr::default()),
+            start_height: Default::default(),
+            version: Default::default(),
+            announce_relayed_transactions: Default::default(),
+        }
+    }
 }
 
 pub const VERSION_COMMAND: [u8; 12] = *b"version\0\0\0\0\0";
@@ -32,10 +47,10 @@ impl<'old, 'new: 'old> DeepClone<'old, 'new> for Version<'old> {
         Self::WithLifetime {
             services: self.services,
             timestamp: self.timestamp,
-            addrrecv: Cow::Owned(self.addrrecv.deep_clone()),
-            addrfrom: Cow::Owned(self.addrfrom.deep_clone()),
+            addrrecv: Supercow::owned(self.addrrecv.deep_clone()),
+            addrfrom: Supercow::owned(self.addrfrom.deep_clone()),
             nonce: self.nonce,
-            user_agent: Cow::Owned(self.user_agent.deep_clone()),
+            user_agent: Supercow::owned(self.user_agent.deep_clone()),
             start_height: self.start_height,
             version: self.version,
             announce_relayed_transactions: self.announce_relayed_transactions,
@@ -53,7 +68,7 @@ impl<'a> Serializable<'a> for Version<'a> {
     fn deserialize(
         allocator: &'a bumpalo::Bump<1>,
         buffer: &'a [u8],
-    ) -> Result<(Cow<'a, Version<'a>>, usize)> {
+    ) -> Result<(Supercow<'a, Version<'a>>, usize)> {
         let version = buffer.get_u32_le(0)?;
         let services = buffer.get_u64_le(4)?;
         let timestamp = buffer.get_u64_le(12)?;
@@ -80,9 +95,9 @@ impl<'a> Serializable<'a> for Version<'a> {
                         .get(84 + offset)
                         .ok_or(anyhow!("missing last byte in version"))?
                         != 0;
-                    return Ok((Cow::Borrowed(result), offset + 85));
+                    return Ok((Supercow::borrowed(result), offset + 85));
                 }
-                Ok((Cow::Borrowed(result), offset + 84))
+                Ok((Supercow::borrowed(result), offset + 84))
             }
             Err(e) => bail!(e),
         }

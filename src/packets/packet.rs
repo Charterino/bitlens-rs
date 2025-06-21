@@ -1,19 +1,16 @@
-use std::sync::LazyLock;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Duration;
-
-use crate::RUNTIME;
-use crate::packets::packetpayload::{deserialize_payload, read_payload};
-
 use super::block::Block;
 use super::packetheader::{PacketHeader, read_header};
 use super::packetpayload::PacketPayloadType;
+use crate::packets::packetpayload::{deserialize_payload, read_payload};
 use anyhow::Result;
 use bumpalo::{Bump, vec};
 use deadpool::unmanaged::Pool;
 use deadpool::unmanaged::{Object, PoolConfig};
 use ouroboros::self_referencing;
 use slog_scope::debug;
+use std::sync::LazyLock;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
 use tokio::io::BufReader;
 use tokio::net::tcp::OwnedReadHalf;
 
@@ -57,7 +54,7 @@ pub struct Packet {
 pub struct PayloadWithAllocator {
     pub allocator_with_buffer: AllocatorWithBuffer,
     #[borrows(allocator_with_buffer)]
-    #[not_covariant]
+    #[covariant]
     pub payload: Option<PacketPayloadType<'this>>,
 }
 
@@ -66,30 +63,26 @@ impl PayloadWithAllocator {
     where
         F: FnOnce(&Block) -> R,
     {
-        self.with_payload(|payload: &Option<PacketPayloadType>| {
-            if let PacketPayloadType::Block(b) =
-                payload.as_ref().expect("the payload to not be empty")
-            {
-                user(b)
-            } else {
-                unreachable!()
-            }
-        })
+        let payload = self.borrow_payload();
+        if let PacketPayloadType::Block(b) = payload.as_ref().expect("the payload to not be empty")
+        {
+            user(b)
+        } else {
+            unreachable!()
+        }
     }
 
     pub async fn with_block_async<F>(&self, user: F)
     where
-        F: AsyncFnOnce(&Block),
+        F: AsyncFnOnce(&Block) + Send,
     {
-        self.with_payload(|payload: &Option<PacketPayloadType>| {
-            if let PacketPayloadType::Block(b) =
-                payload.as_ref().expect("the payload to not be empty")
-            {
-                RUNTIME.block_on(user(b))
-            } else {
-                unreachable!()
-            }
-        });
+        let payload = self.borrow_payload();
+        if let PacketPayloadType::Block(b) = payload.as_ref().expect("the payload to not be empty")
+        {
+            user(b).await
+        } else {
+            unreachable!()
+        }
     }
 }
 

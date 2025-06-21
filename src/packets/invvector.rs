@@ -1,14 +1,12 @@
-use std::borrow::Cow;
-
-use anyhow::bail;
-use num::{FromPrimitive, ToPrimitive};
-use num_derive::{FromPrimitive, ToPrimitive};
-
 use super::{
     buffer::Buffer,
     deepclone::{DeepClone, MustOutlive},
     packetpayload::Serializable,
 };
+use anyhow::bail;
+use num::{FromPrimitive, ToPrimitive};
+use num_derive::{FromPrimitive, ToPrimitive};
+use supercow::Supercow;
 
 #[derive(FromPrimitive, ToPrimitive, Clone, Default, Debug)]
 pub enum InventoryVectorType {
@@ -26,14 +24,14 @@ pub enum InventoryVectorType {
 #[derive(Clone, Debug)]
 pub struct InventoryVector<'a> {
     pub inv_type: InventoryVectorType,
-    pub hash: Cow<'a, [u8; 32]>,
+    pub hash: Supercow<'a, [u8; 32]>,
 }
 
 impl<'a> Serializable<'a> for InventoryVector<'a> {
     fn deserialize(
         allocator: &'a bumpalo::Bump<1>,
         buffer: &'a [u8],
-    ) -> anyhow::Result<(Cow<'a, InventoryVector<'a>>, usize)> {
+    ) -> anyhow::Result<(Supercow<'a, InventoryVector<'a>>, usize)> {
         let raw_type = buffer.get_u32_le(0)?;
         let inv_type = match InventoryVectorType::from_u32(raw_type) {
             Some(inv_type) => inv_type,
@@ -44,9 +42,9 @@ impl<'a> Serializable<'a> for InventoryVector<'a> {
         let hash = buffer.get_hash(4)?;
         match allocator.try_alloc(InventoryVector {
             inv_type,
-            hash: Cow::Borrowed(hash),
+            hash: Supercow::borrowed(hash),
         }) {
-            Ok(result) => Ok((Cow::Borrowed(result), 36)),
+            Ok(result) => Ok((Supercow::borrowed(result), 36)),
             Err(e) => bail!(e),
         }
     }
@@ -63,10 +61,10 @@ impl<'old> MustOutlive<'old> for InventoryVector<'old> {
 
 impl<'old, 'new: 'old> DeepClone<'old, 'new> for InventoryVector<'old> {
     fn deep_clone(&self) -> Self::WithLifetime<'new> {
-        let hash = self.hash.clone().into_owned();
+        let hash = *self.hash;
         Self::WithLifetime {
             inv_type: self.inv_type.clone(),
-            hash: Cow::Owned(hash),
+            hash: Supercow::owned(hash),
         }
     }
 }

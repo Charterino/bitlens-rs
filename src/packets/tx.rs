@@ -1,25 +1,23 @@
-use std::borrow::Cow;
-
-use anyhow::{Result, anyhow, bail};
-use bumpalo::{Bump, collections::Vec};
-use sha2::{Digest, Sha256};
-
 use super::{
+    Array,
     buffer::Buffer,
     deepclone::{DeepClone, MustOutlive},
     packetpayload::{PacketPayload, Serializable, SerializableArrayOfCows, SerializableValue},
     varint::VarInt,
     varstr::VarStr,
 };
+use anyhow::{Result, anyhow, bail};
+use bumpalo::{Bump, collections::Vec};
+use sha2::{Digest, Sha256};
+use supercow::Supercow;
 
 #[derive(Debug, Clone, Default)]
 pub struct Tx<'a> {
     pub version: u32,
     pub locktime: u32,
-    pub txins: Cow<'a, [Cow<'a, TxIn<'a>>]>,
-    pub txouts: Cow<'a, [Cow<'a, TxOut<'a>>]>,
-    pub witness_data: Option<Cow<'a, [Cow<'a, [Cow<'a, VarStr<'a>>]>]>>,
-
+    pub txins: Array<'a, TxIn<'a>>,
+    pub txouts: Array<'a, TxOut<'a>>,
+    pub witness_data: Option<Array<'a, Array<'a, VarStr<'a>>>>,
     pub hash: [u8; 32], // calculated during deserialization
 }
 
@@ -38,22 +36,26 @@ impl<'old> MustOutlive<'old> for Tx<'old> {
 impl<'old, 'new: 'old> DeepClone<'old, 'new> for Tx<'old> {
     fn deep_clone(&self) -> Self::WithLifetime<'new> {
         // This is kind of suboptimal, but it'll do for now.
-        let txins = (&*self.txins)
+        let txins = (&*self.txins.inner)
             .deep_clone()
             .into_iter()
-            .map(Cow::Owned)
+            .map(Supercow::owned)
             .collect();
-        let txouts = (&*self.txouts)
+        let txouts = (&*self.txouts.inner)
             .deep_clone()
             .into_iter()
-            .map(Cow::Owned)
+            .map(Supercow::owned)
             .collect();
 
         Self::WithLifetime {
             version: self.version,
             locktime: self.locktime,
-            txins: Cow::Owned(txins),
-            txouts: Cow::Owned(txouts),
+            txins: Array {
+                inner: Supercow::owned(txins),
+            },
+            txouts: Array {
+                inner: Supercow::owned(txouts),
+            },
             witness_data: None,
             hash: self.hash,
         }
@@ -61,7 +63,10 @@ impl<'old, 'new: 'old> DeepClone<'old, 'new> for Tx<'old> {
 }
 
 impl<'a> Serializable<'a> for Tx<'a> {
-    fn deserialize(allocator: &'a Bump<1>, buffer: &'a [u8]) -> Result<(Cow<'a, Tx<'a>>, usize)> {
+    fn deserialize(
+        allocator: &'a Bump<1>,
+        buffer: &'a [u8],
+    ) -> Result<(Supercow<'a, Tx<'a>>, usize)> {
         let version = buffer.get_u32_le(0)?;
 
         let has_witness_data = match buffer.get(4..6) {
@@ -71,47 +76,29 @@ impl<'a> Serializable<'a> for Tx<'a> {
 
         let mut offset = if has_witness_data { 6 } else { 4 };
 
-        let (txins, offset_delta) =
-            <Cow<'a, [Cow<'a, TxIn<'a>>]> as SerializableArrayOfCows>::deserialize(
-                allocator,
-                buffer.with_offset(offset)?,
-            )?;
+        let (txins, offset_delta) = Array::deserialize(allocator, buffer.with_offset(offset)?)?;
         offset += offset_delta;
-        if txins.is_empty() {
+        if txins.inner.is_empty() {
             bail!("0 txins")
         }
-        let (txouts, offset_delta) =
-            <Cow<'a, [Cow<'a, TxOut<'a>>]>>::deserialize(allocator, buffer.with_offset(offset)?)?;
+
+        let (txouts, offset_delta) = Array::deserialize(allocator, buffer.with_offset(offset)?)?;
         offset += offset_delta;
 
         let (witnesses, witnesses_start) = if has_witness_data {
             let start = offset;
-            let mut wits = Vec::new_in(allocator);
-            if wits.try_reserve_exact(txins.len()).is_err() {
-                bail!("allocation failed");
-            }
-            for _ in 0..txins.len() {
-                let (components_count, offset_delta) =
-                    VarInt::deserialize(buffer.with_offset(offset)?)?;
+            let mut wits = Vec::with_capacity_in(txins.inner.len(), allocator);
+            for _ in 0..txins.inner.len() {
+                let (components, offset_delta) =
+                    Array::deserialize(allocator, buffer.with_offset(offset)?)?;
                 offset += offset_delta;
-                let mut components = Vec::new_in(allocator);
-                if components
-                    .try_reserve_exact(components_count as usize)
-                    .is_err()
-                {
-                    bail!("allocation failed");
-                }
-                for _ in 0..components_count as usize {
-                    let (component, offset_delta) = <VarStr as Serializable>::deserialize(
-                        allocator,
-                        buffer.with_offset(offset)?,
-                    )?;
-                    offset += offset_delta;
-                    components.push(component);
-                }
-                wits.push(Cow::Borrowed(components.into_bump_slice()));
+                wits.push(Supercow::owned(components));
             }
-            (Some(Cow::Borrowed(wits.into_bump_slice())), start)
+            let bump_slice = wits.into_bump_slice();
+            let wits = Array {
+                inner: Supercow::borrowed(bump_slice),
+            };
+            (Some(wits), start)
         } else {
             (None, 0)
         };
@@ -138,7 +125,7 @@ impl<'a> Serializable<'a> for Tx<'a> {
             witness_data: witnesses,
             hash: second_pass.into(),
         }) {
-            Ok(result) => Ok((Cow::Borrowed(result), offset + 4)),
+            Ok(result) => Ok((Supercow::borrowed(result), offset + 4)),
             Err(e) => bail!(e),
         }
     }
@@ -149,25 +136,25 @@ impl<'a> Serializable<'a> for Tx<'a> {
         if self.witness_data.is_some() {
             stream.put_u16(0x0001);
         }
-        let length = self.txins.len() as VarInt;
+        let length = self.txins.inner.len() as VarInt;
         length.serialize(stream);
         for n in 0..length as usize {
-            self.txins.get(n).unwrap().serialize(stream);
+            self.txins.inner[n].serialize(stream);
         }
 
-        let length = self.txouts.len() as VarInt;
+        let length = self.txouts.inner.len() as VarInt;
         length.serialize(stream);
         for n in 0..length as usize {
-            Serializable::serialize(&*self.txouts[n], stream);
+            Serializable::serialize(&*self.txouts.inner[n], stream);
         }
 
         if let Some(witnesses) = &self.witness_data {
-            for i in 0..witnesses.len() {
-                let witness = witnesses.get(i).unwrap();
-                let witness_length = witness.len() as VarInt;
+            for i in 0..witnesses.inner.len() {
+                let witness = &witnesses.inner[i];
+                let witness_length = witness.inner.len() as VarInt;
                 witness_length.serialize(stream);
-                for j in 0..witness_length as usize {
-                    let witness_component = witness.get(j).unwrap();
+                for _ in 0..witness_length as usize {
+                    let witness_component = &witness.inner[i];
                     Serializable::serialize(&**witness_component, stream);
                 }
             }
@@ -177,12 +164,12 @@ impl<'a> Serializable<'a> for Tx<'a> {
     }
 }
 
-#[derive(Default, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct TxIn<'a> {
-    pub prevout_hash: Cow<'a, [u8; 32]>,
+    pub prevout_hash: Supercow<'a, [u8; 32]>,
     pub prevout_index: u32,
     pub sequence: u32,
-    pub sig_script: Cow<'a, VarStr<'a>>,
+    pub sig_script: Supercow<'a, VarStr<'a>>,
 }
 
 impl<'old> MustOutlive<'old> for TxIn<'old> {
@@ -191,13 +178,13 @@ impl<'old> MustOutlive<'old> for TxIn<'old> {
 
 impl<'old, 'new: 'old> DeepClone<'old, 'new> for TxIn<'old> {
     fn deep_clone(&self) -> Self::WithLifetime<'new> {
-        let prevout_hash = self.prevout_hash.clone().into_owned();
+        let prevout_hash = *self.prevout_hash;
         let sig_script = self.sig_script.deep_clone();
         Self::WithLifetime {
-            prevout_hash: Cow::Owned(prevout_hash),
+            prevout_hash: Supercow::owned(prevout_hash),
             prevout_index: self.prevout_index,
             sequence: self.sequence,
-            sig_script: Cow::Owned(sig_script),
+            sig_script: Supercow::owned(sig_script),
         }
     }
 }
@@ -206,19 +193,19 @@ impl<'a> Serializable<'a> for TxIn<'a> {
     fn deserialize(
         allocator: &'a bumpalo::Bump<1>,
         buffer: &'a [u8],
-    ) -> anyhow::Result<(Cow<'a, TxIn<'a>>, usize)> {
+    ) -> anyhow::Result<(Supercow<'a, TxIn<'a>>, usize)> {
         let hash = buffer.get_hash(0)?;
         let index = buffer.get_u32_le(32)?;
         let (script, offset) =
             <VarStr as Serializable>::deserialize(allocator, buffer.with_offset(36)?)?;
         let sequence = buffer.get_u32_le(offset + 36)?;
         match allocator.try_alloc(TxIn {
-            prevout_hash: Cow::Borrowed(hash),
+            prevout_hash: Supercow::borrowed(hash),
             prevout_index: index,
             sequence,
             sig_script: script,
         }) {
-            Ok(result) => Ok((Cow::Borrowed(result), offset + 40)),
+            Ok(result) => Ok((Supercow::borrowed(result), offset + 40)),
             Err(e) => bail!(e),
         }
     }
@@ -231,10 +218,10 @@ impl<'a> Serializable<'a> for TxIn<'a> {
     }
 }
 
-#[derive(Default, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct TxOut<'a> {
     pub value: u64,
-    pub script: Cow<'a, VarStr<'a>>,
+    pub script: Supercow<'a, VarStr<'a>>,
 }
 
 impl<'old> MustOutlive<'old> for TxOut<'old> {
@@ -246,7 +233,7 @@ impl<'old, 'new: 'old> DeepClone<'old, 'new> for TxOut<'old> {
         let script = self.script.deep_clone();
         Self::WithLifetime {
             value: self.value,
-            script: Cow::Owned(script),
+            script: Supercow::owned(script),
         }
     }
 }
@@ -255,12 +242,12 @@ impl<'a> Serializable<'a> for TxOut<'a> {
     fn deserialize(
         allocator: &'a bumpalo::Bump<1>,
         buffer: &'a [u8],
-    ) -> anyhow::Result<(Cow<'a, TxOut<'a>>, usize)> {
+    ) -> anyhow::Result<(Supercow<'a, TxOut<'a>>, usize)> {
         let value = buffer.get_u64_le(0)?;
         let (script, offset) =
             <VarStr as Serializable>::deserialize(allocator, buffer.with_offset(8)?)?;
         match allocator.try_alloc(TxOut { value, script }) {
-            Ok(result) => Ok((Cow::Borrowed(result), offset + 8)),
+            Ok(result) => Ok((Supercow::borrowed(result), offset + 8)),
             Err(e) => bail!(e),
         }
     }
@@ -278,7 +265,7 @@ impl<'script> SerializableValue<'script> for TxOut<'static> {
         Ok((
             TxOut {
                 value,
-                script: Cow::Owned(script),
+                script: Supercow::owned(script),
             },
             offset + 8,
         ))

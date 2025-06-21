@@ -1,4 +1,4 @@
-use std::borrow::Cow;
+use supercow::Supercow;
 
 // Huge thanks to @goldsteinq and @variant for their help with figuring out how to do this!
 // Literally wouldn't be able to figure this out without their help!!!! They're awesome!!!!!!!!!
@@ -24,11 +24,13 @@ impl<'old, 'new: 'old, T: Clone + DeepClone<'old, 'new>> DeepClone<'old, 'new> f
     }
 }
 
-impl<'old, T: Clone + MustOutlive<'old>> MustOutlive<'old> for Cow<'old, T> {
+impl<'old, T: Clone + MustOutlive<'old>> MustOutlive<'old> for Supercow<'old, T> {
     type WithLifetime<'new: 'old> = T::WithLifetime<'new>;
 }
 
-impl<'old, 'new: 'old, T: Clone + DeepClone<'old, 'new>> DeepClone<'old, 'new> for Cow<'old, T> {
+impl<'old, 'new: 'old, T: Clone + DeepClone<'old, 'new>> DeepClone<'old, 'new>
+    for Supercow<'old, T>
+{
     fn deep_clone(&self) -> Self::WithLifetime<'new> {
         (**self).deep_clone()
     }

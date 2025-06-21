@@ -1,11 +1,9 @@
-use std::borrow::Cow;
-
-use anyhow::bail;
-
 use super::{
     deepclone::{DeepClone, MustOutlive},
     packetpayload::{PacketPayload, Serializable},
 };
+use anyhow::bail;
+use supercow::Supercow;
 
 #[derive(Default, Clone, Debug)]
 pub struct VerAck {}
@@ -32,9 +30,9 @@ impl<'a> Serializable<'a> for VerAck {
     fn deserialize(
         a: &'a bumpalo::Bump<1>,
         _: &'a [u8],
-    ) -> anyhow::Result<(Cow<'a, VerAck>, usize)> {
+    ) -> anyhow::Result<(Supercow<'a, VerAck>, usize)> {
         match a.try_alloc(VerAck {}) {
-            Ok(v) => Ok((Cow::Borrowed(v), 0)),
+            Ok(v) => Ok((Supercow::borrowed(v), 0)),
             Err(e) => bail!(e),
         }
     }

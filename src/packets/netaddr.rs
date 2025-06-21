@@ -1,9 +1,3 @@
-use std::borrow::Cow;
-
-use anyhow::{Result, anyhow, bail};
-use bytes::BufMut;
-use num::{FromPrimitive, ToPrimitive};
-
 use super::{
     buffer::Buffer,
     deepclone::{DeepClone, MustOutlive},
@@ -12,12 +6,26 @@ use super::{
     varint::VarInt,
     varstr::VarStr,
 };
+use anyhow::{Result, anyhow, bail};
+use bytes::BufMut;
+use num::{FromPrimitive, ToPrimitive};
+use supercow::Supercow;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct NetAddrShort<'a> {
     pub services: u64,
-    pub addr: Cow<'a, [u8; 16]>,
+    pub addr: Supercow<'a, [u8; 16]>,
     pub port: u16,
+}
+
+impl Default for NetAddrShort<'_> {
+    fn default() -> Self {
+        Self {
+            services: Default::default(),
+            addr: Supercow::owned(Default::default()),
+            port: Default::default(),
+        }
+    }
 }
 
 impl<'old> MustOutlive<'old> for NetAddrShort<'old> {
@@ -26,10 +34,10 @@ impl<'old> MustOutlive<'old> for NetAddrShort<'old> {
 
 impl<'old, 'new: 'old> DeepClone<'old, 'new> for NetAddrShort<'old> {
     fn deep_clone(&self) -> Self::WithLifetime<'new> {
-        let addr = self.addr.clone().into_owned();
+        let addr = *self.addr;
         Self::WithLifetime {
             services: self.services,
-            addr: Cow::Owned(addr),
+            addr: Supercow::owned(addr),
             port: self.port,
         }
     }
@@ -39,15 +47,16 @@ impl<'a> Serializable<'a> for NetAddrShort<'a> {
     fn deserialize(
         allocator: &'a bumpalo::Bump<1>,
         buffer: &'a [u8],
-    ) -> Result<(Cow<'a, NetAddrShort<'a>>, usize)> {
+    ) -> Result<(Supercow<'a, NetAddrShort<'a>>, usize)> {
         match buffer.get(8..24) {
             Some(b) => {
+                let address: &[u8; 16] = b.try_into().unwrap();
                 match allocator.try_alloc(NetAddrShort {
                     services: buffer.get_u64_le(0)?,
-                    addr: Cow::Borrowed(b.try_into().unwrap()),
+                    addr: Supercow::borrowed(address),
                     port: buffer.get_u16(24)?,
                 }) {
-                    Ok(result) => Ok((Cow::Borrowed(result), 26)),
+                    Ok(result) => Ok((Supercow::borrowed(result), 26)),
                     Err(e) => bail!(e),
                 }
             }
@@ -65,7 +74,7 @@ impl<'a> Serializable<'a> for NetAddrShort<'a> {
 #[derive(Clone, Debug)]
 pub struct NetAddr<'a> {
     pub services: u64,
-    pub addr: Cow<'a, [u8; 16]>,
+    pub addr: Supercow<'a, [u8; 16]>,
     pub time: u32,
     pub port: u16,
 }
@@ -76,10 +85,10 @@ impl<'old> MustOutlive<'old> for NetAddr<'old> {
 
 impl<'old, 'new: 'old> DeepClone<'old, 'new> for NetAddr<'old> {
     fn deep_clone(&self) -> Self::WithLifetime<'new> {
-        let addr = self.addr.clone().into_owned();
+        let addr = *self.addr;
         Self::WithLifetime {
             services: self.services,
-            addr: Cow::Owned(addr),
+            addr: Supercow::owned(addr),
             time: self.time,
             port: self.port,
         }
@@ -90,20 +99,21 @@ impl<'a> Serializable<'a> for NetAddr<'a> {
     fn deserialize(
         allocator: &'a bumpalo::Bump<1>,
         buffer: &'a [u8],
-    ) -> Result<(Cow<'a, NetAddr<'a>>, usize)> {
-        match allocator.try_alloc(NetAddr {
-            time: buffer.get_u32_le(0)?,
-            services: buffer.get_u64_le(4)?,
-            addr: Cow::Borrowed(
-                buffer
-                    .get(12..28)
-                    .ok_or(anyhow!("not enough bytes for netaddr"))?
-                    .try_into()?,
-            ),
-            port: buffer.get_u16(28)?,
-        }) {
-            Ok(result) => Ok((Cow::Borrowed(result), 30)),
-            Err(e) => bail!(e),
+    ) -> Result<(Supercow<'a, NetAddr<'a>>, usize)> {
+        match buffer.get(12..28) {
+            Some(address) => {
+                let address: &[u8; 16] = address.try_into().unwrap();
+                match allocator.try_alloc(NetAddr {
+                    time: buffer.get_u32_le(0)?,
+                    services: buffer.get_u64_le(4)?,
+                    addr: Supercow::borrowed(address),
+                    port: buffer.get_u16(28)?,
+                }) {
+                    Ok(result) => Ok((Supercow::borrowed(result), 30)),
+                    Err(e) => bail!(e),
+                }
+            }
+            None => bail!("not enough bytes for netaddr"),
         }
     }
 
@@ -117,7 +127,7 @@ impl<'a> Serializable<'a> for NetAddr<'a> {
 
 #[derive(Clone, Debug)]
 pub struct NetAddrV2<'a> {
-    pub address: Cow<'a, VarStr<'a>>,
+    pub address: Supercow<'a, VarStr<'a>>,
     pub services: VarInt,
     pub time: u32,
     pub port: u16,
@@ -131,7 +141,7 @@ impl<'old> MustOutlive<'old> for NetAddrV2<'old> {
 impl<'old, 'new: 'old> DeepClone<'old, 'new> for NetAddrV2<'old> {
     fn deep_clone(&self) -> Self::WithLifetime<'new> {
         Self::WithLifetime {
-            address: Cow::Owned(self.address.deep_clone()),
+            address: Supercow::owned(self.address.deep_clone()),
             services: self.services,
             time: self.time,
             port: self.port,
@@ -144,7 +154,7 @@ impl<'a> Serializable<'a> for NetAddrV2<'a> {
     fn deserialize(
         allocator: &'a bumpalo::Bump<1>,
         buffer: &'a [u8],
-    ) -> Result<(Cow<'a, NetAddrV2<'a>>, usize)> {
+    ) -> Result<(Supercow<'a, NetAddrV2<'a>>, usize)> {
         let time = buffer.get_u32_le(0)?;
         let (services, mut offset) = VarInt::deserialize(buffer.with_offset(4)?)?;
         offset += 4;
@@ -164,7 +174,7 @@ impl<'a> Serializable<'a> for NetAddrV2<'a> {
             port,
             network_id,
         }) {
-            Ok(result) => Ok((Cow::Borrowed(result), offset + 2)),
+            Ok(result) => Ok((Supercow::borrowed(result), offset + 2)),
             Err(e) => bail!(e),
         }
     }

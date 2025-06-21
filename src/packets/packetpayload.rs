@@ -1,16 +1,13 @@
-use std::{
-    borrow::Cow,
-    fmt::{Debug, Display},
-};
-
 use anyhow::{Result, bail};
 use bumpalo::{Bump, collections::Vec};
 use bytes::BufMut;
 use sha2::{Digest, Sha256};
+use std::fmt::{Debug, Display};
+use supercow::Supercow;
 use tokio::io::AsyncReadExt;
 
 use super::{
-    addr::Addr, addrv2::AddrV2, block::Block, buffer::Buffer, deepclone::DeepClone,
+    Array, addr::Addr, addrv2::AddrV2, block::Block, buffer::Buffer, deepclone::DeepClone,
     getaddr::GetAddr, getdata::GetData, getheaders::GetHeaders, headers::Headers, inv::Inv,
     packet::AllocatorWithBuffer, ping::Ping, pong::Pong, sendaddrv2::SendAddrV2,
     sendheaders::SendHeaders, tx::Tx, varint::VarInt, verack::VerAck, version::Version,
@@ -132,7 +129,7 @@ where
     fn deserialize(
         allocator: &'bump bumpalo::Bump<1>,
         buffer: &'bump [u8],
-    ) -> Result<(Cow<'bump, Self>, usize)>; // returned value is the length consumed
+    ) -> Result<(Supercow<'bump, Self>, usize)>; // returned value is the length consumed
 
     fn serialize(&self, stream: &mut impl BufMut);
 }
@@ -148,37 +145,36 @@ where
     fn serialize(&self, stream: &mut impl BufMut);
 }
 
-pub trait SerializableArrayOfCows<'bump>
-where
-    Self: Sized + Clone,
-{
+pub trait SerializableArrayOfCows<'bump> {
     // While the structs themselves are going to be allocated in the bump allocator,
     // the scripts and other byte-arrays are going to be referenced and not copied.
     fn deserialize(
         allocator: &'bump bumpalo::Bump<1>,
         buffer: &'bump [u8],
-    ) -> Result<(Self, usize)>; // returned value is the length consumed
+    ) -> Result<(Self, usize)>
+    where
+        Self: Sized + Clone + ToOwned; // returned value is the length consumed
 
     fn serialize(&self, stream: &mut impl BufMut);
 }
 
 #[derive(Clone, Debug)]
 pub enum PacketPayloadType<'a> {
-    Version(Cow<'a, Version<'a>>),
-    VerAck(Cow<'a, VerAck>),
-    Addr(Cow<'a, Addr<'a>>),
-    AddrV2(Cow<'a, AddrV2<'a>>),
-    GetAddr(Cow<'a, GetAddr>),
-    Ping(Cow<'a, Ping>),
-    Pong(Cow<'a, Pong>),
-    SendHeaders(Cow<'a, SendHeaders>),
-    SendAddrV2(Cow<'a, SendAddrV2>),
-    Tx(Cow<'a, Tx<'a>>),
-    Block(Cow<'a, Block<'a>>),
-    GetData(Cow<'a, GetData<'a>>),
-    Inv(Cow<'a, Inv<'a>>),
-    Headers(Cow<'a, Headers<'a>>),
-    GetHeaders(Cow<'a, GetHeaders<'a>>),
+    Ping(Supercow<'a, Ping>),
+    Inv(Supercow<'a, Inv<'a>>),
+    Version(Supercow<'a, Version<'a>>),
+    VerAck(Supercow<'a, VerAck>),
+    Addr(Supercow<'a, Addr<'a>>),
+    AddrV2(Supercow<'a, AddrV2<'a>>),
+    GetAddr(Supercow<'a, GetAddr>),
+    Pong(Supercow<'a, Pong>),
+    SendHeaders(Supercow<'a, SendHeaders>),
+    SendAddrV2(Supercow<'a, SendAddrV2>),
+    Tx(Supercow<'a, Tx<'a>>),
+    Block(Supercow<'a, Block<'a>>),
+    GetData(Supercow<'a, GetData<'a>>),
+    Headers(Supercow<'a, Headers<'a>>),
+    GetHeaders(Supercow<'a, GetHeaders<'a>>),
 }
 
 impl PacketPayloadType<'_> {
@@ -223,11 +219,11 @@ impl PacketPayloadType<'_> {
     }
 }
 
-impl<'a, T: Serializable<'a> + ToOwned> SerializableArrayOfCows<'a> for Cow<'a, [Cow<'a, T>]> {
+impl<'a, T: Serializable<'a>> SerializableArrayOfCows<'a> for Array<'a, T> {
     fn deserialize(allocator: &'a Bump<1>, buffer: &'a [u8]) -> Result<(Self, usize)> {
         let (len, mut offset) = VarInt::deserialize(buffer)?;
 
-        let mut result: Vec<'a, Cow<'a, T>> = Vec::new_in(allocator);
+        let mut result: Vec<'a, Supercow<'a, T>> = Vec::new_in(allocator);
         if result.try_reserve_exact(len as usize).is_err() {
             bail!("allocation failed");
         }
@@ -237,14 +233,17 @@ impl<'a, T: Serializable<'a> + ToOwned> SerializableArrayOfCows<'a> for Cow<'a, 
             result.push(value);
         }
 
-        Ok((Cow::Borrowed(result.into_bump_slice()), offset))
+        let array = Array {
+            inner: Supercow::borrowed(result.into_bump_slice()),
+        };
+        Ok((array, offset))
     }
 
     fn serialize(&self, stream: &mut impl BufMut) {
-        let len = self.len() as VarInt;
+        let len = self.inner.len() as VarInt;
         len.serialize(stream);
         for i in 0..len as usize {
-            self.get(i).unwrap().serialize(stream);
+            self.inner[i].serialize(stream);
         }
     }
 }

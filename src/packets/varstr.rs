@@ -1,18 +1,24 @@
-use std::borrow::Cow;
-
-use anyhow::{Result, anyhow, bail};
-use bytes::BufMut;
-
 use super::{
     deepclone::{DeepClone, MustOutlive},
     packetpayload::{Serializable, SerializableValue},
     varint::VarInt,
 };
+use anyhow::{Result, anyhow, bail};
+use bytes::BufMut;
+use supercow::Supercow;
 
 // not necessarily valid UTF-8
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct VarStr<'a> {
-    pub inner: Cow<'a, [u8]>,
+    pub inner: Supercow<'a, Vec<u8>, [u8]>,
+}
+
+impl Default for VarStr<'_> {
+    fn default() -> Self {
+        Self {
+            inner: Supercow::owned(vec![]),
+        }
+    }
 }
 
 impl<'old> MustOutlive<'old> for VarStr<'old> {
@@ -21,9 +27,9 @@ impl<'old> MustOutlive<'old> for VarStr<'old> {
 
 impl<'old, 'new: 'old> DeepClone<'old, 'new> for VarStr<'old> {
     fn deep_clone(&self) -> Self::WithLifetime<'new> {
-        let cloned = self.inner.clone().into_owned();
+        let cloned = self.inner.as_ref().to_vec();
         Self::WithLifetime {
-            inner: Cow::Owned(cloned),
+            inner: Supercow::owned(cloned),
         }
     }
 }
@@ -32,14 +38,14 @@ impl<'a> Serializable<'a> for VarStr<'a> {
     fn deserialize(
         allocator: &'a bumpalo::Bump,
         buffer: &'a [u8],
-    ) -> Result<(Cow<'a, VarStr<'a>>, usize)> {
+    ) -> Result<(Supercow<'a, VarStr<'a>>, usize)> {
         let (length, offset) = VarInt::deserialize(buffer)?;
 
         match buffer.get(offset..offset + length as usize) {
             Some(v) => match allocator.try_alloc(Self {
-                inner: Cow::Borrowed(v),
+                inner: Supercow::borrowed(v),
             }) {
-                Ok(v) => Ok((Cow::Borrowed(v), offset + length as usize)),
+                Ok(v) => Ok((Supercow::borrowed(v), offset + length as usize)),
                 Err(e) => bail!(e),
             },
             None => Err(anyhow!("not enough bytes for varstr")),
@@ -49,10 +55,8 @@ impl<'a> Serializable<'a> for VarStr<'a> {
     fn serialize(&self, stream: &mut impl BufMut) {
         let len = self.inner.len() as VarInt;
         len.serialize(stream);
-        match &self.inner {
-            Cow::Borrowed(ua) => stream.put(*ua),
-            Cow::Owned(ua) => stream.put(ua.as_slice()),
-        }
+        let r = self.inner.as_ref();
+        stream.put(r);
     }
 }
 
@@ -63,7 +67,7 @@ impl<'buffer, 'result: 'buffer> SerializableValue<'buffer> for VarStr<'result> {
         match buffer.get(offset..offset + length as usize) {
             Some(v) => Ok((
                 Self {
-                    inner: Cow::Owned(v.to_vec()),
+                    inner: Supercow::owned(v.to_vec()),
                 },
                 offset + length as usize,
             )),
@@ -74,41 +78,15 @@ impl<'buffer, 'result: 'buffer> SerializableValue<'buffer> for VarStr<'result> {
     fn serialize(&self, stream: &mut impl BufMut) {
         let len = self.inner.len() as VarInt;
         len.serialize(stream);
-        match &self.inner {
-            Cow::Borrowed(ua) => stream.put(*ua),
-            Cow::Owned(ua) => stream.put(ua.as_slice()),
-        }
+        let r = self.inner.as_ref();
+        stream.put(r);
     }
 }
 
 impl From<&str> for VarStr<'_> {
     fn from(value: &str) -> Self {
         Self {
-            inner: Cow::Owned(value.as_bytes().to_vec()),
-        }
-    }
-}
-
-impl<'a> VarStr<'a> {
-    pub fn deserialize_copy(
-        allocator: &'a bumpalo::Bump<1>,
-        buffer: &[u8],
-    ) -> Result<(VarStr<'a>, usize)> {
-        let (length, offset) = VarInt::deserialize(buffer)?;
-        match buffer.get(offset..offset + length as usize) {
-            Some(v) => {
-                let copied = match allocator.try_alloc_slice_copy(v) {
-                    Ok(c) => c,
-                    Err(_) => bail!("oom"),
-                };
-                Ok((
-                    Self {
-                        inner: Cow::Borrowed(copied),
-                    },
-                    offset + length as usize,
-                ))
-            }
-            None => Err(anyhow!("not enough bytes for varstr")),
+            inner: Supercow::owned(value.as_bytes().to_vec()),
         }
     }
 }

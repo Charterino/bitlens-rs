@@ -1,21 +1,28 @@
-use std::borrow::Cow;
-
-use anyhow::bail;
-
-use crate::util::merkle::MerkleTree;
-
 use super::{
+    Array,
     blockheader::BlockHeader,
     buffer::Buffer,
     deepclone::{DeepClone, MustOutlive},
     packetpayload::{PacketPayload, Serializable, SerializableArrayOfCows},
     tx::Tx,
 };
+use crate::util::merkle::MerkleTree;
+use anyhow::bail;
+use supercow::Supercow;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct Block<'a> {
-    pub header: Cow<'a, BlockHeader<'a>>,
-    pub txs: Cow<'a, [Cow<'a, Tx<'a>>]>,
+    pub header: Supercow<'a, BlockHeader<'a>>,
+    pub txs: Array<'a, Tx<'a>>,
+}
+
+impl Default for Block<'_> {
+    fn default() -> Self {
+        Self {
+            header: Supercow::owned(Default::default()),
+            txs: Default::default(),
+        }
+    }
 }
 
 pub const BLOCK_COMMAND: [u8; 12] = *b"block\0\0\0\0\0\0\0";
@@ -34,14 +41,16 @@ impl<'old, 'new: 'old> DeepClone<'old, 'new> for Block<'old> {
     fn deep_clone(&self) -> Self::WithLifetime<'new> {
         let header = self.header.deep_clone();
         // once again suboptimal but it will do for now
-        let txs = (&*self.txs)
+        let txs = (&*self.txs.inner)
             .deep_clone()
             .into_iter()
-            .map(Cow::Owned)
+            .map(Supercow::owned)
             .collect();
         Self::WithLifetime {
-            header: Cow::Owned(header),
-            txs: Cow::Owned(txs),
+            header: Supercow::owned(header),
+            txs: Array {
+                inner: Supercow::owned(txs),
+            },
         }
     }
 }
@@ -50,21 +59,17 @@ impl<'a> Serializable<'a> for Block<'a> {
     fn deserialize(
         allocator: &'a bumpalo::Bump<1>,
         buffer: &'a [u8],
-    ) -> anyhow::Result<(Cow<'a, Block<'a>>, usize)> {
+    ) -> anyhow::Result<(Supercow<'a, Block<'a>>, usize)> {
         let (header, _) = BlockHeader::deserialize(allocator, buffer)?;
         // the header deserialization will read the number of txs, but the `txs` deserializer will also read it.
         // Start deserializing from offset 80 instead of the offset returned by header deserializer, because the header's size is 80+txlenlen
 
-        let (txs, offset) = <Cow<'a, [Cow<'a, Tx<'a>>]> as SerializableArrayOfCows>::deserialize(
-            allocator,
-            buffer.with_offset(80)?,
-        )?;
+        let (txs, offset) = Array::<Tx<'a>>::deserialize(allocator, buffer.with_offset(80)?)?;
 
         // Verify that this block is `correct`, as in the transactions inside actually correspond to the merkle tree in the header.
-
         // Compute the merkle root and make sure it's the same as in the header
-        let mut merkle_tree = MerkleTree::with_capacity(txs.len());
-        for tx in txs.iter() {
+        let mut merkle_tree = MerkleTree::with_capacity(txs.inner.len());
+        for tx in txs.inner.iter() {
             merkle_tree.append_hash(&tx.hash);
         }
         let (merkle_root, mutated) = merkle_tree.into_root();
@@ -79,14 +84,14 @@ impl<'a> Serializable<'a> for Block<'a> {
             header: header,
             txs,
         }) {
-            Ok(result) => Ok((Cow::Borrowed(result), offset + 80)),
+            Ok(result) => Ok((Supercow::borrowed(result), offset + 80)),
             Err(e) => bail!(e),
         }
     }
 
     fn serialize(&self, stream: &mut impl bytes::BufMut) {
         self.header.serialize(stream);
-        for tx in self.txs.iter() {
+        for tx in self.txs.inner.iter() {
             tx.serialize(stream);
         }
     }

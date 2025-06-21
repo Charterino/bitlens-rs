@@ -1,16 +1,15 @@
-use std::borrow::Cow;
-
-use anyhow::bail;
-
 use super::{
+    Array,
     deepclone::{DeepClone, MustOutlive},
     netaddr::NetAddr,
     packetpayload::{PacketPayload, Serializable, SerializableArrayOfCows},
 };
+use anyhow::bail;
+use supercow::Supercow;
 
 #[derive(Debug, Clone, Default)]
 pub struct Addr<'a> {
-    pub inner: Cow<'a, [Cow<'a, NetAddr<'a>>]>,
+    pub inner: Array<'a, NetAddr<'a>>,
 }
 
 pub const ADDR_COMMAND: [u8; 12] = *b"addr\0\0\0\0\0\0\0\0";
@@ -27,12 +26,16 @@ impl<'old> MustOutlive<'old> for Addr<'old> {
 
 impl<'old, 'new: 'old> DeepClone<'old, 'new> for Addr<'old> {
     fn deep_clone(&self) -> Self::WithLifetime<'new> {
-        let addys = (&*self.inner)
+        let addys = (&*self.inner.inner)
             .deep_clone()
             .into_iter()
-            .map(Cow::Owned)
+            .map(Supercow::owned)
             .collect();
-        Self::WithLifetime { inner: addys }
+        Self::WithLifetime {
+            inner: Array {
+                inner: Supercow::owned(addys),
+            },
+        }
     }
 }
 
@@ -40,12 +43,12 @@ impl<'a> Serializable<'a> for Addr<'a> {
     fn deserialize(
         allocator: &'a bumpalo::Bump<1>,
         buffer: &'a [u8],
-    ) -> anyhow::Result<(Cow<'a, Self>, usize)> {
-        let (deserialized, consumed) = Cow::deserialize(allocator, buffer)?;
+    ) -> anyhow::Result<(Supercow<'a, Self>, usize)> {
+        let (deserialized, consumed) = Array::deserialize(allocator, buffer)?;
         match allocator.try_alloc(Addr {
             inner: deserialized,
         }) {
-            Ok(result) => Ok((Cow::Borrowed(result), consumed)),
+            Ok(result) => Ok((Supercow::borrowed(result), consumed)),
             Err(e) => bail!(e),
         }
     }

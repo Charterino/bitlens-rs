@@ -1,3 +1,5 @@
+use supercow::Supercow;
+
 pub mod addr;
 pub mod addrv2;
 pub mod block;
@@ -25,3 +27,24 @@ pub mod varint;
 pub mod varstr;
 pub mod verack;
 pub mod version;
+
+#[derive(Debug)]
+pub struct Array<'a, T> {
+    pub inner: Supercow<'a, Vec<Supercow<'a, T>>, [Supercow<'a, T>]>,
+}
+
+impl<T> Default for Array<'_, T> {
+    fn default() -> Self {
+        Self {
+            inner: Supercow::owned(vec![]),
+        }
+    }
+}
+
+impl<T: Clone> Clone for Array<'_, T> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
+}
