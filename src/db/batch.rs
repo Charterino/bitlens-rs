@@ -7,7 +7,7 @@ use tokio::{
     time::{Instant, sleep_until},
 };
 
-use super::CONNECTION;
+use super::sqlite::CONNECTION;
 
 const BATCH_SIZE: usize = 2048; // batch a lot of inserts/updates together because it doesn't matter if it executes 5 seconds later
 const BATCH_TIMEOUT: Duration = Duration::from_secs(5); // Flush the updates at least every 5 seconds

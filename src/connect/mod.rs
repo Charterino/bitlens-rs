@@ -53,7 +53,7 @@ async fn handshake(conn: &mut Connection) -> Result<Version<'static>> {
             .unwrap()
             .as_secs(),
         nonce: rand::rng().next_u64(),
-        user_agent: VarStr::from("semikek"),
+        user_agent: Cow::Owned(VarStr::from("semikek")),
         version: 70016,
         ..Default::default()
     };

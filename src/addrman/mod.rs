@@ -9,7 +9,10 @@ use tokio::time::sleep;
 
 use crate::{
     connect::{connect_and_handshake, connection::HandshakedConnection},
-    db::{self, ban_peer, delete_peer},
+    db::{
+        self,
+        sqlite::{ban_peer, delete_peer, get_all_peers, insert_peer},
+    },
     types::addressportnetwork::AddressPortNetwork,
     util::online_list::OnlineList,
 };
@@ -26,7 +29,7 @@ static ONLINE_PEERS: LazyLock<RwLock<OnlineList>> =
     LazyLock::new(|| RwLock::new(OnlineList::new(Duration::from_secs(60 * 3))));
 
 pub async fn start() {
-    let all_peers = db::get_all_peers().await;
+    let all_peers = get_all_peers().await;
 
     let mut known = KNOWN_PEERS.lock().unwrap();
     let mut to_check = PEERS_TO_CHECK.lock().unwrap();
@@ -62,7 +65,7 @@ pub async fn peers_seen(apns: Vec<AddressPortNetwork>, time: u64) {
         w.extend_from_slice(&should_pass_to_sqlite);
     }
     for apn in should_pass_to_sqlite {
-        db::insert_peer(apn.clone(), time).await;
+        insert_peer(apn.clone(), time).await;
     }
 }
 
@@ -85,7 +88,7 @@ pub async fn update_peer_from_version(
     block_height: u32,
     user_agent: Vec<u8>,
 ) {
-    db::update_peer_from_version(apn, services, block_height, user_agent).await;
+    db::sqlite::update_peer_from_version(apn, services, block_height, user_agent).await;
 }
 
 pub fn get_alive_peer(services: Option<u64>) -> Option<AddressPortNetwork> {

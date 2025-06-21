@@ -51,7 +51,7 @@ pub async fn start() {
 }
 
 async fn load_headers_from_sqlite() {
-    let headers = db::get_all_headers().await;
+    let headers = db::sqlite::get_all_headers().await;
     let mut w = CHAIN.write().unwrap();
     for new_header in headers {
         if new_header.total_work > w.top_header.total_work {
@@ -176,7 +176,7 @@ fn validate_and_apply_header_inner(header: &BlockHeader, w: &mut Chain) -> Resul
     w.known_headers
         .insert(new_header.header.hash, new_header.clone());
     tokio::spawn(async move {
-        db::insert_header(&new_header).await;
+        db::sqlite::insert_header(&new_header).await;
     });
 
     Ok(())
