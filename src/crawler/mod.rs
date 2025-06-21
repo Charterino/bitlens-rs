@@ -1,10 +1,8 @@
-use std::{
-    borrow::Cow,
-    time::{Duration, SystemTime, UNIX_EPOCH},
-};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Error, Result, bail};
 use slog_scope::{debug, info};
+use supercow::Supercow;
 use tokio::time::{self, Instant, sleep};
 
 use crate::{
@@ -163,7 +161,7 @@ async fn crawl(peer: &AddressPortNetwork, res: &mut CrawlResult) -> Result<()> {
     .await;
     connection
         .inner
-        .write_packet(&PacketPayloadType::GetAddr(Cow::Owned(GetAddr {})))
+        .write_packet(&PacketPayloadType::GetAddr(Supercow::owned(GetAddr {})))
         .await?;
     loop {
         {
@@ -186,8 +184,8 @@ fn handle_payload(payload: &PacketPayloadType) {
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_secs();
-            let mut apns = Vec::with_capacity(addys.inner.len());
-            for addy in addys.inner.iter() {
+            let mut apns = Vec::with_capacity(addys.inner.inner.len());
+            for addy in addys.inner.inner.iter() {
                 let (network_id, addy_bytes) = match *addy.addr {
                     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, a, b, c, d] => {
                         (NetworkId::IPv4, vec![a, b, c, d])
@@ -207,8 +205,8 @@ fn handle_payload(payload: &PacketPayloadType) {
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_secs();
-            let mut apns = Vec::with_capacity(addys.inner.len());
-            for addy in addys.inner.iter() {
+            let mut apns = Vec::with_capacity(addys.inner.inner.len());
+            for addy in addys.inner.inner.iter() {
                 let (network_id, addy_bytes) = match (addy.network_id, addy.address.inner.len()) {
                     (NetworkId::IPv4, 4) => (NetworkId::IPv4, addy.address.inner.to_vec()),
                     (NetworkId::IPv6, 16) => match addy.address.inner.get(0..16).unwrap() {

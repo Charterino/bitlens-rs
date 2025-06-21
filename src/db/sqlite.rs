@@ -1,11 +1,11 @@
 use std::{
-    borrow::Cow,
     collections::HashMap,
     sync::{LazyLock, Mutex},
     time::SystemTime,
 };
 
 use rusqlite::Connection;
+use supercow::Supercow;
 use tokio::sync::mpsc::Sender;
 
 use crate::{
@@ -151,8 +151,8 @@ pub async fn get_all_headers() -> Vec<BlockHeaderWithNumber<'static>> {
         .query_map([], |row| {
             let header = BlockHeader {
                 version: row.get(0)?,
-                parent: Cow::Owned(row.get(1)?),
-                merkle_root: Cow::Owned(row.get(2)?),
+                parent: Supercow::owned(row.get(1)?),
+                merkle_root: Supercow::owned(row.get(2)?),
                 timestamp: row.get(3)?,
                 bits: row.get(4)?,
                 nonce: row.get(5)?,
@@ -180,8 +180,8 @@ pub async fn get_all_headers() -> Vec<BlockHeaderWithNumber<'static>> {
 pub async fn insert_header(header: &BlockHeaderWithNumber<'_>) {
     INSERT_HEADER_QUEUE
         .send(InsertHeaderRequest {
-            parent: header.header.parent.clone().into_owned(),
-            merkle_root: header.header.merkle_root.clone().into_owned(),
+            parent: *header.header.parent,
+            merkle_root: *header.header.merkle_root,
             timestamp: header.header.timestamp,
             bits: header.header.bits,
             nonce: header.header.nonce,

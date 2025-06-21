@@ -1,13 +1,16 @@
-use std::{borrow::Cow, sync::atomic::Ordering, time::Duration};
+use std::{sync::atomic::Ordering, time::Duration};
 
 use crate::{
     addrman,
     chainman::{CHAIN, validate_and_apply_headers},
     ok_or_break,
-    packets::{blockheader::BlockHeader, getheaders::GetHeaders, packetpayload::PacketPayloadType},
+    packets::{
+        SupercowVec, blockheader::BlockHeader, getheaders::GetHeaders, packetpayload::PacketPayloadType,
+    },
     with_deadline,
 };
 use slog_scope::info;
+use supercow::Supercow;
 use tokio::time::Instant;
 
 use super::{SYNCING_HEADERS, build_get_headers, need_ihd};
@@ -54,12 +57,13 @@ fn handle_packet_during_headersync<'packet, 'ret: 'packet, 'params: 'ret>(
     deadline: &mut Instant,
 ) -> Option<Vec<PacketPayloadType<'ret>>> {
     if let PacketPayloadType::Headers(headers) = packet {
-        if headers.inner.is_empty() {
+        if headers.inner.inner.is_empty() {
             *need_break = true;
             return None;
         }
         if validate_and_apply_headers(
             &headers
+                .inner
                 .inner
                 .iter()
                 .map(|x| x.as_ref())
@@ -74,11 +78,15 @@ fn handle_packet_during_headersync<'packet, 'ret: 'packet, 'params: 'ret>(
         info!("chainman: header sync progress"; "top hash" => r.top_header.header.human_hash(), "top number" => r.top_header.number);
         *deadline = Instant::now().checked_add(HEADERS_TIMEOUT).unwrap();
         if need_ihd() {
-            return Some(vec![PacketPayloadType::GetHeaders(Cow::Owned(
+            return Some(vec![PacketPayloadType::GetHeaders(Supercow::owned(
                 GetHeaders {
                     version: 70016,
-                    block_locator: Cow::Owned(vec![Cow::Owned(headers.inner.last().unwrap().hash)]),
-                    hash_stop: Cow::Owned([0u8; 32]),
+                    block_locator: SupercowVec {
+                        inner: Supercow::owned(vec![Supercow::owned(
+                            headers.inner.inner.last().unwrap().hash,
+                        )]),
+                    },
+                    hash_stop: Supercow::owned([0u8; 32]),
                 },
             ))]);
         } else {

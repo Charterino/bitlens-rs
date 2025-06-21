@@ -1,5 +1,4 @@
 use std::{
-    borrow::Cow,
     sync::{
         LazyLock, RwLock,
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -12,11 +11,12 @@ use blocksync::sync_blocks;
 use chain::Chain;
 use headersync::sync_headers;
 use slog_scope::info;
+use supercow::Supercow;
 
 use crate::{
     db,
     packets::{
-        blockheader::BlockHeader, deepclone::DeepClone, getheaders::GetHeaders,
+        SupercowVec, blockheader::BlockHeader, deepclone::DeepClone, getheaders::GetHeaders,
         packetpayload::PacketPayloadType,
     },
     some_or_break,
@@ -88,10 +88,12 @@ fn build_get_headers<'a>() -> PacketPayloadType<'a> {
     let r = CHAIN.read().unwrap();
     if r.top_header.number == 0 {
         // Starting from zero!
-        return PacketPayloadType::GetHeaders(Cow::Owned(GetHeaders {
+        return PacketPayloadType::GetHeaders(Supercow::owned(GetHeaders {
             version: 70016,
-            block_locator: Cow::Owned(vec![Cow::Owned(r.top_header.header.hash)]),
-            hash_stop: Cow::Owned([0u8; 32]),
+            block_locator: SupercowVec {
+                inner: Supercow::owned(vec![Supercow::owned(r.top_header.header.hash)]),
+            },
+            hash_stop: Supercow::owned([0u8; 32]),
         }));
     }
 
@@ -99,7 +101,7 @@ fn build_get_headers<'a>() -> PacketPayloadType<'a> {
     let mut step = 1;
 
     let mut current = &r.top_header;
-    block_locator.push(Cow::Owned(current.header.hash));
+    block_locator.push(Supercow::owned(current.header.hash));
 
     while current.number > 0 {
         if block_locator.len() >= 10 {
@@ -111,7 +113,7 @@ fn build_get_headers<'a>() -> PacketPayloadType<'a> {
         match r.get_ancestor(current, current.number - step) {
             Some(new) => {
                 current = new;
-                block_locator.push(Cow::Owned(current.header.hash));
+                block_locator.push(Supercow::owned(current.header.hash));
             }
             None => {
                 // Should never happen?!
@@ -124,10 +126,12 @@ fn build_get_headers<'a>() -> PacketPayloadType<'a> {
         }
     }
 
-    PacketPayloadType::GetHeaders(Cow::Owned(GetHeaders {
+    PacketPayloadType::GetHeaders(Supercow::owned(GetHeaders {
         version: 70016,
-        block_locator: Cow::Owned(block_locator),
-        hash_stop: Cow::Owned([0u8; 32]),
+        block_locator: SupercowVec {
+            inner: Supercow::owned(block_locator),
+        },
+        hash_stop: Supercow::owned([0u8; 32]),
     }))
 }
 

@@ -1,11 +1,9 @@
-use std::{
-    borrow::Cow,
-    time::{Duration, SystemTime, UNIX_EPOCH},
-};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Result, bail};
 use connection::{Connection, HandshakedConnection};
 use rand::RngCore;
+use supercow::Supercow;
 use tokio::{
     io::{BufReader, BufWriter},
     select,
@@ -53,11 +51,11 @@ async fn handshake(conn: &mut Connection) -> Result<Version<'static>> {
             .unwrap()
             .as_secs(),
         nonce: rand::rng().next_u64(),
-        user_agent: Cow::Owned(VarStr::from("semikek")),
+        user_agent: Supercow::owned(VarStr::from("semikek")),
         version: 70016,
         ..Default::default()
     };
-    conn.write_packet(&PacketPayloadType::Version(Cow::Owned(version)))
+    conn.write_packet(&PacketPayloadType::Version(Supercow::owned(version)))
         .await?;
 
     let mut remote_version: Option<Version> = None;
@@ -104,12 +102,16 @@ fn handle_packet_during_handshaking<'packet, 'ret: 'packet, 'params: 'ret>(
             let mut res: Vec<PacketPayloadType<'ret>> = vec![];
             // BIP 155
             if rv.version > 70016 {
-                res.push(PacketPayloadType::SendAddrV2(Cow::Owned(SendAddrV2 {})));
+                res.push(PacketPayloadType::SendAddrV2(Supercow::owned(
+                    SendAddrV2 {},
+                )));
             }
-            res.push(PacketPayloadType::VerAck(Cow::Owned(VerAck {})));
+            res.push(PacketPayloadType::VerAck(Supercow::owned(VerAck {})));
             // BIP 130
             if rv.version > 70012 {
-                res.push(PacketPayloadType::SendHeaders(Cow::Owned(SendHeaders {})));
+                res.push(PacketPayloadType::SendHeaders(Supercow::owned(
+                    SendHeaders {},
+                )));
             }
             *success = true;
             return Ok(Some(res));
