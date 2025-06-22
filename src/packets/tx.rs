@@ -5,7 +5,7 @@ use super::{
     packetpayload::{
         PacketPayload, Serializable, SerializableSupercowVecOfCows, SerializableValue,
     },
-    varint::VarInt,
+    varint::{VarInt, varint_len, varint_serialize},
     varstr::VarStr,
 };
 use anyhow::{Result, anyhow, bail};
@@ -284,5 +284,19 @@ impl<'script> SerializableValue<'script> for TxOut<'static> {
 impl<'short, 'long: 'short> TxOut<'long> {
     pub fn covariant(&self) -> &TxOut<'short> {
         unsafe { std::mem::transmute(self) }
+    }
+
+    pub fn serialized_length(&self) -> usize {
+        8 + varint_len(self.script.inner.len() as VarInt) + self.script.inner.len()
+    }
+
+    pub fn flat_serialize(&self, slice: &mut [u8]) -> usize {
+        let b = self.value.to_le_bytes();
+        slice.get_mut(0..8).unwrap().copy_from_slice(b.as_slice());
+        let start_of_script =
+            8 + varint_serialize(self.script.inner.len() as VarInt, &mut slice[8..]);
+        slice[start_of_script..start_of_script + self.script.inner.len()]
+            .copy_from_slice(&*self.script.inner);
+        start_of_script + self.script.inner.len()
     }
 }

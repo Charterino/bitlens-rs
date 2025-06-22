@@ -33,3 +33,37 @@ impl<'a> SerializableValue<'a> for VarInt {
         }
     }
 }
+
+pub const fn varint_len(v: VarInt) -> usize {
+    if v < 0xFD {
+        1
+    } else if v < 0xFFFF {
+        3
+    } else if v < 0xFFFFFFFF {
+        5
+    } else {
+        9
+    }
+}
+
+pub fn varint_serialize(v: VarInt, into: &mut [u8]) -> usize {
+    if v < 0xFD {
+        into[0] = v as u8;
+        1
+    } else if v < 0xFFFF {
+        into[0] = 0xFD;
+        let s = (v as u16).to_le_bytes();
+        into[1..].copy_from_slice(s.as_slice());
+        3
+    } else if v < 0xFFFFFFFF {
+        into[0] = 0xFE;
+        let s = (v as u32).to_le_bytes();
+        into[1..].copy_from_slice(s.as_slice());
+        5
+    } else {
+        into[0] = 0xFF;
+        let s = (v as u64).to_le_bytes();
+        into[1..].copy_from_slice(s.as_slice());
+        9
+    }
+}
