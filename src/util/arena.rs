@@ -127,6 +127,10 @@ impl Arena {
         }
         bail!("arena: out of memory")
     }
+
+    pub fn reset(&mut self) {
+        self.consumed.store(0, Ordering::Relaxed);
+    }
 }
 
 impl Drop for Arena {
