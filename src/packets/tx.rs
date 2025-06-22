@@ -296,7 +296,7 @@ impl<'short, 'long: 'short> TxOut<'long> {
         let start_of_script =
             8 + varint_serialize(self.script.inner.len() as VarInt, &mut slice[8..]);
         slice[start_of_script..start_of_script + self.script.inner.len()]
-            .copy_from_slice(&*self.script.inner);
+            .copy_from_slice(&self.script.inner);
         start_of_script + self.script.inner.len()
     }
 }

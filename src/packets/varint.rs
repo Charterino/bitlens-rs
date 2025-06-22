@@ -62,7 +62,7 @@ pub fn varint_serialize(v: VarInt, into: &mut [u8]) -> usize {
         5
     } else {
         into[0] = 0xFF;
-        let s = (v as u64).to_le_bytes();
+        let s = v.to_le_bytes();
         into[1..].copy_from_slice(s.as_slice());
         9
     }

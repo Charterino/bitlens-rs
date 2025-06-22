@@ -80,7 +80,7 @@ fn need_ihd() -> bool {
 // Do we need to sync block bodies?
 fn need_ibd() -> bool {
     let r = CHAIN.read().unwrap();
-    return r.top_header.number - DOWNLOADED_BLOCKS.load(Ordering::Relaxed) > 0;
+    r.top_header.number - DOWNLOADED_BLOCKS.load(Ordering::Relaxed) > 0
 }
 
 // Constructs a `getheaders` packet with `BlockLocator` that allows the remote peer to detect that we are on the wrong branch

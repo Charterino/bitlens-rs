@@ -81,7 +81,7 @@ impl<'a> Serializable<'a> for Block<'a> {
         }
 
         match allocator.try_alloc(Block {
-            header: header,
+            header,
             txs,
         }) {
             Ok(result) => Ok((Supercow::borrowed(result), offset + 80)),

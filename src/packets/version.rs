@@ -81,8 +81,8 @@ impl<'a> Serializable<'a> for Version<'a> {
         match allocator.try_alloc(Version {
             services,
             timestamp,
-            addrrecv: addrrecv,
-            addrfrom: addrfrom,
+            addrrecv,
+            addrfrom,
             nonce,
             user_agent: ua,
             start_height,
