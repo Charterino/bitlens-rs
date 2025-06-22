@@ -1,22 +1,30 @@
+use core::panic;
 use std::{
-    borrow::Cow,
     collections::HashMap,
+    mem::{swap, transmute},
     num::NonZeroUsize,
     sync::{Arc, Mutex, RwLock, atomic::Ordering},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use slog_scope::info;
+use supercow::Supercow;
 use tokio::{
+    join,
     sync::mpsc::{Receiver, Sender, channel},
+    task::JoinHandle,
     time::Instant,
 };
 
 use crate::{
     addrman,
-    db::{self, rocksdb::SerializedTx},
+    db::{
+        self,
+        rocksdb::{SerializedTx, write_analyzed_txs},
+    },
     ok_or_break, ok_or_continue, ok_or_return,
     packets::{
+        SupercowVec,
         block::Block,
         getdata::GetData,
         invvector::{InventoryVector, InventoryVectorType},
@@ -55,8 +63,9 @@ pub async fn sync_blocks() {
     for _ in 0..50 {
         tokio::spawn(run_download_worker(master_tx.clone()));
     }
-    tokio::spawn(run_master(master_rx, flush_tx));
-    tokio::spawn(receive_and_process_blocks(flush_rx));
+    let master = tokio::spawn(run_master(master_rx, flush_tx));
+    let block_writer = tokio::spawn(receive_and_process_blocks(flush_rx));
+    let _ = join!(master, block_writer);
     packet::CURRENT_POOL_LIMIT.store(packet::INITIAL_DESERIALIZE_ARENA_COUNT, Ordering::Relaxed);
 }
 
@@ -293,7 +302,7 @@ async fn run_download_worker(master: Sender<DownloadWorkerMessage>) {
                 );
                 (job, job_number) = some_or_return!(reply_rx.recv().await);
                 job_packet = job_to_getdata(job);
-                ok_or_continue!(connection.inner.write_packet(&job_packet).await);
+                ok_or_break!(connection.inner.write_packet(&job_packet).await);
                 deadline = Instant::now().checked_add(BLOCK_TIMEOUT).unwrap();
             }
         }
@@ -312,11 +321,13 @@ async fn fetch_job(
 }
 
 fn job_to_getdata(hash: [u8; 32]) -> PacketPayloadType<'static> {
-    PacketPayloadType::GetData(Cow::Owned(GetData {
-        inner: Cow::Owned(vec![Cow::Owned(InventoryVector {
-            inv_type: InventoryVectorType::WitnessBlock,
-            hash: Cow::Owned(hash),
-        })]),
+    PacketPayloadType::GetData(Supercow::owned(GetData {
+        inner: SupercowVec {
+            inner: Supercow::owned(vec![Supercow::owned(InventoryVector {
+                inv_type: InventoryVectorType::WitnessBlock,
+                hash: Supercow::owned(hash),
+            })]),
+        },
     }))
 }
 
@@ -329,44 +340,131 @@ struct ChainSyncState<'arena> {
 }
 
 async fn receive_and_process_blocks(mut recv: Receiver<(PayloadWithAllocator, u64)>) {
-    let mut current_blocks = Vec::with_capacity(MAX_BLOCKS_PER_FLUSH);
-    let current_state = Arc::new(RwLock::new(ChainSyncState {
-        current_txouts: HashMap::new(),
-        previous_txouts: HashMap::new(),
-        current_analyzed: Vec::with_capacity(MAX_BLOCKS_PER_FLUSH),
+    let mut current_arena = Arena::new(MAX_BLOCKS_PER_FLUSH * MAX_PACKET_SIZE);
+    let mut previous_arena = Arena::new(MAX_BLOCKS_PER_FLUSH * MAX_PACKET_SIZE);
+    let mut current_state = Arc::new(RwLock::new(ChainSyncState {
+        current_txouts: HashMap::new(), // values live in `current_arena`
+        current_analyzed: Vec::with_capacity(MAX_BLOCKS_PER_FLUSH), // values live in `current_arena`
+        previous_txouts: HashMap::new(), // values live in `previous_arena`
     }));
-    let current_arena: Arena = Arena::new(MAX_BLOCKS_PER_FLUSH * MAX_PACKET_SIZE);
-    // TODO
-    while let Some(b) = recv.recv().await {
-        // Have to instantly insert transactions from this block because they might be needed in the next block
-        b.0.with_block(|block| {
-            current_blocks.push(block.header.hash);
-            let mut w = current_state.write().unwrap();
-            insert_transactions_from_block(block, &current_arena, &mut w.current_txouts)
-                .expect("to have inserted txs from the current block");
-        });
 
-        // local.spawn_local(process_block(b.0, current_state.clone(), &current_arena));
+    let mut running_flush: Option<JoinHandle<()>> = None;
+    while !recv.is_closed() {
+        // Will get the next MAX_BLOCKS_PER_FLUSH blocks and add them to `current_txouts` and `current_analyzed`
+        // and return their hashes
+        let next_batch =
+            get_next_batch_to_flush(&mut recv, current_state.clone(), &current_arena).await;
 
-        if current_blocks.len() == MAX_BLOCKS_PER_FLUSH {
-            // flush
+        // wait for the current flush to finish
+        if let Some(h) = running_flush {
+            h.await.expect("the flush to finish successfully");
         }
+
+        // So everything is flushed now
+        let ChainSyncState {
+            mut current_txouts,
+            current_analyzed,
+            mut previous_txouts,
+        } = Arc::into_inner(current_state)
+            .expect("to have no other arcs for current_state")
+            .into_inner()
+            .unwrap();
+
+        // Right now we have:
+        // current_txouts + current_analyzed -> current_arena
+        // previous_txouts + (dropped) previous_analyzed -> previous_arena
+        //
+        // Clean previous_txouts + previous_arena, and swap everything:
+        // (current_arena, previous_arena) = (previous_arena, current_arena)
+        // (current_txouts, previous_txouts) = (previous_txouts, current_txouts)
+
+        // turn current_analyzed<'current_arena> into previous_analyzed<'static> so we can tokio::spawn it
+        // the returned handle will be awaited before we reset the arena that it borrows data from
+        let static_previous_analyzed =
+            unsafe { transmute::<_, Vec<&'static [SerializedTx<'static>]>>(current_analyzed) };
+
+        unsafe {
+            // Swap current_txouts_arena and previous_txouts_arena
+            // and current_txouts with previous_txouts
+            // then reset the current/prev-prev arena + hashmap
+            // unsafe because we transmute lifetimes but I don't know if there's a better way
+            let txouts_prev_from_cur = transmute(current_txouts);
+            let txouts_cur_from_prev = transmute(previous_txouts);
+            previous_txouts = txouts_prev_from_cur;
+            current_txouts = txouts_cur_from_prev;
+            swap(&mut current_arena, &mut previous_arena);
+            // After we swapped the arenas, `static_previous_analyzed` borrows data from `previous_arena`
+            // Now that we have swapped the txouts and arenas, clear the current arena + txouts
+            current_txouts.clear();
+            current_arena.reset();
+        };
+
+        running_flush = Some(tokio::spawn(write_analyzed_txs(
+            next_batch,
+            static_previous_analyzed,
+        )));
+
+        current_state = Arc::new(RwLock::new(ChainSyncState {
+            current_txouts,
+            current_analyzed: Vec::with_capacity(MAX_BLOCKS_PER_FLUSH),
+            previous_txouts,
+        }));
+    }
+
+    if let Some(h) = running_flush {
+        h.await.expect("the flush to finish successfully");
     }
 }
 
-fn insert_transactions_from_block<'arena, 'block>(
-    block: &Block<'block>,
+async fn get_next_batch_to_flush<'l>(
+    recv: &mut Receiver<(PayloadWithAllocator, u64)>,
+    current_state: Arc<RwLock<ChainSyncState<'l>>>,
+    current_arena: &'l Arena,
+) -> Vec<[u8; 32]> {
+    let mut current_blocks = Vec::with_capacity(MAX_BLOCKS_PER_FLUSH);
+    unsafe {
+        let mut scope = async_scoped::Scope::create(async_scoped::spawner::use_tokio::Tokio);
+        while let Some(b) = recv.recv().await {
+            // Have to instantly insert transactions from this block because they might be needed in the next block
+            {
+                let payload =
+                    b.0.borrow_payload()
+                        .as_ref()
+                        .expect("the payload to not be empty");
+                if let PacketPayloadType::Block(block) = payload {
+                    current_blocks.push(block.header.hash);
+                    let mut w = current_state.write().unwrap();
+                    insert_transactions_from_block(block, current_arena, &mut w.current_txouts)
+                        .expect("to have inserted txs from the current block");
+                } else {
+                    unreachable!()
+                }
+            }
+
+            scope.spawn(process_block(b.0, current_state.clone(), current_arena));
+
+            if current_blocks.len() == MAX_BLOCKS_PER_FLUSH {
+                break;
+            }
+        }
+        scope.collect().await;
+    }
+    current_blocks
+}
+
+fn insert_transactions_from_block<'arena>(
+    block: &Block<'_>,
     arena: &'arena Arena,
     txouts: &mut HashMap<[u8; 32], Vec<&'arena TxOut<'arena>>>,
 ) -> Result<()> {
-    for tx in block.txs.iter() {
-        let mut cloned = Vec::with_capacity(tx.txouts.len());
-        for txout in tx.txouts.iter() {
+    for tx in block.txs.inner.iter() {
+        let mut cloned = Vec::with_capacity(tx.txouts.inner.len());
+        for txout in tx.txouts.inner.iter() {
             let cloned_script = arena.try_alloc_array_copy(txout.script.inner.as_ref())?;
             let txout = match arena.try_alloc(TxOut {
                 value: txout.value,
-                script: Cow::Owned(VarStr {
-                    inner: Cow::Borrowed(cloned_script),
+                script: Supercow::owned(VarStr {
+                    inner: Supercow::borrowed(cloned_script),
                 }),
             }) {
                 Ok(p) => p,
@@ -382,7 +480,7 @@ fn insert_transactions_from_block<'arena, 'block>(
 async fn process_block<'arena>(
     payload: PayloadWithAllocator,
     current_state: Arc<RwLock<ChainSyncState<'arena>>>,
-    arena: &'static Arena,
+    analyzed_arena: &'arena Arena,
 ) {
     payload
         .with_block_async(async |block| {
@@ -398,28 +496,27 @@ async fn process_block<'arena>(
             // - current_txouts: blocks that are still being processed
             // - previous_txouts: last batch of block that is already processed and is being flushed to disk
             // - deps_from_disk
-            let analyzed_txs = arena
-                .try_alloc_array_fill_copy(block.txs.len(), SerializedTx::default())
+            let analyzed_txs = analyzed_arena
+                .try_alloc_array_fill_copy(block.txs.inner.len(), SerializedTx::default())
                 .expect("to have allocated analyzed_txs");
-            for tx_idx in 0..block.txs.len() {
-                let tx = &block.txs[tx_idx];
+            for (tx_idx, tx) in block.txs.inner.iter().enumerate() {
                 // Assemble the dependencies
-                let mut deps = Vec::with_capacity(tx.txins.len());
-                for txin_idx in 0..tx.txins.len() {
-                    let txin = &tx.txins[txin_idx];
+                let mut deps = Vec::with_capacity(tx.txins.inner.len());
+                for txin_idx in 0..tx.txins.inner.len() {
+                    let txin = &tx.txins.inner[txin_idx];
                     if *txin.prevout_hash == [0u8; 32] {
                         continue;
                     }
                     // Is it in current_txouts?..
                     if let Some(txouts) = current_txouts.get(&*txin.prevout_hash) {
                         let p = *txouts.get(txin.prevout_index as usize).unwrap();
-                        deps.push(&*p);
+                        deps.push(p);
                         continue;
                     }
                     // Maybe in previous_txouts?..
                     if let Some(txouts) = previous_txouts.get(&*txin.prevout_hash) {
                         let p = *txouts.get(txin.prevout_index as usize).unwrap();
-                        deps.push(&*p);
+                        deps.push(p);
                         continue;
                     }
                     // Must be in deps_from_disk at `current_deps_index`
@@ -429,7 +526,7 @@ async fn process_block<'arena>(
                     deps_from_disk_index += 1;
                 }
                 // Analyze this tx
-                let analyzed = tx::analyze_tx(tx, &deps, arena);
+                let analyzed = tx::analyze_tx(tx, &deps, analyzed_arena);
                 analyzed_txs[tx_idx] = analyzed;
             }
             drop(r);
@@ -449,9 +546,9 @@ async fn fetch_missing_dependencies(
     {
         let r = current_state.read().unwrap();
         let mut w = loaded_deps.lock().unwrap();
-        for tx in block.txs.iter() {
-            for txin_idx in 0..tx.txins.len() {
-                let txin = &tx.txins[txin_idx];
+        for tx in block.txs.inner.iter() {
+            for txin_idx in 0..tx.txins.inner.len() {
+                let txin = &tx.txins.inner[txin_idx];
                 // Skip empty hashes
                 if *txin.prevout_hash == [0u8; 32] {
                     continue;
@@ -465,11 +562,15 @@ async fn fetch_missing_dependencies(
                     continue;
                 }
                 w.push(None);
-                loaded_deps_handles.push(tokio::spawn(fetch_dependency_and_insert(
-                    txin.prevout_hash.clone().into_owned(),
-                    txin.prevout_index as usize,
-                    loaded_deps.clone(),
-                    w.len(),
+                let len = w.len();
+                let cloned_deps = loaded_deps.clone();
+                let hash = *txin.prevout_hash;
+                let index = txin.prevout_index as usize;
+                loaded_deps_handles.push(tokio::task::spawn(fetch_dependency_and_insert(
+                    hash,
+                    index,
+                    cloned_deps,
+                    len - 1,
                 )));
             }
         }

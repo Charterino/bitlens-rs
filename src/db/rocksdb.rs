@@ -84,6 +84,9 @@ pub async fn get_transaction_outputs(hash: [u8; 32]) -> Result<Vec<TxOut<'static
 }
 
 pub async fn write_analyzed_txs(blocks: Vec<[u8; 32]>, txs: Vec<&[SerializedTx<'_>]>) {
+    // TODO: go thru sqlite first and check what blocks we actually need to write
+    // and update fetched_full field
+
     let serialized_txhashes: Vec<Vec<u8>> = txs
         .iter()
         .map(|block| block.iter().map(|tx| tx.hash).collect::<Vec<[u8; 32]>>())
