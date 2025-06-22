@@ -94,7 +94,7 @@ impl Arena {
 
     #[inline(always)]
     pub fn try_alloc_array_copy<T: Sized + Copy>(&self, value: &[T]) -> Result<&mut [T]> {
-        let size = size_of::<T>() * value.len();
+        let size = size_of_val(value);
         let mut currently_consumed = self.consumed.load(Ordering::Relaxed);
         let cap = self.capacity;
         let mut padding = if size != 0 {
