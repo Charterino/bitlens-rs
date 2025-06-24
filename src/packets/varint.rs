@@ -53,17 +53,17 @@ pub fn varint_serialize(v: VarInt, into: &mut [u8]) -> usize {
     } else if v < 0xFFFF {
         into[0] = 0xFD;
         let s = (v as u16).to_le_bytes();
-        into[1..].copy_from_slice(s.as_slice());
+        into[1..3].copy_from_slice(s.as_slice());
         3
     } else if v < 0xFFFFFFFF {
         into[0] = 0xFE;
         let s = (v as u32).to_le_bytes();
-        into[1..].copy_from_slice(s.as_slice());
+        into[1..5].copy_from_slice(s.as_slice());
         5
     } else {
         into[0] = 0xFF;
         let s = v.to_le_bytes();
-        into[1..].copy_from_slice(s.as_slice());
+        into[1..9].copy_from_slice(s.as_slice());
         9
     }
 }
