@@ -18,10 +18,7 @@ use tokio::{
 
 use crate::{
     addrman,
-    db::{
-        self,
-        rocksdb::{SerializedTx, write_analyzed_txs},
-    },
+    db::{self, rocksdb::SerializedTx, write_analyzed_txs},
     ok_or_break, ok_or_continue, ok_or_return,
     packets::{
         SupercowVec,
@@ -425,6 +422,9 @@ async fn get_next_batch_to_flush<'l>(
     unsafe {
         let mut scope = async_scoped::Scope::create(async_scoped::spawner::use_tokio::Tokio);
         while let Some(b) = recv.recv().await {
+            if b.1 % 1000 == 0 {
+                info!("sync progress"; "current_height" => b.1);
+            }
             // Have to instantly insert transactions from this block because they might be needed in the next block
             {
                 let payload =

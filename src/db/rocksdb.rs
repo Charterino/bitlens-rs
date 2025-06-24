@@ -2,7 +2,6 @@ use crate::packets::buffer::Buffer;
 use crate::packets::packetpayload::SerializableValue;
 use crate::packets::tx::TxOut;
 use crate::packets::varint::VarInt;
-use crate::packets::varint::varint_len;
 use anyhow::Result;
 use anyhow::bail;
 use rocksdb::{DB, IngestExternalFileOptions, Options};
@@ -83,44 +82,7 @@ pub async fn get_transaction_outputs(hash: [u8; 32]) -> Result<Vec<TxOut<'static
     .await?
 }
 
-pub async fn write_analyzed_txs(blocks: Vec<[u8; 32]>, txs: Vec<&[SerializedTx<'_>]>) {
-    // TODO: go thru sqlite first and check what blocks we actually need to write
-    // and update fetched_full field
-
-    let serialized_txhashes: Vec<Vec<u8>> = txs
-        .iter()
-        .map(|block| block.iter().map(|tx| tx.hash).collect::<Vec<[u8; 32]>>())
-        .map(|hashes| {
-            let length = varint_len(hashes.len() as VarInt);
-            let mut serialized = Vec::with_capacity(length + (hashes.len() * 32));
-            (hashes.len() as VarInt).serialize(&mut serialized);
-
-            for tx in hashes {
-                serialized.extend_from_slice(&tx);
-            }
-
-            serialized
-        })
-        .collect();
-    let mut blocks_with_txs_pairs: Vec<([u8; 32], Vec<u8>)> = blocks
-        .into_iter()
-        .zip(serialized_txhashes.into_iter())
-        .collect();
-    // sort by hash before ingestion
-    blocks_with_txs_pairs.sort_by(|a, b| a.0.cmp(&b.0));
-
-    let mut collapsed: Vec<&SerializedTx> = txs.into_iter().flatten().collect();
-    // sort by hash before ingestion
-    collapsed.sort_by(|a, b| a.hash.cmp(&b.hash));
-
-    async_scoped::TokioScope::scope_and_block(|s| {
-        s.spawn(write_txouts(&collapsed));
-        s.spawn(write_txs(&collapsed));
-        s.spawn(write_block_txs(blocks_with_txs_pairs));
-    });
-}
-
-async fn write_txouts(txs: &Vec<&SerializedTx<'_>>) {
+pub async fn write_txouts(txs: &Vec<&SerializedTx<'_>>) {
     let mut writer = rocksdb::SstFileWriter::create(&OPEN_OPTIONS);
     writer
         .open("bitlens-txouts-temp.sst")
@@ -145,7 +107,7 @@ async fn write_txouts(txs: &Vec<&SerializedTx<'_>>) {
     TXOUTS_DB.flush().expect("to flush txouts");
 }
 
-async fn write_txs(txs: &Vec<&SerializedTx<'_>>) {
+pub async fn write_txs(txs: &Vec<&SerializedTx<'_>>) {
     let mut writer = rocksdb::SstFileWriter::create(&OPEN_OPTIONS);
     writer
         .open("bitlens-txs-temp.sst")
@@ -170,7 +132,7 @@ async fn write_txs(txs: &Vec<&SerializedTx<'_>>) {
     TXS_DB.flush().expect("to flush txs");
 }
 
-async fn write_block_txs(blocks_with_txs_pairs: Vec<([u8; 32], Vec<u8>)>) {
+pub async fn write_block_txs(blocks_with_txs_pairs: Vec<(&[u8; 32], Vec<u8>)>) {
     let mut writer = rocksdb::SstFileWriter::create(&OPEN_OPTIONS);
     writer
         .open("bitlens-blocktxs-temp.sst")

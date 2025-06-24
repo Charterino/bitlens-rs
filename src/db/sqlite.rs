@@ -192,3 +192,19 @@ pub async fn insert_header(header: &BlockHeaderWithNumber<'_>) {
         .await
         .unwrap();
 }
+
+pub fn set_fetched_full(hashes: &[[u8; 32]], new_value: bool) {
+    let mut conn = CONNECTION.lock().unwrap();
+    let tx = conn.transaction().expect("to being sqlite transaction");
+    {
+        let mut stmt = tx
+            .prepare_cached("UPDATE headers SET fetched_full = ? WHERE block_hash = ?")
+            .expect("to prepare statement");
+
+        for hash in hashes {
+            stmt.execute((new_value, hash))
+                .expect("to execute fetched_full update");
+        }
+    }
+    tx.commit().expect("to commit tx");
+}
