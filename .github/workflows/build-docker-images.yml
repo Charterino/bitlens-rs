@@ -1,0 +1,68 @@
+name: Build (and later push) docker images for x86_64 and aarch64
+
+on:
+  push:
+    branches: [ master ]
+
+jobs:
+  build-and-push:
+    strategy:
+      matrix:
+        system: [x86_64-linux, aarch64-linux]
+    runs-on:
+      - self-hosted
+      - ${{ matrix.system == 'aarch64-linux' && 'ARM64' || 'x64' }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - uses: cachix/install-nix-action@v31
+
+      - name: Build Docker Image
+        run: |
+          nix build .#packages.${{matrix.system}}.dockerImage --out-link result-docker
+
+      - name: Login to registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.DOCKER_REGISTRY }}
+          username: ${{ secrets.DOCKER_REGISTRY_USER }}
+          password: ${{ secrets.DOCKER_REGISTRY_PASSWORD }}
+
+      - name: Load docker image
+        run: |
+          docker load --input result-docker
+
+      - name: Tag and push
+        run: |
+          docker tag bitlens ${{ secrets.DOCKER_REGISTRY }}/bitlens:${{ github.sha }}-${{ matrix.system }}
+          docker tag bitlens ${{ secrets.DOCKER_REGISTRY }}/bitlens:latest-${{ matrix.system }}
+          # Push
+          docker push ${{ secrets.DOCKER_REGISTRY }}/bitlens:${{ github.sha }}-${{ matrix.system }}
+          docker push ${{ secrets.DOCKER_REGISTRY }}/bitlens:latest-${{ matrix.system }}
+
+
+  publish-manifest:
+    runs-on: 'self-hosted'
+    needs: [build-and-push]
+    steps:
+      - name: Login to registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.DOCKER_REGISTRY }}
+          username: ${{ secrets.DOCKER_REGISTRY_USER }}
+          password: ${{ secrets.DOCKER_REGISTRY_PASSWORD }}
+
+      - name: Create and push manifest
+        run: |
+          # For commit SHA tag
+          docker manifest create ${{ secrets.DOCKER_REGISTRY }}/bitlens:${{ github.sha }} \
+            --amend ${{ secrets.DOCKER_REGISTRY }}/bitlens:${{ github.sha }}-aarch64-linux \
+            --amend ${{ secrets.DOCKER_REGISTRY }}/bitlens:${{ github.sha }}-x86_64-linux
+          docker manifest push ${{ secrets.DOCKER_REGISTRY }}/bitlens:${{ github.sha }}
+
+          # For latest tag
+          docker manifest create ${{ secrets.DOCKER_REGISTRY }}/bitlens:latest \
+            --amend ${{ secrets.DOCKER_REGISTRY }}/bitlens:latest-aarch64-linux \
+            --amend ${{ secrets.DOCKER_REGISTRY }}/bitlens:latest-x86_64-linux
+          docker manifest push ${{ secrets.DOCKER_REGISTRY }}/bitlens:latest

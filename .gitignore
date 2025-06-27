@@ -25,3 +25,14 @@ target/
 
 /target
 .direnv
+
+flamegraph.svg
+perf.data
+perf.data.old
+bitlens.db*
+profile.pb
+logs/
+bitlens-txs
+bitlens-txouts
+bitlens-blocktxs
+result
