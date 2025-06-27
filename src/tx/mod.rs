@@ -33,6 +33,8 @@ pub fn analyze_tx<'arena, 'data>(
         calculate_fee(tx, dependencies)
     };
 
+    let txouts_sum: u64 = tx.txouts.inner.iter().map(|x| x.value).sum();
+
     let size_wus = calculate_tx_size_wus(tx);
 
     let mut flags = SCRIPT_VERIFY_P2SH;
@@ -42,10 +44,22 @@ pub fn analyze_tx<'arena, 'data>(
 
     let sigops = get_transaction_sigop_cost(tx, dependencies, flags);
 
+    let analyzed_tx = arena
+        // serialized tx size + fee (8 bytes) + txouts_sum (8 bytes) + size_wus(4 bytes) + sigops (4 bytes)
+        .try_alloc_array_fill_copy(tx.serialized_without_txouts_sized() + 8 + 8 + 4 + 4, 0u8)
+        .expect("to allocate space for analyzed tx");
+
+    analyzed_tx[0..8].copy_from_slice(&fee.to_le_bytes());
+    analyzed_tx[8..16].copy_from_slice(&txouts_sum.to_le_bytes());
+    analyzed_tx[16..20].copy_from_slice(&size_wus.to_le_bytes());
+    analyzed_tx[20..24].copy_from_slice(&sigops.to_le_bytes());
+    let mut for_tx = &mut analyzed_tx[24..];
+    tx.serialize_without_txouts(&mut for_tx);
+
     let tx_outs = serialize_txouts(tx, arena);
     SerializedTx {
         hash: tx.hash,
-        analyzed_tx: Some(todo!()),
+        analyzed_tx: Some(analyzed_tx),
         tx_outs: Some(tx_outs),
         fee: 0,
         value: 0,

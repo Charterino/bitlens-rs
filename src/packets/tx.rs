@@ -27,6 +27,62 @@ impl Tx<'_> {
     pub fn is_coinbase(&self) -> bool {
         self.txins.inner.len() == 1 && self.txins.inner[0].is_empty()
     }
+
+    pub fn serialized_without_txouts_sized(&self) -> usize {
+        let mut total = 4; // version
+        if self.witness_data.is_some() {
+            total += 2; // witness marker
+        }
+        total += varint_len(self.txins.inner.len() as VarInt); // txins len len
+        for txin in self.txins.inner.iter() {
+            total += 40; // hash + index + sequence
+            total += varint_len(txin.sig_script.inner.len() as VarInt); // script len len
+            total += txin.sig_script.inner.len(); // script len
+        }
+
+        if let Some(witnesses) = &self.witness_data {
+            for i in 0..witnesses.inner.len() {
+                let witness = &witnesses.inner[i];
+                total += varint_len(witness.inner.len() as VarInt); // component count len
+                for j in 0..witness.inner.len() as usize {
+                    let component = &witness.inner[j];
+                    total += varint_len(component.inner.len() as VarInt); // component size len
+                    total += component.inner.len(); // component len
+                }
+            }
+        }
+
+        total += 4; // locktime
+
+        total
+    }
+
+    pub fn serialize_without_txouts(&self, stream: &mut impl bytes::BufMut) {
+        stream.put_u32_le(self.version);
+        // If we have witness data, insert 0x0001 marker
+        if self.witness_data.is_some() {
+            stream.put_u16(0x0001);
+        }
+        let length = self.txins.inner.len() as VarInt;
+        length.serialize(stream);
+        for n in 0..length as usize {
+            self.txins.inner[n].serialize(stream);
+        }
+
+        if let Some(witnesses) = &self.witness_data {
+            for i in 0..witnesses.inner.len() {
+                let witness = &witnesses.inner[i];
+                let witness_length = witness.inner.len() as VarInt;
+                witness_length.serialize(stream);
+                for j in 0..witness_length as usize {
+                    let witness_component = &witness.inner[j];
+                    Serializable::serialize(&**witness_component, stream);
+                }
+            }
+        }
+
+        stream.put_u32_le(self.locktime);
+    }
 }
 
 pub const TX_COMMAND: [u8; 12] = *b"tx\0\0\0\0\0\0\0\0\0\0";
@@ -163,8 +219,8 @@ impl<'a> Serializable<'a> for Tx<'a> {
                 let witness = &witnesses.inner[i];
                 let witness_length = witness.inner.len() as VarInt;
                 witness_length.serialize(stream);
-                for _ in 0..witness_length as usize {
-                    let witness_component = &witness.inner[i];
+                for j in 0..witness_length as usize {
+                    let witness_component = &witness.inner[j];
                     Serializable::serialize(&**witness_component, stream);
                 }
             }

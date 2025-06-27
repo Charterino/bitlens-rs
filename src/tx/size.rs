@@ -3,7 +3,7 @@ use crate::packets::{
     varint::{VarInt, varint_len},
 };
 
-pub fn calculate_tx_size_wus(tx: &Tx) -> u64 {
+pub fn calculate_tx_size_wus(tx: &Tx) -> u32 {
     let mut result = 0;
     // First we count the non-segwit data at 4 WUs per bytes
     // Version is 4 bytes so 16 WUs
@@ -52,5 +52,5 @@ pub fn calculate_tx_size_wus(tx: &Tx) -> u64 {
         }
     }
 
-    result as u64
+    result as u32
 }
