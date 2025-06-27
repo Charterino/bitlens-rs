@@ -27,6 +27,7 @@ pub mod connect;
 pub mod crawler;
 pub mod db;
 pub mod log;
+pub mod metrics;
 pub mod packets;
 pub mod tx;
 pub mod types;
@@ -60,6 +61,7 @@ async fn async_main() -> Result<()> {
     let ctrl_c_events = ctrl_channel()?;
 
     info!("starting bitlens..");
+    metrics::start().await;
 
     db::setup().await;
     addrman::start().await;

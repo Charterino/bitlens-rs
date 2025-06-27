@@ -7,6 +7,8 @@ use tokio::{
     time::{Instant, sleep_until},
 };
 
+use crate::metrics::METRIC_SQLITE_REQUESTS_TIME;
+
 use super::sqlite::CONNECTION;
 
 const BATCH_SIZE: usize = 2048; // batch a lot of inserts/updates together because it doesn't matter if it executes 5 seconds later
@@ -54,8 +56,10 @@ pub async fn batch_process_requests(
 
         let mut requests = Vec::with_capacity(BATCH_SIZE);
         swap(&mut requests, &mut pending_requests);
+        let count = requests.len();
         // Flush all the requests yay!
         let mut conn = CONNECTION.lock().unwrap();
+        let start = Instant::now();
         let tx = conn.transaction().unwrap();
         {
             let mut stmt = tx.prepare_cached(query).unwrap();
@@ -64,6 +68,11 @@ pub async fn batch_process_requests(
             }
         }
         tx.commit().unwrap();
+        let duration_total = Instant::now().duration_since(start).as_millis() as f64;
+        let duration_per_request = duration_total / count as f64;
+        for _ in 0..count {
+            METRIC_SQLITE_REQUESTS_TIME.observe(duration_per_request);
+        }
     }
 }
 

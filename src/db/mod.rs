@@ -20,7 +20,7 @@ pub async fn setup() {
     setup_rocksdb().await;
 }
 
-pub async fn write_analyzed_txs(blocks: Vec<[u8; 32]>, txs: Vec<&[SerializedTx<'_>]>) {
+pub async fn write_analyzed_txs(blocks: &[[u8; 32]], txs: Vec<&[SerializedTx<'_>]>) {
     debug_assert_eq!(blocks.len(), txs.len());
 
     let serialized_txhashes: Vec<Vec<u8>> = txs
@@ -54,5 +54,5 @@ pub async fn write_analyzed_txs(blocks: Vec<[u8; 32]>, txs: Vec<&[SerializedTx<'
     });
 
     // after we're done with txs, update fetched_full in sqlite
-    set_fetched_full(&blocks, true);
+    set_fetched_full(blocks, true);
 }

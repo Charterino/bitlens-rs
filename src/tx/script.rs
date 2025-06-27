@@ -147,8 +147,7 @@ pub fn get_transaction_sigop_cost(tx: &Tx, dependencies: &[&TxOut], flags: Scrip
     if flags & SCRIPT_VERIFY_WITNESS != 0 {
         debug_assert!(tx.witness_data.is_some());
 
-        for txin_idx in 0..tx.txins.inner.len() {
-            let txin = &tx.txins.inner[txin_idx];
+        for (txin_idx, txin) in tx.txins.inner.iter().enumerate() {
             let txout = dependencies[txin_idx];
 
             let a = &tx.witness_data.as_ref().unwrap().inner[txin_idx];
@@ -216,8 +215,7 @@ pub fn get_p2sh_sigop_count(tx: &Tx, dependencies: &[&TxOut]) -> u32 {
 
     let mut total = 0;
 
-    for i in 0..tx.txins.inner.len() {
-        let txin = &tx.txins.inner[i];
+    for (i, txin) in tx.txins.inner.iter().enumerate() {
         let txout = dependencies[i];
 
         if is_pay_to_script_hash(&txout.script.inner) {

@@ -15,6 +15,7 @@ use supercow::Supercow;
 
 use crate::{
     db,
+    metrics::{METRIC_FULL_BLOCKS_DOWNLOADED, METRIC_TOP_HEADER_HEIGHT},
     packets::{
         SupercowVec, blockheader::BlockHeader, deepclone::DeepClone, getheaders::GetHeaders,
         packetpayload::PacketPayloadType,
@@ -56,6 +57,7 @@ async fn load_headers_from_sqlite() {
     for new_header in headers {
         if new_header.total_work > w.top_header.total_work {
             w.top_header = new_header.clone();
+            METRIC_TOP_HEADER_HEIGHT.set(new_header.number as i64);
         }
 
         w.known_headers
@@ -63,7 +65,9 @@ async fn load_headers_from_sqlite() {
     }
 
     // After loading all headers from sqlite, figure out how many blocks we have downloaded
-    DOWNLOADED_BLOCKS.store(calculate_downloaded_blocks_w(&w), Ordering::Relaxed);
+    let new_downloaded_blocks = calculate_downloaded_blocks_w(&w);
+    DOWNLOADED_BLOCKS.store(new_downloaded_blocks, Ordering::Relaxed);
+    METRIC_FULL_BLOCKS_DOWNLOADED.set(new_downloaded_blocks as i64);
 }
 
 // Do we need to sync headers?
@@ -171,9 +175,11 @@ fn validate_and_apply_header_inner(header: &BlockHeader, w: &mut Chain) -> Resul
         // since top_header is changing, we might need to adjust DOWNLOADED_BLOCKS
         let should_recount = *new_header.header.parent != w.top_header.header.hash;
         w.top_header = new_header.clone();
+        METRIC_TOP_HEADER_HEIGHT.set(new_header.number as i64);
         if should_recount {
             let new_count = calculate_downloaded_blocks_w(w);
             DOWNLOADED_BLOCKS.store(new_count, Ordering::Relaxed);
+            METRIC_FULL_BLOCKS_DOWNLOADED.set(new_count as i64);
         }
     }
 
@@ -235,4 +241,28 @@ fn get_block_hashes_to_download() -> Option<(Vec<[u8; 32]>, u64)> {
 
     all.reverse();
     Some((all, last_added))
+}
+
+fn mark_as_downloaded(blocks: Vec<[u8; 32]>) {
+    let mut w = CHAIN.write().unwrap();
+    for block in blocks {
+        w.known_headers
+            .get_mut(&block)
+            .expect("the header to be present in known_headers")
+            .fetched_full = true;
+    }
+    // Technically the top header is stored twice: in known_headers and as w.top_header.
+    // Which means fetched_full might be different in these two structs. This is the only place where we change data inside of a header,
+    // since they're otherwise immutable.
+    // Change top_header's fetched_full here and we're guaranteed to be in sync.
+    w.top_header.fetched_full = w
+        .known_headers
+        .get(&w.top_header.header.hash)
+        .unwrap()
+        .fetched_full;
+
+    // Update DOWNLOADED_BLOCKS
+    let new_downloaded_blocks = calculate_downloaded_blocks_w(&w);
+    DOWNLOADED_BLOCKS.store(new_downloaded_blocks, Ordering::Relaxed);
+    METRIC_FULL_BLOCKS_DOWNLOADED.set(new_downloaded_blocks as i64);
 }

@@ -11,6 +11,7 @@ use tokio::{
 };
 
 use crate::{
+    metrics::{METRIC_CONNECTIONS_IPV4, METRIC_CONNECTIONS_IPV6, METRIC_NET_DIALS_TOTAL},
     packets::{
         deepclone::DeepClone, packetpayload::PacketPayloadType, sendaddrv2::SendAddrV2,
         sendheaders::SendHeaders, varstr::VarStr, verack::VerAck, version::Version,
@@ -122,13 +123,25 @@ fn handle_packet_during_handshaking<'packet, 'ret: 'packet, 'params: 'ret>(
 }
 
 async fn connect(peer: &AddressPortNetwork) -> Result<Connection> {
+    METRIC_NET_DIALS_TOTAL.inc();
     let stream = tokio::net::TcpStream::connect(peer.to_string()).await?;
     let (a, b) = stream.into_split();
     let bufwriter = BufWriter::new(b);
     let bufreader = BufReader::new(a);
 
+    match peer.network_id {
+        crate::packets::network_id::NetworkId::IPv4 => {
+            METRIC_CONNECTIONS_IPV4.inc();
+        }
+        crate::packets::network_id::NetworkId::IPv6 => {
+            METRIC_CONNECTIONS_IPV6.inc();
+        }
+        _ => {}
+    }
+
     Ok(Connection {
         write_stream: bufwriter,
         read_stream: bufreader,
+        network_id: peer.network_id,
     })
 }

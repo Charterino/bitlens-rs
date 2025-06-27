@@ -6,9 +6,10 @@ use std::{
 
 use rusqlite::Connection;
 use supercow::Supercow;
-use tokio::sync::mpsc::Sender;
+use tokio::{sync::mpsc::Sender, time::Instant};
 
 use crate::{
+    metrics::METRIC_SQLITE_REQUESTS_TIME,
     packets::blockheader::BlockHeader,
     types::{addressportnetwork::AddressPortNetwork, blockheaderwithnumber::BlockHeaderWithNumber},
     util::genesis::GENESIS_HEADER,
@@ -71,6 +72,7 @@ pub(crate) async fn setup_sqlite() {
 
 pub async fn get_all_peers() -> Vec<AddressPortNetwork> {
     let conn = CONNECTION.lock().unwrap();
+    let start = Instant::now();
     let mut stmt = conn
         .prepare_cached("SELECT network_id, address, port FROM peers;")
         .unwrap();
@@ -83,8 +85,11 @@ pub async fn get_all_peers() -> Vec<AddressPortNetwork> {
             })
         })
         .unwrap();
-    iter.map(|x| x.unwrap())
-        .collect::<Vec<AddressPortNetwork>>()
+    let result = iter
+        .map(|x| x.unwrap())
+        .collect::<Vec<AddressPortNetwork>>();
+    METRIC_SQLITE_REQUESTS_TIME.observe(Instant::now().duration_since(start).as_millis() as f64);
+    result
 }
 
 pub async fn insert_peer(peer: AddressPortNetwork, first_seen: u64) {
@@ -144,6 +149,7 @@ pub async fn update_peer_from_version(
 
 pub async fn get_all_headers() -> Vec<BlockHeaderWithNumber<'static>> {
     let conn = CONNECTION.lock().unwrap();
+    let start = Instant::now();
     let mut stmt = conn.prepare_cached("SELECT version, previous_block, merkle_root, timestamp, bits, nonce, block_number, block_hash, fetched_full FROM headers ORDER BY block_number ASC;").unwrap();
     let mut work_totals = HashMap::new();
     work_totals.insert(GENESIS_HEADER.hash, GENESIS_HEADER.get_work());
@@ -173,8 +179,11 @@ pub async fn get_all_headers() -> Vec<BlockHeaderWithNumber<'static>> {
             })
         })
         .unwrap();
-    iter.map(|x| x.unwrap())
-        .collect::<Vec<BlockHeaderWithNumber>>()
+    let result = iter
+        .map(|x| x.unwrap())
+        .collect::<Vec<BlockHeaderWithNumber>>();
+    METRIC_SQLITE_REQUESTS_TIME.observe(Instant::now().duration_since(start).as_millis() as f64);
+    result
 }
 
 pub async fn insert_header(header: &BlockHeaderWithNumber<'_>) {
@@ -195,6 +204,7 @@ pub async fn insert_header(header: &BlockHeaderWithNumber<'_>) {
 
 pub fn set_fetched_full(hashes: &[[u8; 32]], new_value: bool) {
     let mut conn = CONNECTION.lock().unwrap();
+    let start = Instant::now();
     let tx = conn.transaction().expect("to being sqlite transaction");
     {
         let mut stmt = tx
@@ -207,4 +217,5 @@ pub fn set_fetched_full(hashes: &[[u8; 32]], new_value: bool) {
         }
     }
     tx.commit().expect("to commit tx");
+    METRIC_SQLITE_REQUESTS_TIME.observe(Instant::now().duration_since(start).as_millis() as f64);
 }

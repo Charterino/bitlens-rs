@@ -36,7 +36,7 @@ use crate::{
 };
 use anyhow::{Result, bail};
 
-use super::get_block_hashes_to_download;
+use super::{get_block_hashes_to_download, mark_as_downloaded};
 
 const BLOCK_TIMEOUT: Duration = Duration::from_millis(1000);
 
@@ -396,10 +396,12 @@ async fn receive_and_process_blocks(mut recv: Receiver<(PayloadWithAllocator, u6
             current_arena.reset();
         };
 
-        running_flush = Some(tokio::spawn(write_analyzed_txs(
-            next_batch,
-            static_previous_analyzed,
-        )));
+        running_flush = Some(tokio::spawn(async move {
+            write_analyzed_txs(&next_batch, static_previous_analyzed).await;
+            // after we've written blocks and updated fetched_full in sqlite to true,
+            // update fetched_full in chainman's live state
+            mark_as_downloaded(next_batch);
+        }));
 
         current_state = Arc::new(RwLock::new(ChainSyncState {
             current_txouts,

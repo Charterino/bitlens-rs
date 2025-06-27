@@ -44,7 +44,7 @@ impl Tx<'_> {
             for i in 0..witnesses.inner.len() {
                 let witness = &witnesses.inner[i];
                 total += varint_len(witness.inner.len() as VarInt); // component count len
-                for j in 0..witness.inner.len() as usize {
+                for j in 0..witness.inner.len() {
                     let component = &witness.inner[j];
                     total += varint_len(component.inner.len() as VarInt); // component size len
                     total += component.inner.len(); // component len

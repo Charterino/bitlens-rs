@@ -7,17 +7,36 @@ use tokio::{
     net::tcp::{OwnedReadHalf, OwnedWriteHalf},
 };
 
-use crate::packets::{
-    magic::ACTIVE_MAGIC,
-    packet::{Packet, SERIALIZE_POOL, read_packet},
-    packetpayload::PacketPayloadType,
-    version::Version,
+use crate::{
+    metrics::{METRIC_CONNECTIONS_IPV4, METRIC_CONNECTIONS_IPV6},
+    packets::{
+        magic::ACTIVE_MAGIC,
+        network_id::NetworkId,
+        packet::{Packet, SERIALIZE_POOL, read_packet},
+        packetpayload::PacketPayloadType,
+        version::Version,
+    },
 };
 
 #[derive(Debug)]
 pub struct Connection {
     pub read_stream: BufReader<OwnedReadHalf>,
     pub write_stream: BufWriter<OwnedWriteHalf>,
+    pub network_id: NetworkId,
+}
+
+impl Drop for Connection {
+    fn drop(&mut self) {
+        match self.network_id {
+            crate::packets::network_id::NetworkId::IPv4 => {
+                METRIC_CONNECTIONS_IPV4.dec();
+            }
+            crate::packets::network_id::NetworkId::IPv6 => {
+                METRIC_CONNECTIONS_IPV6.dec();
+            }
+            _ => {}
+        }
+    }
 }
 
 impl Connection {
