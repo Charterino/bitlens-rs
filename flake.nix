@@ -47,7 +47,7 @@
       packages = forAllSystems (
         { pkgs, cargoHash }:
         let
-          bin = pkgs.rustPlatform.buildRustPackage {
+          bin = pkgs.rustPlatform.buildRustPackage.override { stdenv = pkgs.clangStdenv; } {
             pname = "bitlens";
             name = "bitlens";
             src = pkgs.lib.cleanSource ./.;
