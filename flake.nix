@@ -52,10 +52,10 @@
             name = "bitlens";
             src = pkgs.lib.cleanSource ./.;
             inherit cargoHash;
-            preBuild = ''
-              export LIBCLANG_PATH=${pkgs.libclang.lib}/lib
-              export TAR_OPTIONS="--no-same-owner"
-            '';
+            env = {
+              LIBCLANG_PATH = "${pkgs.libclang.lib}/lib";
+              TAR_OPTIONS = "--no-same-owner";
+            };
           };
 
           dockerImage = pkgs.dockerTools.buildImage {
