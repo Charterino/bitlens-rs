@@ -56,6 +56,7 @@
               # This fixes building the flake on an aarch64 github runner that has a /homeless-shelter present
               export HOME=$(pwd)
               export LIBCLANG_PATH=${pkgs.libclang.lib}/lib
+              export TAR_OPTIONS="--no-same-owner"
             '';
           };
 
