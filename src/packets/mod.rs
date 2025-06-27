@@ -48,3 +48,12 @@ impl<T: Clone> Clone for SupercowVec<'_, T> {
         }
     }
 }
+
+impl<T> SupercowVec<'_, T> {
+    pub fn from_owned(data: Vec<T>) -> Self {
+        let mapped_to_supercows = data.into_iter().map(|item| Supercow::owned(item)).collect();
+        Self {
+            inner: Supercow::owned(mapped_to_supercows),
+        }
+    }
+}

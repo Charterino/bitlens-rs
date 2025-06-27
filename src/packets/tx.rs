@@ -23,6 +23,12 @@ pub struct Tx<'a> {
     pub hash: [u8; 32], // calculated during deserialization
 }
 
+impl Tx<'_> {
+    pub fn is_coinbase(&self) -> bool {
+        self.txins.inner.len() == 1 && self.txins.inner[0].is_empty()
+    }
+}
+
 pub const TX_COMMAND: [u8; 12] = *b"tx\0\0\0\0\0\0\0\0\0\0";
 
 impl<'old, 'new: 'old> PacketPayload<'old, 'new> for Tx<'old> {
@@ -174,6 +180,12 @@ pub struct TxIn<'a> {
     pub prevout_index: u32,
     pub sequence: u32,
     pub sig_script: Supercow<'a, VarStr<'a>>,
+}
+
+impl TxIn<'_> {
+    pub fn is_empty(&self) -> bool {
+        self.prevout_hash == [0u8; 32] && self.prevout_index == 0xFFFFFFFF
+    }
 }
 
 impl<'old> MustOutlive<'old> for TxIn<'old> {

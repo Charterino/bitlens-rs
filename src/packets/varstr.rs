@@ -13,6 +13,14 @@ pub struct VarStr<'a> {
     pub inner: Supercow<'a, Vec<u8>, [u8]>,
 }
 
+impl VarStr<'_> {
+    pub fn from_owned(data: Vec<u8>) -> Self {
+        Self {
+            inner: Supercow::owned(data),
+        }
+    }
+}
+
 impl Default for VarStr<'_> {
     fn default() -> Self {
         Self {
