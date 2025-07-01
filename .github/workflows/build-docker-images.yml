@@ -22,6 +22,10 @@ jobs:
         run: |
           nix build .#packages.${{matrix.system}}.dockerImage --out-link result-docker
 
+      - name: Install fuse-overlayfs so podman works
+        run: |
+          sudo apt install -y fuse-overlayfs
+
       - name: Login to registry
         uses: redhat-actions/podman-login@v1
         with:
@@ -46,6 +50,10 @@ jobs:
     runs-on: 'self-hosted'
     needs: [build-and-push]
     steps:
+      - name: Install fuse-overlayfs so podman works
+        run: |
+          sudo apt install -y fuse-overlayfs
+
       - name: Login to registry
         uses: redhat-actions/podman-login@v1
         with:
