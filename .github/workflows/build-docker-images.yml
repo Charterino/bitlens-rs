@@ -27,11 +27,12 @@ jobs:
           sudo apt install -y fuse-overlayfs
 
       - name: Login to registry
-        uses: redhat-actions/podman-login@v1
-        with:
+        env:
           registry: ${{ secrets.DOCKER_REGISTRY }}
           username: ${{ secrets.DOCKER_REGISTRY_USER }}
           password: ${{ secrets.DOCKER_REGISTRY_PASSWORD }}
+        run: |
+          echo $password | podman login $registry --username $username --password-stdin
 
       - name: Load docker image
         run: |
@@ -55,11 +56,12 @@ jobs:
           sudo apt install -y fuse-overlayfs
 
       - name: Login to registry
-        uses: redhat-actions/podman-login@v1
-        with:
+        env:
           registry: ${{ secrets.DOCKER_REGISTRY }}
           username: ${{ secrets.DOCKER_REGISTRY_USER }}
           password: ${{ secrets.DOCKER_REGISTRY_PASSWORD }}
+        run: |
+          echo $password | podman login $registry --username $username --password-stdin
 
       - name: Create and push manifest
         run: |
