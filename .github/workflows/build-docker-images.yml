@@ -23,7 +23,7 @@ jobs:
           nix build .#packages.${{matrix.system}}.dockerImage --out-link result-docker
 
       - name: Login to registry
-        uses: docker/login-action@v3
+        uses: redhat-actions/podman-login@v1
         with:
           registry: ${{ secrets.DOCKER_REGISTRY }}
           username: ${{ secrets.DOCKER_REGISTRY_USER }}
@@ -31,15 +31,15 @@ jobs:
 
       - name: Load docker image
         run: |
-          docker load --input result-docker
+          podman load --input result-docker
 
       - name: Tag and push
         run: |
-          docker tag bitlens ${{ secrets.DOCKER_REGISTRY }}/bitlens:${{ github.sha }}-${{ matrix.system }}
-          docker tag bitlens ${{ secrets.DOCKER_REGISTRY }}/bitlens:latest-${{ matrix.system }}
+          podman tag bitlens ${{ secrets.DOCKER_REGISTRY }}/bitlens:${{ github.sha }}-${{ matrix.system }}
+          podman tag bitlens ${{ secrets.DOCKER_REGISTRY }}/bitlens:latest-${{ matrix.system }}
           # Push
-          docker push ${{ secrets.DOCKER_REGISTRY }}/bitlens:${{ github.sha }}-${{ matrix.system }}
-          docker push ${{ secrets.DOCKER_REGISTRY }}/bitlens:latest-${{ matrix.system }}
+          podman push ${{ secrets.DOCKER_REGISTRY }}/bitlens:${{ github.sha }}-${{ matrix.system }}
+          podman push ${{ secrets.DOCKER_REGISTRY }}/bitlens:latest-${{ matrix.system }}
 
 
   publish-manifest:
@@ -47,7 +47,7 @@ jobs:
     needs: [build-and-push]
     steps:
       - name: Login to registry
-        uses: docker/login-action@v3
+        uses: redhat-actions/podman-login@v1
         with:
           registry: ${{ secrets.DOCKER_REGISTRY }}
           username: ${{ secrets.DOCKER_REGISTRY_USER }}
@@ -56,13 +56,13 @@ jobs:
       - name: Create and push manifest
         run: |
           # For commit SHA tag
-          docker manifest create ${{ secrets.DOCKER_REGISTRY }}/bitlens:${{ github.sha }} \
+          podman manifest create ${{ secrets.DOCKER_REGISTRY }}/bitlens:${{ github.sha }} \
             --amend ${{ secrets.DOCKER_REGISTRY }}/bitlens:${{ github.sha }}-aarch64-linux \
             --amend ${{ secrets.DOCKER_REGISTRY }}/bitlens:${{ github.sha }}-x86_64-linux
-          docker manifest push ${{ secrets.DOCKER_REGISTRY }}/bitlens:${{ github.sha }}
+          podman manifest push ${{ secrets.DOCKER_REGISTRY }}/bitlens:${{ github.sha }}
 
           # For latest tag
-          docker manifest create ${{ secrets.DOCKER_REGISTRY }}/bitlens:latest \
+          podman manifest create ${{ secrets.DOCKER_REGISTRY }}/bitlens:latest \
             --amend ${{ secrets.DOCKER_REGISTRY }}/bitlens:latest-aarch64-linux \
             --amend ${{ secrets.DOCKER_REGISTRY }}/bitlens:latest-x86_64-linux
-          docker manifest push ${{ secrets.DOCKER_REGISTRY }}/bitlens:latest
+          podman manifest push ${{ secrets.DOCKER_REGISTRY }}/bitlens:latest
