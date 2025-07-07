@@ -1,10 +1,9 @@
-use std::sync::LazyLock;
-
-use axum::{Router, routing::get};
+use axum::{Router, extract::Request, http::StatusCode, routing::get};
 use prometheus::{
     Encoder, Histogram, IntGauge, TextEncoder, linear_buckets, register_histogram,
     register_int_gauge,
 };
+use std::{env, sync::LazyLock};
 
 pub static METRIC_TOP_HEADER_HEIGHT: LazyLock<IntGauge> = LazyLock::new(|| {
     register_int_gauge!("bitlens_top_header_height", "the number of the top header").unwrap()
@@ -53,19 +52,35 @@ pub static METRIC_SQLITE_REQUESTS_TIME: LazyLock<Histogram> = LazyLock::new(|| {
 
 // todo: add more metrics
 
+static METRICS_TOKEN: LazyLock<Vec<u8>> = LazyLock::new(|| {
+    let token = env::var("METRICS_TOKEN").expect("METRICS_TOKEN is not set");
+    ("Bearer ".to_owned() + &token).into_bytes()
+});
+
 pub async fn start() {
+    let _ = *METRICS_TOKEN; // Ensure METRICS_TOKEN is set.
+
     let app = Router::new().route("/metrics", get(metrics));
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8123").await.unwrap();
     tokio::spawn(async { axum::serve(listener, app).await });
 }
 
-async fn metrics() -> String {
+async fn metrics(req: Request) -> Result<String, StatusCode> {
+    let headers = req.headers();
+    match headers.get("Authorization") {
+        Some(token) => {
+            if token.as_bytes() != *METRICS_TOKEN {
+                return Err(StatusCode::UNAUTHORIZED);
+            }
+        }
+        None => return Err(StatusCode::UNAUTHORIZED),
+    }
     let mut buffer = Vec::new();
     let encoder = TextEncoder::new();
 
     let metric_families = prometheus::gather();
     encoder.encode(&metric_families, &mut buffer).unwrap();
 
-    String::from_utf8(buffer.clone()).unwrap()
+    Ok(String::from_utf8(buffer.clone()).unwrap())
 }
