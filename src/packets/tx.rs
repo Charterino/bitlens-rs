@@ -3,7 +3,8 @@ use super::{
     buffer::Buffer,
     deepclone::{DeepClone, MustOutlive},
     packetpayload::{
-        PacketPayload, Serializable, SerializableSupercowVecOfCows, SerializableValue,
+        DeserializableOwned, PacketPayload, Serializable, SerializableSupercowVecOfCows,
+        SerializableSupercowVecOfCowsOwned, SerializableValue,
     },
     varint::{VarInt, varint_len, varint_serialize},
     varstr::VarStr,
@@ -28,7 +29,7 @@ impl Tx<'_> {
         self.txins.inner.len() == 1 && self.txins.inner[0].is_empty()
     }
 
-    pub fn serialized_without_txouts_sized(&self) -> usize {
+    pub fn serialized_without_txouts_size(&self) -> usize {
         let mut total = 4; // version
         if self.witness_data.is_some() {
             total += 2; // witness marker
@@ -82,6 +83,51 @@ impl Tx<'_> {
         }
 
         stream.put_u32_le(self.locktime);
+    }
+
+    pub fn deserialize_without_txouts(buffer: &[u8], hash: [u8; 32]) -> Result<Tx<'static>> {
+        let version = buffer.get_u32_le(0)?;
+
+        let has_witness_data = match buffer.get(4..6) {
+            Some(v) => *v == [0x00, 0x01],
+            None => return Err(anyhow!("not enough data")),
+        };
+
+        let mut offset = if has_witness_data { 6 } else { 4 };
+
+        let (txins, offset_delta) = SupercowVec::deserialize_owned(buffer.with_offset(offset)?)?;
+        offset += offset_delta;
+        if txins.inner.is_empty() {
+            bail!("0 txins")
+        }
+
+        let (witnesses, _) = if has_witness_data {
+            let start = offset;
+            let mut wits = std::vec::Vec::with_capacity(txins.inner.len());
+            for _ in 0..txins.inner.len() {
+                let (components, offset_delta) =
+                    SupercowVec::deserialize_owned(buffer.with_offset(offset)?)?;
+                offset += offset_delta;
+                wits.push(Supercow::owned(components));
+            }
+            let wits = SupercowVec {
+                inner: Supercow::owned(wits),
+            };
+            (Some(wits), start)
+        } else {
+            (None, 0)
+        };
+
+        let locktime = buffer.get_u32_le(offset)?;
+
+        Ok(Tx {
+            version,
+            locktime,
+            txins,
+            txouts: SupercowVec::default(),
+            witness_data: witnesses,
+            hash,
+        })
     }
 }
 
@@ -287,6 +333,25 @@ impl<'a> Serializable<'a> for TxIn<'a> {
         stream.put_u32_le(self.prevout_index);
         Serializable::serialize(&*self.sig_script, stream);
         stream.put_u32_le(self.sequence);
+    }
+}
+
+impl DeserializableOwned for TxIn<'static> {
+    fn deserialize_owned(buffer: &[u8]) -> Result<(Supercow<'static, Self>, usize)> {
+        let hash = buffer.get_hash(0)?;
+        let index = buffer.get_u32_le(32)?;
+        let (script, offset) =
+            <VarStr as DeserializableOwned>::deserialize_owned(buffer.with_offset(36)?)?;
+        let sequence = buffer.get_u32_le(offset + 36)?;
+        Ok((
+            Supercow::owned(TxIn {
+                prevout_hash: Supercow::owned(*hash),
+                prevout_index: index,
+                sequence,
+                sig_script: script,
+            }),
+            offset + 40,
+        ))
     }
 }
 

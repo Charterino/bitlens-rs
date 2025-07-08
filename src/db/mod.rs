@@ -1,9 +1,12 @@
 use rocksdb::{SerializedTx, setup_rocksdb, write_block_txs, write_txouts, write_txs};
-use sqlite::{set_fetched_full, setup_sqlite};
+use sqlite::{mark_blocks_as_downloaded, setup_sqlite};
 
-use crate::packets::{
-    packetpayload::SerializableValue,
-    varint::{VarInt, varint_len},
+use crate::{
+    packets::{
+        packetpayload::SerializableValue,
+        varint::{VarInt, varint_len},
+    },
+    types::blockmetrics::BlockMetrics,
 };
 
 mod batch;
@@ -20,7 +23,11 @@ pub async fn setup() {
     setup_rocksdb().await;
 }
 
-pub async fn write_analyzed_txs(blocks: &[[u8; 32]], txs: Vec<&[SerializedTx<'_>]>) {
+pub async fn write_analyzed_txs(
+    blocks: &[[u8; 32]],
+    txs: &[&[SerializedTx<'_>]],
+    block_metrics: &[BlockMetrics],
+) {
     debug_assert_eq!(blocks.len(), txs.len());
 
     let serialized_txhashes: Vec<Vec<u8>> = txs
@@ -43,7 +50,7 @@ pub async fn write_analyzed_txs(blocks: &[[u8; 32]], txs: Vec<&[SerializedTx<'_>
     // sort by hash before ingestion
     blocks_with_txs_pairs.sort_by(|a, b| a.0.cmp(b.0));
 
-    let mut collapsed: Vec<&SerializedTx> = txs.into_iter().flatten().collect();
+    let mut collapsed: Vec<&SerializedTx> = txs.into_iter().map(|x| x.iter()).flatten().collect();
     // sort by hash before ingestion
     collapsed.sort_by(|a, b| a.hash.cmp(&b.hash));
 
@@ -54,5 +61,5 @@ pub async fn write_analyzed_txs(blocks: &[[u8; 32]], txs: Vec<&[SerializedTx<'_>
     });
 
     // after we're done with txs, update fetched_full in sqlite
-    set_fetched_full(blocks, true);
+    mark_blocks_as_downloaded(blocks, block_metrics);
 }

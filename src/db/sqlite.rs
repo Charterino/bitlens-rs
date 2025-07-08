@@ -11,7 +11,10 @@ use tokio::{sync::mpsc::Sender, time::Instant};
 use crate::{
     metrics::METRIC_SQLITE_REQUESTS_TIME,
     packets::blockheader::BlockHeader,
-    types::{addressportnetwork::AddressPortNetwork, blockheaderwithnumber::BlockHeaderWithNumber},
+    types::{
+        addressportnetwork::AddressPortNetwork, blockheaderwithnumber::BlockHeaderWithNumber,
+        blockmetrics::BlockMetrics,
+    },
     util::genesis::GENESIS_HEADER,
 };
 
@@ -202,7 +205,8 @@ pub async fn insert_header(header: &BlockHeaderWithNumber<'_>) {
         .unwrap();
 }
 
-pub fn set_fetched_full(hashes: &[[u8; 32]], new_value: bool) {
+pub fn mark_blocks_as_downloaded(hashes: &[[u8; 32]], metrics: &[BlockMetrics]) {
+    assert_eq!(hashes.len(), metrics.len());
     let mut conn = CONNECTION.lock().unwrap();
     let start = Instant::now();
     let tx = conn.transaction().expect("to being sqlite transaction");
@@ -212,10 +216,49 @@ pub fn set_fetched_full(hashes: &[[u8; 32]], new_value: bool) {
             .expect("to prepare statement");
 
         for hash in hashes {
-            stmt.execute((new_value, hash))
+            stmt.execute((true, hash))
                 .expect("to execute fetched_full update");
+        }
+
+        let mut stmt = tx
+            .prepare_cached("INSERT INTO block_stats VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+            .expect("to prepare statement");
+
+        let zipped = hashes.iter().zip(metrics);
+        for (hash, metrics) in zipped {
+            stmt.execute((
+                hash,
+                metrics.fees_total,
+                metrics.volume,
+                metrics.txs_count,
+                metrics.average_fee_rate,
+                metrics.lowest_fee_rate,
+                metrics.highest_fee_rate,
+                metrics.median_fee_rate,
+            ))
+            .expect("to insert block_stats");
         }
     }
     tx.commit().expect("to commit tx");
     METRIC_SQLITE_REQUESTS_TIME.observe(Instant::now().duration_since(start).as_millis() as f64);
+}
+
+pub async fn find_block_metrics(hash: [u8; 32]) -> BlockMetrics {
+    let conn = CONNECTION.lock().unwrap();
+    let start = Instant::now();
+    let mut stmt = conn.prepare_cached("SELECT fees_total, volume, txs_count, avg_fee_rate, lowest_fee_rate, highest_fee_rate, median_fee_rate FROM block_stats WHERE hash=?;").expect("to prepare stmt");
+    let bms = stmt.query_row([hash], |row| {
+        Ok(BlockMetrics {
+            fees_total: row.get(0).unwrap(),
+            volume: row.get(1).unwrap(),
+            txs_count: row.get(2).unwrap(),
+            average_fee_rate: row.get(3).unwrap(),
+            lowest_fee_rate: row.get(4).unwrap(),
+            highest_fee_rate: row.get(5).unwrap(),
+            median_fee_rate: row.get(6).unwrap(),
+        })
+    });
+
+    METRIC_SQLITE_REQUESTS_TIME.observe(Instant::now().duration_since(start).as_millis() as f64);
+    bms.unwrap()
 }

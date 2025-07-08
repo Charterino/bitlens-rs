@@ -31,12 +31,13 @@ use crate::{
         varstr::VarStr,
     },
     some_or_return, tx,
+    types::blockmetrics::BlockMetrics,
     util::arena::Arena,
     with_deadline,
 };
 use anyhow::{Result, bail};
 
-use super::{get_block_hashes_to_download, mark_as_downloaded};
+use super::{get_block_hashes_to_download, mark_as_downloaded, update_frontpage_response};
 
 const BLOCK_TIMEOUT: Duration = Duration::from_millis(1000);
 
@@ -333,6 +334,7 @@ type AnalyzedBlock<'a> = &'a [SerializedTx<'a>];
 struct ChainSyncState<'arena> {
     current_txouts: HashMap<[u8; 32], Vec<&'arena TxOut<'arena>>>,
     current_analyzed: Vec<AnalyzedBlock<'arena>>,
+    current_metrics: Vec<BlockMetrics>,
     previous_txouts: HashMap<[u8; 32], Vec<&'arena TxOut<'arena>>>,
 }
 
@@ -343,6 +345,7 @@ async fn receive_and_process_blocks(mut recv: Receiver<(PayloadWithAllocator, u6
         current_txouts: HashMap::new(), // values live in `current_arena`
         current_analyzed: Vec::with_capacity(MAX_BLOCKS_PER_FLUSH), // values live in `current_arena`
         previous_txouts: HashMap::new(), // values live in `previous_arena`
+        current_metrics: Vec::with_capacity(MAX_BLOCKS_PER_FLUSH), // all heap
     }));
 
     let mut running_flush: Option<JoinHandle<()>> = None;
@@ -362,6 +365,7 @@ async fn receive_and_process_blocks(mut recv: Receiver<(PayloadWithAllocator, u6
             mut current_txouts,
             current_analyzed,
             mut previous_txouts,
+            current_metrics,
         } = Arc::into_inner(current_state)
             .expect("to have no other arcs for current_state")
             .into_inner()
@@ -397,16 +401,25 @@ async fn receive_and_process_blocks(mut recv: Receiver<(PayloadWithAllocator, u6
         };
 
         running_flush = Some(tokio::spawn(async move {
-            write_analyzed_txs(&next_batch, static_previous_analyzed).await;
+            write_analyzed_txs(&next_batch, &static_previous_analyzed, &current_metrics).await;
             // after we've written blocks and updated fetched_full in sqlite to true,
             // update fetched_full in chainman's live state
+            let top = next_batch[next_batch.len() - 1];
             mark_as_downloaded(next_batch);
+            update_frontpage_response(
+                top,
+                Some(&current_metrics),
+                Some(&static_previous_analyzed),
+                false,
+            )
+            .await;
         }));
 
         current_state = Arc::new(RwLock::new(ChainSyncState {
             current_txouts,
             current_analyzed: Vec::with_capacity(MAX_BLOCKS_PER_FLUSH),
             previous_txouts,
+            current_metrics: Vec::with_capacity(MAX_BLOCKS_PER_FLUSH),
         }));
     }
 
@@ -428,7 +441,7 @@ async fn get_next_batch_to_flush<'l>(
                 info!("sync progress"; "current_height" => b.1);
             }
             // Have to instantly insert transactions from this block because they might be needed in the next block
-            {
+            let index = {
                 let payload =
                     b.0.borrow_payload()
                         .as_ref()
@@ -438,12 +451,21 @@ async fn get_next_batch_to_flush<'l>(
                     let mut w = current_state.write().unwrap();
                     insert_transactions_from_block(block, current_arena, &mut w.current_txouts)
                         .expect("to have inserted txs from the current block");
+                    let index = w.current_analyzed.len();
+                    w.current_analyzed.push(Default::default());
+                    w.current_metrics.push(Default::default());
+                    index
                 } else {
                     unreachable!()
                 }
-            }
+            };
 
-            scope.spawn(process_block(b.0, current_state.clone(), current_arena));
+            scope.spawn(process_block(
+                b.0,
+                current_state.clone(),
+                current_arena,
+                index,
+            ));
 
             if current_blocks.len() == MAX_BLOCKS_PER_FLUSH {
                 break;
@@ -483,6 +505,7 @@ async fn process_block<'arena>(
     payload: PayloadWithAllocator,
     current_state: Arc<RwLock<ChainSyncState<'arena>>>,
     analyzed_arena: &'arena Arena,
+    index_into_analyzed_and_metrics: usize,
 ) {
     payload
         .with_block_async(async |block| {
@@ -501,6 +524,12 @@ async fn process_block<'arena>(
             let analyzed_txs = analyzed_arena
                 .try_alloc_array_fill_copy(block.txs.inner.len(), SerializedTx::default())
                 .expect("to have allocated analyzed_txs");
+
+            // keep track of metrics as we go
+            let mut fees_total = 0;
+            let mut volume = 0;
+            let mut fee_rates = Vec::with_capacity(block.txs.inner.len() - 1);
+
             for (tx_idx, tx) in block.txs.inner.iter().enumerate() {
                 // Assemble the dependencies
                 let mut deps = Vec::with_capacity(tx.txins.inner.len());
@@ -530,11 +559,41 @@ async fn process_block<'arena>(
                 // Analyze this tx
                 let analyzed = tx::analyze_tx(tx, &deps, analyzed_arena);
                 analyzed_txs[tx_idx] = analyzed;
+                if tx_idx != 0 {
+                    let size_vbytes = f64::ceil(analyzed.size_wus as f64 / 4.);
+                    fee_rates.push(analyzed.fee as f64 / size_vbytes);
+                }
+
+                fees_total += analyzed.fee;
+                volume += analyzed.txouts_sum;
             }
             drop(r);
+
+            let (lowest, highest, median, average) = if fee_rates.is_empty() {
+                (0., 0., 0., 0.)
+            } else {
+                fee_rates.sort_by(|a, b| a.partial_cmp(b).expect("fee rate to be not nan"));
+
+                (
+                    fee_rates[0],
+                    fee_rates[fee_rates.len() - 1],
+                    fee_rates[fee_rates.len() / 2],
+                    fees_total as f64 / fee_rates.len() as f64,
+                )
+            };
+
             // insert analyzed_txs into current_state.
             let mut w = current_state.write().unwrap();
-            w.current_analyzed.push(analyzed_txs);
+            w.current_analyzed[index_into_analyzed_and_metrics] = analyzed_txs;
+            w.current_metrics[index_into_analyzed_and_metrics] = BlockMetrics {
+                fees_total,
+                volume,
+                txs_count: block.txs.inner.len() as u64,
+                average_fee_rate: average,
+                lowest_fee_rate: lowest,
+                highest_fee_rate: highest,
+                median_fee_rate: median,
+            };
         })
         .await;
 }

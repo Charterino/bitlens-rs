@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS peers (
   user_agent TEXT,
   height INTEGER,
   services INTEGER NOT NULL,
-  PRIMARY KEY (address, port)
+  PRIMARY KEY (address, port, network_id)
 );"#,
     r#"
 CREATE INDEX IF NOT EXISTS idx_peers_network_id ON peers (network_id);
@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS banned_peers (
   port SMALLINT NOT NULL,
   banned_at INTEGER NOT NULL,
   banned_until INTEGER NOT NULL,
-  PRIMARY KEY (address, port, banned_until)
+  PRIMARY KEY (address, port, network_id, banned_until)
 )
 "#,
     r#"
@@ -44,5 +44,17 @@ CREATE TABLE IF NOT EXISTS headers (
 "#,
     r#"
 CREATE INDEX IF NOT EXISTS idx_headers_block_number ON headers (block_number);
+"#,
+    r#"
+CREATE TABLE IF NOT EXISTS block_stats (
+    hash BLOB PRIMARY KEY,
+    fees_total INTEGER NOT NULL,
+    volume INTEGER NOT NULL,
+    txs_count INTEGER NOT NULL,
+    avg_fee_rate REAL NOT NULL,
+    lowest_fee_rate REAL NOT NULL,
+    highest_fee_rate REAL NOT NULL,
+    median_fee_rate REAL NOT NULL
+);
 "#,
 ];

@@ -1,6 +1,7 @@
 use crate::{
     db::{self, rocksdb::SerializedTx},
     packets::{
+        buffer::Buffer,
         tx::{Tx, TxOut},
         varint::{VarInt, varint_len, varint_serialize},
     },
@@ -21,6 +22,36 @@ mod size;
 mod script_test;
 #[cfg(test)]
 mod size_test;
+
+pub struct AnalyzedTx {
+    pub fee: u64,
+    pub txouts_sum: u64,
+    pub size_wus: u32,
+    pub sigops: u32,
+    pub tx: Tx<'static>,
+}
+
+pub fn deserialize_analyzed_tx<'a>(data: &'a [u8], hash: [u8; 32]) -> AnalyzedTx {
+    let fee = data.get_u64_le(0).expect("to deserialize fee");
+    let txouts_sum = data.get_u64_le(8).expect("to deserialize txouts_sum");
+    let size_wus = data.get_u32_le(16).expect("to deserialize size_wus");
+    let sigops = data.get_u32_le(20).expect("to deserialize sigops");
+
+    let tx = Tx::deserialize_without_txouts(
+        data.with_offset(24)
+            .expect("to offset before deserializing tx"),
+        hash,
+    )
+    .expect("to deserialize tx without txouts");
+
+    AnalyzedTx {
+        fee,
+        txouts_sum,
+        size_wus,
+        sigops,
+        tx,
+    }
+}
 
 pub fn analyze_tx<'arena, 'data>(
     tx: &'data Tx,
@@ -46,7 +77,7 @@ pub fn analyze_tx<'arena, 'data>(
 
     let analyzed_tx = arena
         // serialized tx size + fee (8 bytes) + txouts_sum (8 bytes) + size_wus(4 bytes) + sigops (4 bytes)
-        .try_alloc_array_fill_copy(tx.serialized_without_txouts_sized() + 8 + 8 + 4 + 4, 0u8)
+        .try_alloc_array_fill_copy(tx.serialized_without_txouts_size() + 8 + 8 + 4 + 4, 0u8)
         .expect("to allocate space for analyzed tx");
 
     analyzed_tx[0..8].copy_from_slice(&fee.to_le_bytes());
@@ -61,9 +92,9 @@ pub fn analyze_tx<'arena, 'data>(
         hash: tx.hash,
         analyzed_tx: Some(analyzed_tx),
         tx_outs: Some(tx_outs),
-        fee: 0,
-        value: 0,
-        size: 0,
+        fee,
+        txouts_sum,
+        size_wus,
     }
 }
 

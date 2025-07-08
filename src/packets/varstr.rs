@@ -1,6 +1,6 @@
 use super::{
     deepclone::{DeepClone, MustOutlive},
-    packetpayload::{Serializable, SerializableValue},
+    packetpayload::{DeserializableOwned, Serializable, SerializableValue},
     varint::VarInt,
 };
 use anyhow::{Result, anyhow, bail};
@@ -95,6 +95,22 @@ impl From<&str> for VarStr<'_> {
     fn from(value: &str) -> Self {
         Self {
             inner: Supercow::owned(value.as_bytes().to_vec()),
+        }
+    }
+}
+
+impl DeserializableOwned for VarStr<'static> {
+    fn deserialize_owned(buffer: &[u8]) -> Result<(Supercow<'static, Self>, usize)> {
+        let (length, offset) = VarInt::deserialize(buffer)?;
+
+        match buffer.get(offset..offset + length as usize) {
+            Some(v) => Ok((
+                Supercow::owned(Self {
+                    inner: Supercow::owned(v.to_vec()),
+                }),
+                offset + length as usize,
+            )),
+            None => Err(anyhow!("not enough bytes for varstr")),
         }
     }
 }

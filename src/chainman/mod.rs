@@ -1,28 +1,35 @@
-use std::{
-    sync::{
-        LazyLock, RwLock,
-        atomic::{AtomicBool, AtomicU64, Ordering},
-    },
-    time::{SystemTime, UNIX_EPOCH},
-};
-
-use anyhow::{Result, bail};
-use blocksync::sync_blocks;
-use chain::Chain;
-use headersync::sync_headers;
-use slog_scope::info;
-use supercow::Supercow;
-
 use crate::{
-    db,
+    db::{self, rocksdb::SerializedTx},
     metrics::{METRIC_FULL_BLOCKS_DOWNLOADED, METRIC_TOP_HEADER_HEIGHT},
     packets::{
         SupercowVec, blockheader::BlockHeader, deepclone::DeepClone, getheaders::GetHeaders,
         packetpayload::PacketPayloadType,
     },
     some_or_break,
-    types::blockheaderwithnumber::BlockHeaderWithNumber,
+    types::{
+        blockheaderwithnumber::BlockHeaderWithNumber,
+        blockmetrics::BlockMetrics,
+        frontpagedata::{FrontPageData, FrontPageDataWithSerialized, ShortBlock, ShortTx},
+        stats::Stats,
+    },
 };
+use anyhow::{Result, bail};
+use blocksync::sync_blocks;
+use chain::Chain;
+use headersync::sync_headers;
+use slog_scope::{debug, info};
+use std::{
+    cmp::min,
+    sync::{
+        LazyLock, RwLock,
+        atomic::{AtomicBool, AtomicU64, Ordering},
+    },
+    time::{SystemTime, UNIX_EPOCH},
+};
+use supercow::Supercow;
+
+const FRONTPAGE_TXS_COUNT: usize = 50;
+const FRONTPAGE_BLOCKS_COUNT: usize = 50;
 
 static SYNCING_HEADERS: AtomicBool = AtomicBool::new(false); // are we currently in the process of initial header sync?
 #[allow(dead_code)]
@@ -30,6 +37,9 @@ static SYNCING_BODIES: AtomicBool = AtomicBool::new(false); // are we currently 
 static DOWNLOADED_BLOCKS: AtomicU64 = AtomicU64::new(0); // It's important that this number only counts downloaded blocks from the main chain.
 
 static CHAIN: LazyLock<RwLock<Chain>> = LazyLock::new(|| RwLock::new(Chain::default()));
+
+pub static FRONTPAGE_STATS: LazyLock<RwLock<FrontPageDataWithSerialized>> =
+    LazyLock::new(|| RwLock::new(Default::default())); // empty initially
 
 mod blocksync;
 mod chain;
@@ -44,11 +54,254 @@ pub async fn start() {
             let r = CHAIN.read().unwrap();
             info!("synced headers"; "top number" => r.top_header.number);
         }
+        // if we're not syncing from 0, we already have some blocks downloaded
+        // which means we can update the frontpage response
+        let top_downloaded_block_hash = {
+            let r = CHAIN.read().unwrap();
+            get_top_downloaded_block_hash(&*r)
+        };
+        if let Some(top_block_hash) = top_downloaded_block_hash {
+            update_frontpage_response(top_block_hash, None, None, true).await;
+        }
         if need_ibd() {
             info!("downloading missing block bodies..");
             sync_blocks().await;
         }
     });
+}
+
+async fn update_frontpage_response(
+    top_block_hash: [u8; 32],
+    metrics_cache: Option<&[BlockMetrics]>,
+    analyzed_cache: Option<&[&[SerializedTx<'_>]]>,
+    first_time: bool,
+) {
+    // If this is the first time this function is called, we'll have to go pulling block data from the store
+    // If not, then we have everything we need
+
+    let stats = calculate_stats(top_block_hash, metrics_cache).await;
+    let mut latest_blocks = Vec::with_capacity(FRONTPAGE_BLOCKS_COUNT);
+    let mut latest_txs = Vec::with_capacity(FRONTPAGE_TXS_COUNT);
+    let mut w = if first_time {
+        // Pull from the disk
+
+        let mut current_header = {
+            let r = CHAIN.read().unwrap();
+            r.known_headers[&top_block_hash].clone()
+        };
+
+        loop {
+            if latest_blocks.len() == FRONTPAGE_BLOCKS_COUNT
+                && latest_txs.len() == FRONTPAGE_TXS_COUNT
+            {
+                break;
+            }
+
+            // pull the tx hashes that are in this block from rocksdb
+            let block_tx_hashes = db::rocksdb::get_block_tx_hashes(current_header.header.hash)
+                .await
+                .expect("to fetch block txs from rocksdb");
+
+            latest_blocks.push(ShortBlock {
+                number: current_header.number,
+                hash: current_header.header.human_hash(),
+                tx_count: block_tx_hashes.len() as u64,
+                reward_btc: 0., // todo
+                btc_price: 0.,  // todo
+                timestamp: current_header.header.timestamp,
+            });
+
+            let missing_txs = min(
+                FRONTPAGE_TXS_COUNT - latest_txs.len(),
+                block_tx_hashes.len(),
+            );
+            for j in 0..missing_txs {
+                let tx_hash = block_tx_hashes[j];
+                let tx = db::rocksdb::get_analyzed_tx(tx_hash)
+                    .await
+                    .expect("to get analyzed tx from rocksdb");
+                let mut human_hash = tx_hash;
+                human_hash.reverse();
+                let human_hash = hex::encode(human_hash);
+                latest_txs.push(ShortTx {
+                    hash: human_hash,
+                    value: tx.txouts_sum as f64 / 100_000_000.,
+                    size_wus: tx.size_wus,
+                    block_number: current_header.number,
+                    block_hash: current_header.header.human_hash(),
+                    fee_sats: tx.fee,
+                    btc_price: 0., // TODO
+                    timestamp: current_header.header.timestamp,
+                });
+            }
+
+            if *current_header.header.parent == [0u8; 32] {
+                break; // reached the genesis block
+            }
+            current_header = {
+                let r = CHAIN.read().unwrap();
+                r.known_headers[&current_header.header.hash].clone()
+            };
+        }
+
+        let w = FRONTPAGE_STATS.write().unwrap();
+        w
+    } else {
+        // Everything is in ram
+        let r = CHAIN.read().unwrap();
+        let analyzed = analyzed_cache.expect("analyzed_cache to be Some if first_time is true");
+        let mut i = analyzed.len();
+        let mut current_header = &r.known_headers[&top_block_hash];
+        while i > 0 {
+            if latest_blocks.len() == FRONTPAGE_BLOCKS_COUNT
+                && latest_txs.len() == FRONTPAGE_TXS_COUNT
+            {
+                break;
+            }
+
+            let block_txs = &analyzed[i - 1];
+
+            latest_blocks.push(ShortBlock {
+                number: current_header.number,
+                hash: current_header.header.human_hash(),
+                tx_count: block_txs.len() as u64,
+                reward_btc: 0., // TODO
+                btc_price: 0.,  // TODO
+                timestamp: current_header.header.timestamp,
+            });
+
+            let missing_txs = min(FRONTPAGE_TXS_COUNT - latest_txs.len(), block_txs.len());
+            for j in 0..missing_txs {
+                let tx = block_txs[j];
+                let mut human_hash = tx.hash;
+                human_hash.reverse();
+                let human_hash = hex::encode(human_hash);
+                latest_txs.push(ShortTx {
+                    hash: human_hash,
+                    value: tx.txouts_sum as f64 / 100_000_000.,
+                    size_wus: tx.size_wus,
+                    block_number: current_header.number,
+                    block_hash: current_header.header.human_hash(),
+                    fee_sats: tx.fee,
+                    btc_price: 0., // TODO
+                    timestamp: current_header.header.timestamp,
+                });
+            }
+
+            i -= 1;
+            if i != 0 {
+                current_header = &r.known_headers[&current_header.header.hash];
+            }
+        }
+
+        // We've either got all of the required blocks and txs, or ran out of blocks in `analyzed`.
+        // If we're still missing blocks/txs, copy them from the previous response
+        let missing_blocks = FRONTPAGE_BLOCKS_COUNT - latest_blocks.len();
+        let missing_txs = FRONTPAGE_TXS_COUNT - latest_txs.len();
+        let w = FRONTPAGE_STATS.write().unwrap();
+        if missing_blocks != 0 {
+            let to_keep_from_old = min(missing_blocks, w.data.latest_blocks.len());
+            latest_blocks.extend_from_slice(&w.data.latest_blocks[0..to_keep_from_old]);
+        }
+        if missing_txs != 0 {
+            let to_keep_from_old = min(missing_txs, w.data.latest_txs.len());
+            latest_txs.extend_from_slice(&w.data.latest_txs[0..to_keep_from_old]);
+        }
+
+        w
+    };
+
+    w.data = FrontPageData {
+        stats,
+        latest_blocks,
+        latest_txs,
+    };
+    w.serialized = serde_json::to_string(&w.data).unwrap();
+    debug!("updated front page response"; "new_response" => w.serialized.clone());
+}
+
+async fn calculate_stats(top: [u8; 32], cache: Option<&[BlockMetrics]>) -> Stats {
+    let (relevant_blocks, timestamps, now) = {
+        let r = CHAIN.read().unwrap();
+        let top_header = &r.known_headers[&top];
+        let now = top_header.header.timestamp;
+        let cutoff = now - 86400 * 15;
+        let mut relevant_blocks = Vec::with_capacity(2160);
+        let mut timestamps = Vec::with_capacity(2160);
+        let mut last = top_header;
+        loop {
+            relevant_blocks.push(last.header.hash);
+            timestamps.push(last.header.timestamp);
+            if last.header.parent == [0u8; 32] {
+                break;
+            }
+            last = &r.known_headers[&*last.header.parent];
+            if last.header.timestamp < cutoff {
+                break;
+            }
+        }
+        (relevant_blocks, timestamps, now)
+    };
+
+    // Now that we know what blocks we need, first get all the blocks we can from the cache,
+    // then fetch the missing blocks from sqlite
+    let mut bms = Vec::with_capacity(relevant_blocks.len());
+    if let Some(cache) = cache {
+        for i in bms.len()..relevant_blocks.len() {
+            if let Some(bm) = cache.get(i) {
+                bms.push(bm.clone());
+            } else {
+                // This block is not in the cache. Since the cache is always continuous,
+                // e.g. if it does not have A, it definitely cant have A's parent,
+                // we can break here and fetch the remaining blocks from sqlite
+                break;
+            }
+        }
+    }
+    let mut handles = Vec::new();
+    for i in bms.len()..relevant_blocks.len() {
+        let hash = &relevant_blocks[i];
+        handles.push(tokio::spawn(db::sqlite::find_block_metrics(*hash)));
+    }
+
+    let mut results = Vec::with_capacity(handles.len());
+    for handle in handles {
+        results.push(handle.await.unwrap());
+    }
+
+    bms.append(&mut results);
+
+    // Got all the block metrics we'll need
+    // group blocks by day
+    let mut boundary = 0;
+    let mut cutoff = now - (now % 86400);
+    let mut result = Stats::default();
+
+    for i in 0..bms.len() {
+        if timestamps[i] < cutoff {
+            // blocks[boundary:i] belong to day `cutoff`
+
+            let mut total_vol = 0.;
+            let mut total_txs = 0;
+            let mut median_fees_sum = 0.;
+            for bm in &bms[boundary..i] {
+                total_vol += bm.volume as f64 / 100_000_000.;
+                total_txs += bm.txs_count;
+                median_fees_sum += bm.median_fee_rate;
+            }
+
+            result
+                .average_median_fees
+                .insert(cutoff, median_fees_sum / (i - boundary) as f64);
+            result.volume.insert(cutoff, total_vol);
+            result.transactions.insert(cutoff, total_txs);
+
+            cutoff -= 86400;
+            boundary = i;
+        }
+    }
+
+    result
 }
 
 async fn load_headers_from_sqlite() {
@@ -65,7 +318,7 @@ async fn load_headers_from_sqlite() {
     }
 
     // After loading all headers from sqlite, figure out how many blocks we have downloaded
-    let new_downloaded_blocks = calculate_downloaded_blocks_w(&w);
+    let new_downloaded_blocks = calculate_downloaded_blocks(&w);
     DOWNLOADED_BLOCKS.store(new_downloaded_blocks, Ordering::Relaxed);
     METRIC_FULL_BLOCKS_DOWNLOADED.set(new_downloaded_blocks as i64);
 }
@@ -177,7 +430,7 @@ fn validate_and_apply_header_inner(header: &BlockHeader, w: &mut Chain) -> Resul
         w.top_header = new_header.clone();
         METRIC_TOP_HEADER_HEIGHT.set(new_header.number as i64);
         if should_recount {
-            let new_count = calculate_downloaded_blocks_w(w);
+            let new_count = calculate_downloaded_blocks(w);
             DOWNLOADED_BLOCKS.store(new_count, Ordering::Relaxed);
             METRIC_FULL_BLOCKS_DOWNLOADED.set(new_count as i64);
         }
@@ -201,7 +454,7 @@ fn validate_and_apply_headers(headers: &[&BlockHeader]) -> Result<()> {
     Ok(())
 }
 
-fn calculate_downloaded_blocks_w(r: &Chain) -> u64 {
+fn calculate_downloaded_blocks(r: &Chain) -> u64 {
     // Since blocks are applied sequentially, if we see a block that has FetchedFull set to true, we know all of the blocks before it are also downloaded
     let mut last = &r.top_header;
     loop {
@@ -210,6 +463,20 @@ fn calculate_downloaded_blocks_w(r: &Chain) -> u64 {
         }
         if last.number == 0 {
             return 0;
+        }
+        last = r.known_headers.get(last.header.parent.as_slice()).unwrap();
+    }
+}
+
+fn get_top_downloaded_block_hash(r: &Chain) -> Option<[u8; 32]> {
+    // Since blocks are applied sequentially, if we see a block that has FetchedFull set to true, we know all of the blocks before it are also downloaded
+    let mut last = &r.top_header;
+    loop {
+        if last.fetched_full {
+            return Some(last.header.hash);
+        }
+        if last.number == 0 {
+            return None;
         }
         last = r.known_headers.get(last.header.parent.as_slice()).unwrap();
     }
@@ -262,7 +529,7 @@ fn mark_as_downloaded(blocks: Vec<[u8; 32]>) {
         .fetched_full;
 
     // Update DOWNLOADED_BLOCKS
-    let new_downloaded_blocks = calculate_downloaded_blocks_w(&w);
+    let new_downloaded_blocks = calculate_downloaded_blocks(&w);
     DOWNLOADED_BLOCKS.store(new_downloaded_blocks, Ordering::Relaxed);
     METRIC_FULL_BLOCKS_DOWNLOADED.set(new_downloaded_blocks as i64);
 }

@@ -134,6 +134,13 @@ where
     fn serialize(&self, stream: &mut impl BufMut);
 }
 
+pub trait DeserializableOwned
+where
+    Self: Sized + Clone,
+{
+    fn deserialize_owned(buffer: &[u8]) -> Result<(Supercow<'static, Self>, usize)>; // returned value is the length consumed
+}
+
 pub trait SerializableValue<'bump>
 where
     Self: Sized,
@@ -156,6 +163,13 @@ pub trait SerializableSupercowVecOfCows<'bump> {
         Self: Sized + Clone + ToOwned; // returned value is the length consumed
 
     fn serialize(&self, stream: &mut impl BufMut);
+}
+
+pub trait SerializableSupercowVecOfCowsOwned {
+    // Everything is heap allocated
+    fn deserialize_owned(buffer: &[u8]) -> Result<(Self, usize)>
+    where
+        Self: Sized + Clone + ToOwned; // returned value is the length consumed
 }
 
 #[derive(Clone, Debug)]
@@ -223,10 +237,7 @@ impl<'a, T: Serializable<'a>> SerializableSupercowVecOfCows<'a> for SupercowVec<
     fn deserialize(allocator: &'a Bump<1>, buffer: &'a [u8]) -> Result<(Self, usize)> {
         let (len, mut offset) = VarInt::deserialize(buffer)?;
 
-        let mut result: Vec<'a, Supercow<'a, T>> = Vec::new_in(allocator);
-        if result.try_reserve_exact(len as usize).is_err() {
-            bail!("allocation failed");
-        }
+        let mut result: Vec<'a, Supercow<'a, T>> = Vec::with_capacity_in(len as usize, allocator);
         for _ in 0..len as usize {
             let (value, offset_delta) = T::deserialize(allocator, buffer.with_offset(offset)?)?;
             offset += offset_delta;
@@ -245,5 +256,30 @@ impl<'a, T: Serializable<'a>> SerializableSupercowVecOfCows<'a> for SupercowVec<
         for i in 0..len as usize {
             self.inner[i].serialize(stream);
         }
+    }
+}
+
+impl<T: DeserializableOwned> SerializableSupercowVecOfCowsOwned for SupercowVec<'static, T> {
+    fn deserialize_owned(buffer: &[u8]) -> Result<(Self, usize)>
+    where
+        Self: Sized + Clone + ToOwned,
+    {
+        let (len, mut offset) = VarInt::deserialize(buffer)?;
+
+        let mut result: std::vec::Vec<Supercow<'static, T>> =
+            std::vec::Vec::with_capacity(len as usize);
+        if result.try_reserve_exact(len as usize).is_err() {
+            bail!("allocation failed");
+        }
+        for _ in 0..len as usize {
+            let (value, offset_delta) = T::deserialize_owned(buffer.with_offset(offset)?)?;
+            offset += offset_delta;
+            result.push(value);
+        }
+
+        let array = SupercowVec {
+            inner: Supercow::owned(result),
+        };
+        Ok((array, offset))
     }
 }

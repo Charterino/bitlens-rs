@@ -2,6 +2,8 @@ use crate::packets::buffer::Buffer;
 use crate::packets::packetpayload::SerializableValue;
 use crate::packets::tx::TxOut;
 use crate::packets::varint::VarInt;
+use crate::tx::AnalyzedTx;
+use crate::tx::deserialize_analyzed_tx;
 use anyhow::Result;
 use anyhow::bail;
 use rocksdb::{DB, IngestExternalFileOptions, Options};
@@ -48,11 +50,11 @@ pub struct SerializedTx<'a> {
     pub analyzed_tx: Option<&'a [u8]>,
     pub tx_outs: Option<&'a [u8]>,
 
-    // The following fields arent written to disk (because they're already present in of `analyzed_tx`),
+    // The following fields arent written to disk (because they're already present in `analyzed_tx`),
     // but are stored for easy access after writing this transaction to update the front page response.
     pub fee: u64,
-    pub value: u64,
-    pub size: u32,
+    pub txouts_sum: u64,
+    pub size_wus: u32,
 }
 
 // for now this does the regular alloc stuff and returns owned data with 'static lifetime
@@ -151,4 +153,50 @@ pub async fn write_block_txs(blocks_with_txs_pairs: Vec<(&[u8; 32], Vec<u8>)>) {
         .expect("to ingest bitlens-blocktxs-temp.sst");
     BLOCKTXS_DB.flush_wal(true).expect("to flush blocktxs wal");
     BLOCKTXS_DB.flush().expect("to flush blocktxs");
+}
+
+pub async fn get_block_tx_hashes(hash: [u8; 32]) -> Result<Vec<[u8; 32]>> {
+    let _g = READ_SEMAPHORE
+        .acquire()
+        .await
+        .expect("to have acquire a read permit from the semaphore");
+
+    tokio::task::spawn_blocking(move || match BLOCKTXS_DB.get_pinned(hash)? {
+        None => bail!("data does not exist"),
+        Some(data) => {
+            if data.is_empty() {
+                bail!("data empty")
+            }
+
+            let (count, mut continue_at) = VarInt::deserialize(&data)?;
+            let mut result = Vec::with_capacity(count as usize);
+            for _ in 0..count {
+                let mut tx_hash: [u8; 32] = [0u8; 32];
+                tx_hash.copy_from_slice(&data[continue_at..continue_at + 32]);
+                continue_at += 32;
+                result.push(tx_hash);
+            }
+            Ok(result)
+        }
+    })
+    .await?
+}
+
+pub async fn get_analyzed_tx(hash: [u8; 32]) -> Result<AnalyzedTx> {
+    let _g = READ_SEMAPHORE
+        .acquire()
+        .await
+        .expect("to have acquire a read permit from the semaphore");
+
+    tokio::task::spawn_blocking(move || match TXS_DB.get_pinned(hash)? {
+        None => bail!("data does not exist"),
+        Some(data) => {
+            if data.is_empty() {
+                bail!("data empty")
+            }
+
+            Ok(deserialize_analyzed_tx(&data, hash))
+        }
+    })
+    .await?
 }
