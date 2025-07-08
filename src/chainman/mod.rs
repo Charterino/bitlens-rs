@@ -140,7 +140,7 @@ async fn update_frontpage_response(
             }
             current_header = {
                 let r = CHAIN.read().unwrap();
-                r.known_headers[&current_header.header.hash].clone()
+                r.known_headers[&*current_header.header.parent].clone()
             };
         }
 
@@ -190,7 +190,7 @@ async fn update_frontpage_response(
 
             i -= 1;
             if i != 0 {
-                current_header = &r.known_headers[&current_header.header.hash];
+                current_header = &r.known_headers[&*current_header.header.parent];
             }
         }
 
