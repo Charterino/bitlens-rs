@@ -1,9 +1,13 @@
+use crate::packets::packet::{CURRENT_POOL_LIMIT, CURRENT_POOL_SIZE};
 use axum::{Router, extract::Request, http::StatusCode, routing::get};
 use prometheus::{
     Encoder, Histogram, IntGauge, TextEncoder, linear_buckets, register_histogram,
     register_int_gauge,
 };
-use std::{env, sync::LazyLock};
+use std::{
+    env,
+    sync::{LazyLock, atomic::Ordering},
+};
 
 pub static METRIC_TOP_HEADER_HEIGHT: LazyLock<IntGauge> = LazyLock::new(|| {
     register_int_gauge!("bitlens_top_header_height", "the number of the top header").unwrap()
@@ -81,6 +85,24 @@ async fn metrics(req: Request) -> Result<String, StatusCode> {
 
     let metric_families = prometheus::gather();
     encoder.encode(&metric_families, &mut buffer).unwrap();
+    buffer.extend_from_slice("# HELP bitlens_deserialize_pool_size current number of bump allocators used for deserializing incoming packets\n".as_bytes());
+    buffer.extend_from_slice("# TYPE bitlens_deserialize_pool_size gauge\n".as_bytes());
+    buffer.extend_from_slice(
+        format!(
+            "bitlens_deserialize_pool_size {}\n",
+            CURRENT_POOL_SIZE.load(Ordering::Relaxed)
+        )
+        .as_bytes(),
+    );
+    buffer.extend_from_slice("# HELP bitlens_deserialize_pool_limit current limit of bump allocators used for deserializing incoming packets\n".as_bytes());
+    buffer.extend_from_slice("# TYPE bitlens_deserialize_pool_limit gauge\n".as_bytes());
+    buffer.extend_from_slice(
+        format!(
+            "bitlens_deserialize_pool_limit {}\n",
+            CURRENT_POOL_LIMIT.load(Ordering::Relaxed)
+        )
+        .as_bytes(),
+    );
 
     Ok(String::from_utf8(buffer.clone()).unwrap())
 }
