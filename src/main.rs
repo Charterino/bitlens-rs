@@ -22,6 +22,7 @@ use tokio::{
 use types::addressportnetwork::AddressPortNetwork;
 
 pub mod addrman;
+pub mod api;
 pub mod chainman;
 pub mod connect;
 pub mod crawler;
@@ -53,11 +54,11 @@ pub static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
 });
 
 fn main() -> Result<()> {
+    let _guard = setup_logging();
     RUNTIME.block_on(async_main())
 }
 
 async fn async_main() -> Result<()> {
-    let _guard = setup_logging();
     let ctrl_c_events = ctrl_channel()?;
 
     info!("starting bitlens..");
@@ -66,6 +67,7 @@ async fn async_main() -> Result<()> {
     db::setup().await;
     addrman::start().await;
     chainman::start().await;
+    api::start().await;
     tokio::spawn(resolve_dns_and_add_to_addrman(DNS_SEEDS));
     let c = tokio::spawn(crawler::crawl_forever());
 
