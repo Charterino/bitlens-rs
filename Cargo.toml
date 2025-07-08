@@ -23,10 +23,6 @@ num-traits = "0.2.19"
 ouroboros = "0.18.5"
 primitive-types = "0.13.1"
 rand = "0.9.1"
-zstd-sys = { version = "2.0", features = [
-    "legacy",
-    "zdict_builder",
-], default-features = false }
 rusqlite = { version = "0.36.0", features = ["bundled"] }
 sha2 = { version = "0.10.9", features = ["asm", "asm-aarch64"] }
 slog = "2.7.0"
@@ -36,10 +32,6 @@ slog-scope = "4.4.0"
 slog-term = "2.9.1"
 time = "0.3.41"
 tokio = { version = "1.45.1", features = ["full"] }
-librocksdb-sys = { version = "0.17.1", features = [
-    "bindgen-runtime",
-    "zstd",
-], default-features = false }
 rocksdb = { version = "0.23.0", features = [
     "bindgen-runtime",
     "zstd",
