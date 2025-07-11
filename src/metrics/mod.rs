@@ -61,12 +61,19 @@ static METRICS_TOKEN: LazyLock<Vec<u8>> = LazyLock::new(|| {
     ("Bearer ".to_owned() + &token).into_bytes()
 });
 
+static METRICS_LISTEN_ADDRESS: LazyLock<String> = LazyLock::new(|| {
+    let token = env::var("METRICS_LISTEN_ADDRESS").expect("METRICS_LISTEN_ADDRESS is not set");
+    token
+});
+
 pub async fn start() {
     let _ = *METRICS_TOKEN; // Ensure METRICS_TOKEN is set.
 
     let app = Router::new().route("/metrics", get(metrics));
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:8123").await.unwrap();
+    let listener = tokio::net::TcpListener::bind(&*METRICS_LISTEN_ADDRESS)
+        .await
+        .unwrap();
     tokio::spawn(async { axum::serve(listener, app).await });
 }
 
