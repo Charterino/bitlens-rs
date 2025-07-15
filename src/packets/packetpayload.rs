@@ -158,7 +158,7 @@ pub trait SerializableSupercowVecOfCows<'bump> {
     fn deserialize(
         allocator: &'bump bumpalo::Bump<1>,
         buffer: &'bump [u8],
-    ) -> Result<(Self, usize)>
+    ) -> Result<(&'bump Self, usize)>
     where
         Self: Sized + Clone + ToOwned; // returned value is the length consumed
 
@@ -234,7 +234,7 @@ impl PacketPayloadType<'_> {
 }
 
 impl<'a, T: Serializable<'a>> SerializableSupercowVecOfCows<'a> for SupercowVec<'a, T> {
-    fn deserialize(allocator: &'a Bump<1>, buffer: &'a [u8]) -> Result<(Self, usize)> {
+    fn deserialize(allocator: &'a Bump<1>, buffer: &'a [u8]) -> Result<(&'a Self, usize)> {
         let (len, mut offset) = VarInt::deserialize(buffer)?;
 
         let mut result: Vec<'a, Supercow<'a, T>> = Vec::with_capacity_in(len as usize, allocator);
@@ -244,8 +244,11 @@ impl<'a, T: Serializable<'a>> SerializableSupercowVecOfCows<'a> for SupercowVec<
             result.push(value);
         }
 
-        let array = SupercowVec {
+        let array = match allocator.try_alloc(SupercowVec {
             inner: Supercow::borrowed(result.into_bump_slice()),
+        }) {
+            Ok(v) => v,
+            Err(e) => bail!(e),
         };
         Ok((array, offset))
     }

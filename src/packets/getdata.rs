@@ -7,9 +7,17 @@ use super::{
 use anyhow::bail;
 use supercow::Supercow;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct GetData<'a> {
-    pub inner: SupercowVec<'a, InventoryVector<'a>>,
+    pub inner: Supercow<'a, SupercowVec<'a, InventoryVector<'a>>>,
+}
+
+impl Default for GetData<'_> {
+    fn default() -> Self {
+        Self {
+            inner: Supercow::owned(Default::default()),
+        }
+    }
 }
 
 pub const GETDATA_COMMAND: [u8; 12] = *b"getdata\0\0\0\0\0";
@@ -32,9 +40,9 @@ impl<'old, 'new: 'old> DeepClone<'old, 'new> for GetData<'old> {
             .map(Supercow::owned)
             .collect();
         Self::WithLifetime {
-            inner: SupercowVec {
+            inner: Supercow::owned(SupercowVec {
                 inner: Supercow::owned(data),
-            },
+            }),
         }
     }
 }
@@ -46,7 +54,7 @@ impl<'a> Serializable<'a> for GetData<'a> {
     ) -> anyhow::Result<(Supercow<'a, Self>, usize)> {
         let (deserialized, consumed) = SupercowVec::deserialize(allocator, buffer)?;
         match allocator.try_alloc(GetData {
-            inner: deserialized,
+            inner: Supercow::borrowed(deserialized),
         }) {
             Ok(result) => Ok((Supercow::borrowed(result), consumed)),
             Err(e) => bail!(e),

@@ -7,10 +7,17 @@ use super::{
 use anyhow::bail;
 use supercow::Supercow;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct Inv<'a> {
-    //pub inner: Supercow<'a, std::vec::Vec<InventoryVector<'a>>, [InventoryVector<'a>]>,
-    pub inner: SupercowVec<'a, InventoryVector<'a>>,
+    pub inner: Supercow<'a, SupercowVec<'a, InventoryVector<'a>>>,
+}
+
+impl Default for Inv<'_> {
+    fn default() -> Self {
+        Self {
+            inner: Supercow::owned(Default::default()),
+        }
+    }
 }
 
 pub const INV_COMMAND: [u8; 12] = *b"inv\0\0\0\0\0\0\0\0\0";
@@ -33,9 +40,9 @@ impl<'old, 'new: 'old> DeepClone<'old, 'new> for Inv<'old> {
             .map(Supercow::owned)
             .collect();
         Self::WithLifetime {
-            inner: SupercowVec {
+            inner: Supercow::owned(SupercowVec {
                 inner: Supercow::owned(invs),
-            },
+            }),
         }
     }
 }
@@ -47,7 +54,7 @@ impl<'a> Serializable<'a> for Inv<'a> {
     ) -> anyhow::Result<(Supercow<'a, Self>, usize)> {
         let (deserialized, consumed) = SupercowVec::deserialize(allocator, buffer)?;
         match allocator.try_alloc(Inv {
-            inner: deserialized,
+            inner: Supercow::borrowed(deserialized),
         }) {
             Ok(result) => Ok((Supercow::borrowed(result), consumed)),
             Err(e) => bail!(e),

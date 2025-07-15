@@ -14,14 +14,27 @@ use bumpalo::{Bump, collections::Vec};
 use sha2::{Digest, Sha256};
 use supercow::Supercow;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct Tx<'a> {
     pub version: u32,
     pub locktime: u32,
-    pub txins: SupercowVec<'a, TxIn<'a>>,
-    pub txouts: SupercowVec<'a, TxOut<'a>>,
-    pub witness_data: Option<SupercowVec<'a, SupercowVec<'a, VarStr<'a>>>>,
+    pub txins: Supercow<'a, SupercowVec<'a, TxIn<'a>>>,
+    pub txouts: Supercow<'a, SupercowVec<'a, TxOut<'a>>>,
+    pub witness_data: Option<Supercow<'a, SupercowVec<'a, SupercowVec<'a, VarStr<'a>>>>>,
     pub hash: [u8; 32], // calculated during deserialization
+}
+
+impl Default for Tx<'_> {
+    fn default() -> Self {
+        Self {
+            version: Default::default(),
+            locktime: Default::default(),
+            txins: Supercow::owned(Default::default()),
+            txouts: Supercow::owned(Default::default()),
+            witness_data: Default::default(),
+            hash: Default::default(),
+        }
+    }
 }
 
 impl Tx<'_> {
@@ -113,7 +126,7 @@ impl Tx<'_> {
             let wits = SupercowVec {
                 inner: Supercow::owned(wits),
             };
-            (Some(wits), start)
+            (Some(Supercow::owned(wits)), start)
         } else {
             (None, 0)
         };
@@ -123,8 +136,8 @@ impl Tx<'_> {
         Ok(Tx {
             version,
             locktime,
-            txins,
-            txouts: SupercowVec::default(),
+            txins: Supercow::owned(txins),
+            txouts: Supercow::owned(SupercowVec::default()),
             witness_data: witnesses,
             hash,
         })
@@ -160,12 +173,12 @@ impl<'old, 'new: 'old> DeepClone<'old, 'new> for Tx<'old> {
         Self::WithLifetime {
             version: self.version,
             locktime: self.locktime,
-            txins: SupercowVec {
+            txins: Supercow::owned(SupercowVec {
                 inner: Supercow::owned(txins),
-            },
-            txouts: SupercowVec {
+            }),
+            txouts: Supercow::owned(SupercowVec {
                 inner: Supercow::owned(txouts),
-            },
+            }),
             witness_data: None,
             hash: self.hash,
         }
@@ -204,13 +217,16 @@ impl<'a> Serializable<'a> for Tx<'a> {
                 let (components, offset_delta) =
                     SupercowVec::deserialize(allocator, buffer.with_offset(offset)?)?;
                 offset += offset_delta;
-                wits.push(Supercow::owned(components));
+                wits.push(Supercow::borrowed(components));
             }
             let bump_slice = wits.into_bump_slice();
-            let wits = SupercowVec {
+            let wits = match allocator.try_alloc(SupercowVec {
                 inner: Supercow::borrowed(bump_slice),
+            }) {
+                Ok(v) => v,
+                Err(e) => bail!(e),
             };
-            (Some(wits), start)
+            (Some(Supercow::borrowed(wits)), start)
         } else {
             (None, 0)
         };
@@ -232,8 +248,8 @@ impl<'a> Serializable<'a> for Tx<'a> {
         match allocator.try_alloc(Tx {
             version,
             locktime,
-            txins,
-            txouts,
+            txins: Supercow::borrowed(txins),
+            txouts: Supercow::borrowed(txouts),
             witness_data: witnesses,
             hash: second_pass.into(),
         }) {

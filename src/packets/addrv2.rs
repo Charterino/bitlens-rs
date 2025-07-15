@@ -7,9 +7,17 @@ use super::{
 use anyhow::bail;
 use supercow::Supercow;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct AddrV2<'a> {
-    pub inner: SupercowVec<'a, NetAddrV2<'a>>,
+    pub inner: Supercow<'a, SupercowVec<'a, NetAddrV2<'a>>>,
+}
+
+impl Default for AddrV2<'_> {
+    fn default() -> Self {
+        Self {
+            inner: Supercow::owned(Default::default()),
+        }
+    }
 }
 
 pub const ADDRV2_COMMAND: [u8; 12] = *b"addrv2\0\0\0\0\0\0";
@@ -32,9 +40,9 @@ impl<'old, 'new: 'old> DeepClone<'old, 'new> for AddrV2<'old> {
             .map(Supercow::owned)
             .collect();
         Self::WithLifetime {
-            inner: SupercowVec {
+            inner: Supercow::owned(SupercowVec {
                 inner: Supercow::owned(addys),
-            },
+            }),
         }
     }
 }
@@ -46,7 +54,7 @@ impl<'a> Serializable<'a> for AddrV2<'a> {
     ) -> anyhow::Result<(Supercow<'a, Self>, usize)> {
         let (deserialized, consumed) = SupercowVec::deserialize(allocator, buffer)?;
         match allocator.try_alloc(AddrV2 {
-            inner: deserialized,
+            inner: Supercow::borrowed(deserialized),
         }) {
             Ok(result) => Ok((Supercow::borrowed(result), consumed)),
             Err(e) => bail!(e),

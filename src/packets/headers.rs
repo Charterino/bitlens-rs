@@ -7,9 +7,17 @@ use super::{
 use anyhow::bail;
 use supercow::Supercow;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct Headers<'a> {
-    pub inner: SupercowVec<'a, BlockHeader<'a>>,
+    pub inner: Supercow<'a, SupercowVec<'a, BlockHeader<'a>>>,
+}
+
+impl Default for Headers<'_> {
+    fn default() -> Self {
+        Self {
+            inner: Supercow::owned(Default::default()),
+        }
+    }
 }
 
 pub const HEADERS_COMMAND: [u8; 12] = *b"headers\0\0\0\0\0";
@@ -32,9 +40,9 @@ impl<'old, 'new: 'old> DeepClone<'old, 'new> for Headers<'old> {
             .map(Supercow::owned)
             .collect();
         Self::WithLifetime {
-            inner: SupercowVec {
+            inner: Supercow::owned(SupercowVec {
                 inner: Supercow::owned(addys),
-            },
+            }),
         }
     }
 }
@@ -46,7 +54,7 @@ impl<'a> Serializable<'a> for Headers<'a> {
     ) -> anyhow::Result<(Supercow<'a, Self>, usize)> {
         let (deserialized, consumed) = SupercowVec::deserialize(allocator, buffer)?;
         match allocator.try_alloc(Self {
-            inner: deserialized,
+            inner: Supercow::borrowed(deserialized),
         }) {
             Ok(result) => Ok((Supercow::borrowed(result), consumed)),
             Err(e) => bail!(e),

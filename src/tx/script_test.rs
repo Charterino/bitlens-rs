@@ -185,12 +185,12 @@ fn test_get_transaction_sigop_cost() {
             Some(vec![vec![], vec![]]),
         );
         // The witness of a coinbase transaction is not taken into account
-        spending_tx.txins = SupercowVec::from_owned(vec![TxIn {
+        spending_tx.txins = Supercow::owned(SupercowVec::from_owned(vec![TxIn {
             prevout_hash: Supercow::owned([0u8; 32]),
             prevout_index: 0xFFFFFFFF,
             sequence: 0,
             sig_script: Supercow::owned(VarStr::from_owned(script_sig)),
-        }]);
+        }]));
         assert_eq!(
             0,
             get_transaction_sigop_cost(&spending_tx, &deps, flags_witness)
@@ -295,28 +295,28 @@ fn build_txs<'creation>(
     witness: Option<Vec<Vec<u8>>>,
 ) -> Vec<&'creation TxOut<'creation>> {
     creation_tx.version = 1;
-    creation_tx.txins = SupercowVec::default();
-    creation_tx.txouts = SupercowVec::from_owned(vec![TxOut {
+    creation_tx.txins = Supercow::owned(SupercowVec::default());
+    creation_tx.txouts = Supercow::owned(SupercowVec::from_owned(vec![TxOut {
         value: 1,
         script: Supercow::owned(VarStr::from_owned(script_pubkey)),
-    }]);
+    }]));
     creation_tx.witness_data = None;
 
     spending_tx.version = 1;
-    spending_tx.txins = SupercowVec::from_owned(vec![TxIn {
+    spending_tx.txins = Supercow::owned(SupercowVec::from_owned(vec![TxIn {
         prevout_hash: Supercow::owned(creation_tx.hash),
         prevout_index: 0,
         sequence: 0,
         sig_script: Supercow::owned(VarStr::from_owned(script_sig)),
-    }]);
+    }]));
     if let Some(witness) = witness {
         let mapped_to_varstrs = witness
             .into_iter()
             .map(VarStr::from_owned)
             .collect::<Vec<VarStr>>();
-        spending_tx.witness_data = Some(SupercowVec::from_owned(vec![SupercowVec::from_owned(
-            mapped_to_varstrs,
-        )]));
+        spending_tx.witness_data = Some(Supercow::owned(SupercowVec::from_owned(vec![
+            SupercowVec::from_owned(mapped_to_varstrs),
+        ])));
     } else {
         spending_tx.witness_data = None;
     }

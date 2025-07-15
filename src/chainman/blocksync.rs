@@ -35,7 +35,7 @@ use crate::{
     util::arena::Arena,
     with_deadline,
 };
-use anyhow::{Result, bail};
+use anyhow::Result;
 
 use super::{get_block_hashes_to_download, mark_as_downloaded, update_frontpage_response};
 
@@ -212,7 +212,7 @@ fn find_next_best_job(
         }
         let elapsed = now - requested_at;
 
-        if elapsed > 2_000 {
+        if elapsed > 1_000 {
             last_request_times[i] = now;
             return Some((missing_blocks[i], first_missing_number + i as u64));
         }
@@ -320,12 +320,12 @@ async fn fetch_job(
 
 fn job_to_getdata(hash: [u8; 32]) -> PacketPayloadType<'static> {
     PacketPayloadType::GetData(Supercow::owned(GetData {
-        inner: SupercowVec {
+        inner: Supercow::owned(SupercowVec {
             inner: Supercow::owned(vec![Supercow::owned(InventoryVector {
                 inv_type: InventoryVectorType::WitnessBlock,
                 hash: Supercow::owned(hash),
             })]),
-        },
+        }),
     }))
 }
 
@@ -361,43 +361,37 @@ async fn receive_and_process_blocks(mut recv: Receiver<(PayloadWithAllocator, u6
         }
 
         // So everything is flushed now
+
+        // TODO: can prolly optimize a lil here by reusing metrics/analyzed arrays and hashmaps
         let ChainSyncState {
-            mut current_txouts,
+            current_txouts,
             current_analyzed,
-            mut previous_txouts,
+            previous_txouts,
             current_metrics,
         } = Arc::into_inner(current_state)
             .expect("to have no other arcs for current_state")
             .into_inner()
             .unwrap();
+        // Instantly drop previous_txouts and reset the previous arena
+        drop(previous_txouts);
+        previous_arena.reset();
 
         // Right now we have:
         // current_txouts + current_analyzed -> current_arena
-        // previous_txouts + (dropped) previous_analyzed -> previous_arena
-        //
-        // Clean previous_txouts + previous_arena, and swap everything:
-        // (current_arena, previous_arena) = (previous_arena, current_arena)
-        // (current_txouts, previous_txouts) = (previous_txouts, current_txouts)
 
         // turn current_analyzed<'current_arena> into previous_analyzed<'static> so we can tokio::spawn it
         // the returned handle will be awaited before we reset the arena that it borrows data from
         let static_previous_analyzed =
             unsafe { transmute::<_, Vec<&'static [SerializedTx<'static>]>>(current_analyzed) };
 
-        unsafe {
-            // Swap current_txouts_arena and previous_txouts_arena
-            // and current_txouts with previous_txouts
-            // then reset the current/prev-prev arena + hashmap
-            // unsafe because we transmute lifetimes but I don't know if there's a better way
-            let txouts_prev_from_cur = transmute(current_txouts);
-            let txouts_cur_from_prev = transmute(previous_txouts);
-            previous_txouts = txouts_prev_from_cur;
-            current_txouts = txouts_cur_from_prev;
+        // turn current_txouts<'current_arena> into previous_txouts<'previous_arena> and swap the arenas
+        let new_previous_txouts = unsafe {
+            let txouts_prev_from_cur: HashMap<[u8; 32], Vec<&TxOut<'_>>> =
+                transmute(current_txouts);
             swap(&mut current_arena, &mut previous_arena);
             // After we swapped the arenas, `static_previous_analyzed` borrows data from `previous_arena`
             // Now that we have swapped the txouts and arenas, clear the current arena + txouts
-            current_txouts.clear();
-            current_arena.reset();
+            txouts_prev_from_cur
         };
 
         running_flush = Some(tokio::spawn(async move {
@@ -413,12 +407,14 @@ async fn receive_and_process_blocks(mut recv: Receiver<(PayloadWithAllocator, u6
                 false,
             )
             .await;
+            drop(static_previous_analyzed);
+            drop(current_metrics);
         }));
 
         current_state = Arc::new(RwLock::new(ChainSyncState {
-            current_txouts,
+            current_txouts: HashMap::new(),
             current_analyzed: Vec::with_capacity(MAX_BLOCKS_PER_FLUSH),
-            previous_txouts,
+            previous_txouts: new_previous_txouts,
             current_metrics: Vec::with_capacity(MAX_BLOCKS_PER_FLUSH),
         }));
     }
@@ -485,15 +481,13 @@ fn insert_transactions_from_block<'arena>(
         let mut cloned = Vec::with_capacity(tx.txouts.inner.len());
         for txout in tx.txouts.inner.iter() {
             let cloned_script = arena.try_alloc_array_copy(txout.script.inner.as_ref())?;
-            let txout = match arena.try_alloc(TxOut {
+            let cloned_varstr = arena.try_alloc(VarStr {
+                inner: Supercow::borrowed(cloned_script),
+            })?;
+            let txout = arena.try_alloc(TxOut {
                 value: txout.value,
-                script: Supercow::owned(VarStr {
-                    inner: Supercow::borrowed(cloned_script),
-                }),
-            }) {
-                Ok(p) => p,
-                Err(_) => bail!("oom"),
-            };
+                script: Supercow::borrowed(cloned_varstr),
+            })?;
             cloned.push(&*txout);
         }
         txouts.insert(tx.hash, cloned);

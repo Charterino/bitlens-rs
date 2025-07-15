@@ -13,14 +13,14 @@ use supercow::Supercow;
 #[derive(Debug, Clone)]
 pub struct Block<'a> {
     pub header: Supercow<'a, BlockHeader<'a>>,
-    pub txs: SupercowVec<'a, Tx<'a>>,
+    pub txs: Supercow<'a, SupercowVec<'a, Tx<'a>>>,
 }
 
 impl Default for Block<'_> {
     fn default() -> Self {
         Self {
             header: Supercow::owned(Default::default()),
-            txs: Default::default(),
+            txs: Supercow::owned(Default::default()),
         }
     }
 }
@@ -48,9 +48,9 @@ impl<'old, 'new: 'old> DeepClone<'old, 'new> for Block<'old> {
             .collect();
         Self::WithLifetime {
             header: Supercow::owned(header),
-            txs: SupercowVec {
+            txs: Supercow::owned(SupercowVec {
                 inner: Supercow::owned(txs),
-            },
+            }),
         }
     }
 }
@@ -82,7 +82,7 @@ impl<'a> Serializable<'a> for Block<'a> {
 
         match allocator.try_alloc(Block {
             header,
-            txs,
+            txs: Supercow::borrowed(txs),
         }) {
             Ok(result) => Ok((Supercow::borrowed(result), offset + 80)),
             Err(e) => bail!(e),
