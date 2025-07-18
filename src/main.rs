@@ -2,10 +2,7 @@
 
 use std::{
     net::ToSocketAddrs,
-    sync::{
-        LazyLock,
-        mpsc::{Receiver, channel},
-    },
+    sync::mpsc::{Receiver, channel},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
