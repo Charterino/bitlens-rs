@@ -1,7 +1,6 @@
 use core::panic;
 use std::{
     collections::HashMap,
-    mem::{swap, transmute},
     num::NonZeroUsize,
     sync::{Arc, Mutex, RwLock, atomic::Ordering},
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -12,7 +11,6 @@ use supercow::Supercow;
 use tokio::{
     join,
     sync::mpsc::{Receiver, Sender, channel},
-    task::JoinHandle,
     time::Instant,
 };
 
@@ -42,8 +40,11 @@ use super::{get_block_hashes_to_download, mark_as_downloaded, update_frontpage_r
 const BLOCK_TIMEOUT: Duration = Duration::from_millis(1000);
 
 pub enum DownloadWorkerMessage {
-    PullFirstJob(Sender<BlockHashWithNumber>),
-    PushResultAndGetNewJob(BlockWithNumber, Sender<BlockHashWithNumber>),
+    PullFirstJob(tokio::sync::oneshot::Sender<BlockHashWithNumber>),
+    PushResultAndGetNewJob(
+        BlockWithNumber,
+        tokio::sync::oneshot::Sender<BlockHashWithNumber>,
+    ),
 }
 
 type BlockHashWithNumber = ([u8; 32], u64);
@@ -57,11 +58,19 @@ pub async fn sync_blocks() {
     );
     let (flush_tx, flush_rx) = channel(1);
     let (master_tx, master_rx) = channel(1);
-    // Todo: spawn and kill workers dynamically
-    for _ in 0..50 {
-        tokio::spawn(run_download_worker(master_tx.clone()));
-    }
     let master = tokio::spawn(run_master(master_rx, flush_tx));
+    // Todo: spawn and kill workers dynamically
+    let mut handles = vec![];
+    for _ in 0..50 {
+        handles.push(tokio::spawn(run_download_worker(master_tx.clone())));
+    }
+    tokio::spawn(async move {
+        for h in handles {
+            let _ = h.await;
+        }
+        drop(master_tx);
+        info!("done with all workers");
+    });
     let block_writer = tokio::spawn(receive_and_process_blocks(flush_rx));
     let _ = join!(master, block_writer);
     packet::CURRENT_POOL_LIMIT.store(packet::INITIAL_DESERIALIZE_ARENA_COUNT, Ordering::Relaxed);
@@ -94,7 +103,7 @@ async fn run_master(mut master: Receiver<DownloadWorkerMessage>, flush: Sender<B
                     true,
                 ) {
                     Some(job) => {
-                        _ = sender.send(job).await;
+                        _ = sender.send(job);
                     }
                     None => {
                         // No job for this runner, kill it
@@ -138,7 +147,7 @@ async fn run_master(mut master: Receiver<DownloadWorkerMessage>, flush: Sender<B
                     can_advance,
                 ) {
                     Some(job) => {
-                        _ = sender.send(job).await;
+                        _ = sender.send(job);
                     }
                     None => {
                         // No job for this runner, kill it
@@ -267,9 +276,9 @@ fn find_next_best_job(
 }
 
 async fn run_download_worker(master: Sender<DownloadWorkerMessage>) {
-    let (reply_tx, mut reply_rx) = channel::<BlockHashWithNumber>(1);
+    let (reply_tx, mut reply_rx) = tokio::sync::oneshot::channel::<BlockHashWithNumber>();
     let (mut job, mut job_number) =
-        some_or_return!(fetch_job(&master, reply_tx.clone(), &mut reply_rx).await);
+        some_or_return!(fetch_job(&master, reply_tx, &mut reply_rx).await);
     let mut job_packet = job_to_getdata(job);
 
     // the peer loop: every iteration is a different peer, and "continue" is used to switch to a new peer
@@ -279,6 +288,7 @@ async fn run_download_worker(master: Sender<DownloadWorkerMessage>) {
         ok_or_continue!(connection.inner.write_packet(&job_packet).await);
         let mut deadline = Instant::now().checked_add(BLOCK_TIMEOUT).unwrap();
         loop {
+            let (reply_tx, reply_rx) = tokio::sync::oneshot::channel::<BlockHashWithNumber>();
             // read_packet() returns a Result<Packet>. with_deadline!() will wrap the future and return an error if it doesnt complete before `deadline`.
             // ok_or_break!() will match that and `break` if its Result::Err(), breaking this loop, thus switching to a new peer.
             let packet = ok_or_break!(with_deadline!(connection.inner.read_packet(), deadline));
@@ -294,11 +304,11 @@ async fn run_download_worker(master: Sender<DownloadWorkerMessage>) {
                     master
                         .send(DownloadWorkerMessage::PushResultAndGetNewJob(
                             (packet.payload, job_number),
-                            reply_tx.clone(),
+                            reply_tx,
                         ))
                         .await
                 );
-                (job, job_number) = some_or_return!(reply_rx.recv().await);
+                (job, job_number) = ok_or_return!(reply_rx.await);
                 job_packet = job_to_getdata(job);
                 ok_or_break!(connection.inner.write_packet(&job_packet).await);
                 deadline = Instant::now().checked_add(BLOCK_TIMEOUT).unwrap();
@@ -309,11 +319,11 @@ async fn run_download_worker(master: Sender<DownloadWorkerMessage>) {
 
 async fn fetch_job(
     master: &Sender<DownloadWorkerMessage>,
-    send: Sender<BlockHashWithNumber>,
-    recv: &mut Receiver<BlockHashWithNumber>,
+    send: tokio::sync::oneshot::Sender<BlockHashWithNumber>,
+    recv: &mut tokio::sync::oneshot::Receiver<BlockHashWithNumber>,
 ) -> Option<([u8; 32], u64)> {
     match master.send(DownloadWorkerMessage::PullFirstJob(send)).await {
-        Ok(_) => recv.recv().await,
+        Ok(_) => (recv.await).ok(),
         Err(_) => None,
     }
 }
@@ -330,105 +340,112 @@ fn job_to_getdata(hash: [u8; 32]) -> PacketPayloadType<'static> {
 }
 
 const MAX_BLOCKS_PER_FLUSH: usize = 1024;
+const ANALYZED_OVERHEAD_PER_BLOCK: usize = 4096 * 24;
 type AnalyzedBlock<'a> = &'a [SerializedTx<'a>];
-struct ChainSyncState<'arena> {
-    current_txouts: HashMap<[u8; 32], Vec<&'arena TxOut<'arena>>>,
-    current_analyzed: Vec<AnalyzedBlock<'arena>>,
+struct ChainSyncState<'current, 'previous> {
+    current_txouts: HashMap<[u8; 32], Vec<&'current TxOut<'current>>>,
+    previous_txouts: HashMap<[u8; 32], Vec<&'previous TxOut<'previous>>>,
+    current_analyzed: Vec<AnalyzedBlock<'current>>,
     current_metrics: Vec<BlockMetrics>,
-    previous_txouts: HashMap<[u8; 32], Vec<&'arena TxOut<'arena>>>,
 }
 
 async fn receive_and_process_blocks(mut recv: Receiver<(PayloadWithAllocator, u64)>) {
-    let mut current_arena = Arena::new(MAX_BLOCKS_PER_FLUSH * MAX_PACKET_SIZE);
-    let mut previous_arena = Arena::new(MAX_BLOCKS_PER_FLUSH * MAX_PACKET_SIZE);
+    let current_arena_b = Arena::new(
+        MAX_BLOCKS_PER_FLUSH * MAX_PACKET_SIZE + MAX_BLOCKS_PER_FLUSH * ANALYZED_OVERHEAD_PER_BLOCK,
+    );
+    let mut current_arena = &current_arena_b;
+    let previous_arena_b = Arena::new(
+        MAX_BLOCKS_PER_FLUSH * MAX_PACKET_SIZE + MAX_BLOCKS_PER_FLUSH * ANALYZED_OVERHEAD_PER_BLOCK,
+    );
+    let mut previous_arena = &previous_arena_b;
     let mut current_state = Arc::new(RwLock::new(ChainSyncState {
-        current_txouts: HashMap::new(), // values live in `current_arena`
+        current_txouts: HashMap::with_capacity(MAX_BLOCKS_PER_FLUSH * 4096), // values live in `current_arena`
+        previous_txouts: HashMap::with_capacity(MAX_BLOCKS_PER_FLUSH * 4096), // values live in `previous_arena`
         current_analyzed: Vec::with_capacity(MAX_BLOCKS_PER_FLUSH), // values live in `current_arena`
-        previous_txouts: HashMap::new(), // values live in `previous_arena`
-        current_metrics: Vec::with_capacity(MAX_BLOCKS_PER_FLUSH), // all heap
+        current_metrics: Vec::with_capacity(MAX_BLOCKS_PER_FLUSH),  // all heap
     }));
+    let previous_analyzed = Arc::new(Mutex::new(Some(Vec::with_capacity(MAX_BLOCKS_PER_FLUSH)))); // values live in `previous_arena`
+    let previous_metrics = Arc::new(Mutex::new(Some(Vec::with_capacity(MAX_BLOCKS_PER_FLUSH)))); // all heap
 
-    let mut running_flush: Option<JoinHandle<()>> = None;
-    while !recv.is_closed() {
-        // Will get the next MAX_BLOCKS_PER_FLUSH blocks and add them to `current_txouts` and `current_analyzed`
-        // and return their hashes
-        let next_batch =
-            get_next_batch_to_flush(&mut recv, current_state.clone(), &current_arena).await;
+    unsafe {
+        let mut scope = async_scoped::Scope::create(async_scoped::spawner::use_tokio::Tokio);
 
-        // wait for the current flush to finish
-        if let Some(h) = running_flush {
-            h.await.expect("the flush to finish successfully");
+        while !recv.is_closed() {
+            // Will get the next MAX_BLOCKS_PER_FLUSH blocks and add them to `current_txouts` and `current_analyzed`
+            // and return their hashes
+            let next_batch =
+                get_next_batch_to_flush(&mut recv, current_state.clone(), current_arena).await;
+
+            // wait for the current flush to finish
+            scope.collect().await;
+
+            // So everything is flushed now
+
+            // TODO: can prolly optimize a lil here by reusing metrics/analyzed arrays and hashmaps
+            let ChainSyncState {
+                current_txouts,
+                mut previous_txouts,
+                current_analyzed,
+                current_metrics,
+            } = Arc::into_inner(current_state)
+                .expect("to have no other arcs for current_state")
+                .into_inner()
+                .unwrap();
+
+            // Right now we have:
+            // current_txouts + current_analyzed -> current_arena
+            // previous_txouts + previous_analyzed -> previous_arena
+
+            // First we reset everything previous_ to prepare it for becoming the new current_
+            previous_txouts.clear();
+            let mut pm = previous_metrics.lock().unwrap().take().unwrap();
+            pm.clear();
+            let mut pa = previous_analyzed.lock().unwrap().take().unwrap();
+            pa.clear();
+            previous_arena.reset();
+
+            let pm_clone = previous_metrics.clone();
+            let pa_clone = previous_analyzed.clone();
+            scope.spawn(async move {
+                write_analyzed_txs(&next_batch, &current_analyzed, &current_metrics).await;
+                // after we've written blocks and updated fetched_full in sqlite to true,
+                // update fetched_full in chainman's live state
+                let top = next_batch[next_batch.len() - 1];
+                mark_as_downloaded(next_batch);
+                update_frontpage_response(
+                    top,
+                    Some(&current_metrics),
+                    Some(&current_analyzed),
+                    false,
+                )
+                .await;
+                *pm_clone.lock().unwrap() = Some(current_metrics);
+                *pa_clone.lock().unwrap() = Some(current_analyzed);
+            });
+
+            // previous_* is stored as the new current_*
+            // and current_txouts is stored as the new previous_txouts
+            // old current_analyzed and current_metrics are passed into the write task and are returned to as upon completion via the mutex
+            current_state = Arc::new(RwLock::new(ChainSyncState {
+                current_txouts: previous_txouts,
+                previous_txouts: current_txouts,
+                current_analyzed: pa,
+                current_metrics: pm,
+            }));
+            (previous_arena, current_arena) = (current_arena, previous_arena);
         }
 
-        // So everything is flushed now
-
-        // TODO: can prolly optimize a lil here by reusing metrics/analyzed arrays and hashmaps
-        let ChainSyncState {
-            current_txouts,
-            current_analyzed,
-            previous_txouts,
-            current_metrics,
-        } = Arc::into_inner(current_state)
-            .expect("to have no other arcs for current_state")
-            .into_inner()
-            .unwrap();
-        // Instantly drop previous_txouts and reset the previous arena
-        drop(previous_txouts);
-        previous_arena.reset();
-
-        // Right now we have:
-        // current_txouts + current_analyzed -> current_arena
-
-        // turn current_analyzed<'current_arena> into previous_analyzed<'static> so we can tokio::spawn it
-        // the returned handle will be awaited before we reset the arena that it borrows data from
-        let static_previous_analyzed =
-            unsafe { transmute::<_, Vec<&'static [SerializedTx<'static>]>>(current_analyzed) };
-
-        // turn current_txouts<'current_arena> into previous_txouts<'previous_arena> and swap the arenas
-        let new_previous_txouts = unsafe {
-            let txouts_prev_from_cur: HashMap<[u8; 32], Vec<&TxOut<'_>>> =
-                transmute(current_txouts);
-            swap(&mut current_arena, &mut previous_arena);
-            // After we swapped the arenas, `static_previous_analyzed` borrows data from `previous_arena`
-            // Now that we have swapped the txouts and arenas, clear the current arena + txouts
-            txouts_prev_from_cur
-        };
-
-        running_flush = Some(tokio::spawn(async move {
-            write_analyzed_txs(&next_batch, &static_previous_analyzed, &current_metrics).await;
-            // after we've written blocks and updated fetched_full in sqlite to true,
-            // update fetched_full in chainman's live state
-            let top = next_batch[next_batch.len() - 1];
-            mark_as_downloaded(next_batch);
-            update_frontpage_response(
-                top,
-                Some(&current_metrics),
-                Some(&static_previous_analyzed),
-                false,
-            )
-            .await;
-            drop(static_previous_analyzed);
-            drop(current_metrics);
-        }));
-
-        current_state = Arc::new(RwLock::new(ChainSyncState {
-            current_txouts: HashMap::new(),
-            current_analyzed: Vec::with_capacity(MAX_BLOCKS_PER_FLUSH),
-            previous_txouts: new_previous_txouts,
-            current_metrics: Vec::with_capacity(MAX_BLOCKS_PER_FLUSH),
-        }));
-    }
-
-    if let Some(h) = running_flush {
-        h.await.expect("the flush to finish successfully");
+        // Ensure all futures r finished
+        scope.collect().await;
     }
 }
 
-async fn get_next_batch_to_flush<'l>(
+async fn get_next_batch_to_flush<'current, 'previous>(
     recv: &mut Receiver<(PayloadWithAllocator, u64)>,
-    current_state: Arc<RwLock<ChainSyncState<'l>>>,
-    current_arena: &'l Arena,
+    current_state: Arc<RwLock<ChainSyncState<'current, 'previous>>>,
+    current_arena: &'current Arena,
 ) -> Vec<[u8; 32]> {
+    assert_eq!(current_arena.used(), 0);
     let mut current_blocks = Vec::with_capacity(MAX_BLOCKS_PER_FLUSH);
     unsafe {
         let mut scope = async_scoped::Scope::create(async_scoped::spawner::use_tokio::Tokio);
@@ -497,7 +514,7 @@ fn insert_transactions_from_block<'arena>(
 
 async fn process_block<'arena>(
     payload: PayloadWithAllocator,
-    current_state: Arc<RwLock<ChainSyncState<'arena>>>,
+    current_state: Arc<RwLock<ChainSyncState<'arena, '_>>>,
     analyzed_arena: &'arena Arena,
     index_into_analyzed_and_metrics: usize,
 ) {
@@ -594,7 +611,7 @@ async fn process_block<'arena>(
 
 async fn fetch_missing_dependencies(
     block: &Block<'_>,
-    current_state: Arc<RwLock<ChainSyncState<'_>>>,
+    current_state: Arc<RwLock<ChainSyncState<'_, '_>>>,
 ) -> Vec<TxOut<'static>> {
     let loaded_deps = Arc::new(Mutex::new(Vec::new()));
     let mut loaded_deps_handles = Vec::new();
