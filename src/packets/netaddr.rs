@@ -18,16 +18,6 @@ pub struct NetAddrShort<'a> {
     pub port: u16,
 }
 
-impl Default for NetAddrShort<'_> {
-    fn default() -> Self {
-        Self {
-            services: Default::default(),
-            addr: Supercow::owned(Default::default()),
-            port: Default::default(),
-        }
-    }
-}
-
 impl<'old> MustOutlive<'old> for NetAddrShort<'old> {
     type WithLifetime<'new: 'old> = NetAddrShort<'new>;
 }

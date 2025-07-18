@@ -16,6 +16,8 @@ pub mod magic;
 pub mod netaddr;
 pub mod network_id;
 pub mod packet;
+#[cfg(test)]
+pub mod packet_test;
 pub mod packetheader;
 pub mod packetpayload;
 pub mod ping;
@@ -31,14 +33,6 @@ pub mod version;
 #[derive(Debug)]
 pub struct SupercowVec<'a, T> {
     pub inner: Supercow<'a, Vec<Supercow<'a, T>>, [Supercow<'a, T>]>,
-}
-
-impl<T> Default for SupercowVec<'_, T> {
-    fn default() -> Self {
-        Self {
-            inner: Supercow::owned(vec![]),
-        }
-    }
 }
 
 impl<T: Clone> Clone for SupercowVec<'_, T> {

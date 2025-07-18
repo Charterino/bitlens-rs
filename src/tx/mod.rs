@@ -31,7 +31,7 @@ pub struct AnalyzedTx {
     pub tx: Tx<'static>,
 }
 
-pub fn deserialize_analyzed_tx<'a>(data: &'a [u8], hash: [u8; 32]) -> AnalyzedTx {
+pub fn deserialize_analyzed_tx(data: &[u8], hash: [u8; 32]) -> AnalyzedTx {
     let fee = data.get_u64_le(0).expect("to deserialize fee");
     let txouts_sum = data.get_u64_le(8).expect("to deserialize txouts_sum");
     let size_wus = data.get_u32_le(16).expect("to deserialize size_wus");

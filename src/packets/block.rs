@@ -16,15 +16,6 @@ pub struct Block<'a> {
     pub txs: Supercow<'a, SupercowVec<'a, Tx<'a>>>,
 }
 
-impl Default for Block<'_> {
-    fn default() -> Self {
-        Self {
-            header: Supercow::owned(Default::default()),
-            txs: Supercow::owned(Default::default()),
-        }
-    }
-}
-
 pub const BLOCK_COMMAND: [u8; 12] = *b"block\0\0\0\0\0\0\0";
 
 impl<'old, 'new: 'old> PacketPayload<'old, 'new> for Block<'old> {
@@ -68,7 +59,11 @@ impl<'a> Serializable<'a> for Block<'a> {
 
         // Verify that this block is `correct`, as in the transactions inside actually correspond to the merkle tree in the header.
         // Compute the merkle root and make sure it's the same as in the header
-        let mut merkle_tree = MerkleTree::with_capacity(txs.inner.len());
+        let mut txs_count = txs.inner.len();
+        if txs_count & 1 == 1 {
+            txs_count += 1;
+        }
+        let mut merkle_tree = MerkleTree::with_capacity(txs_count);
         for tx in txs.inner.iter() {
             merkle_tree.append_hash(&tx.hash);
         }

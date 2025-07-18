@@ -11,18 +11,8 @@ use supercow::Supercow;
 #[derive(Debug, Clone)]
 pub struct GetHeaders<'a> {
     pub version: u32,
-    pub block_locator: SupercowVec<'a, [u8; 32]>,
+    pub block_locator: Supercow<'a, SupercowVec<'a, [u8; 32]>>,
     pub hash_stop: Supercow<'a, [u8; 32]>,
-}
-
-impl Default for GetHeaders<'_> {
-    fn default() -> Self {
-        Self {
-            version: Default::default(),
-            block_locator: Default::default(),
-            hash_stop: Supercow::owned(Default::default()),
-        }
-    }
 }
 
 pub const GETHEADERS_COMMAND: [u8; 12] = *b"getheaders\0\0";
@@ -46,9 +36,9 @@ impl<'old, 'new: 'old> DeepClone<'old, 'new> for GetHeaders<'old> {
         Self::WithLifetime {
             version: self.version,
             hash_stop: Supercow::owned(*self.hash_stop),
-            block_locator: SupercowVec {
+            block_locator: Supercow::owned(SupercowVec {
                 inner: Supercow::owned(locator),
-            },
+            }),
         }
     }
 }
@@ -69,14 +59,19 @@ impl<'a> Serializable<'a> for GetHeaders<'a> {
             offset += 32;
         }
         let hash_stop = buffer.get_hash(offset)?;
-        match allocator.try_alloc(Self {
-            version,
-            block_locator: SupercowVec {
-                inner: Supercow::borrowed(block_locator.into_bump_slice()),
-            },
-            hash_stop: Supercow::borrowed(hash_stop),
+        match allocator.try_alloc(SupercowVec {
+            inner: Supercow::borrowed(block_locator.into_bump_slice()),
         }) {
-            Ok(result) => Ok((Supercow::borrowed(result), offset + 32)),
+            Ok(v) => {
+                match allocator.try_alloc(Self {
+                    version,
+                    block_locator: Supercow::borrowed(v),
+                    hash_stop: Supercow::borrowed(hash_stop),
+                }) {
+                    Ok(result) => Ok((Supercow::borrowed(result), offset + 32)),
+                    Err(e) => bail!(e),
+                }
+            }
             Err(e) => bail!(e),
         }
     }

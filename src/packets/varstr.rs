@@ -21,14 +21,6 @@ impl VarStr<'_> {
     }
 }
 
-impl Default for VarStr<'_> {
-    fn default() -> Self {
-        Self {
-            inner: Supercow::owned(vec![]),
-        }
-    }
-}
-
 impl<'old> MustOutlive<'old> for VarStr<'old> {
     type WithLifetime<'new: 'old> = VarStr<'new>;
 }

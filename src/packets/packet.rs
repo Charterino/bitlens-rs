@@ -7,7 +7,7 @@ use bumpalo::{Bump, vec};
 use deadpool::unmanaged::Pool;
 use deadpool::unmanaged::{Object, PoolConfig};
 use ouroboros::self_referencing;
-use slog_scope::debug;
+use slog_scope::{debug, warn};
 use std::sync::LazyLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
@@ -26,6 +26,7 @@ pub static SERIALIZE_POOL: LazyLock<Pool<Vec<u8>>> = LazyLock::new(|| {
 
 // So we start off with 128 4mb arenas. During block download we can have as many as 2k of them. After that, it's gonna go back to 128.
 // See deserializearenas.png for a drawing explaining this process.
+// TODO: configure these 2 variables via env variables
 pub const DESERIALIZE_POOL_TIMEOUT: Duration = Duration::from_millis(100);
 pub const INITIAL_DESERIALIZE_ARENA_COUNT: usize = 128;
 pub const MAX_DESERIALIZE_ARENA_COUNT_DURING_BLOCKSYNC: usize = 2048;
@@ -39,7 +40,7 @@ static DESERIALIZE_POOL: LazyLock<Pool<Bump<1>>> = LazyLock::new(|| {
     let pool = Pool::from_config(&config);
     for _ in 0..INITIAL_DESERIALIZE_ARENA_COUNT {
         let b = Bump::with_capacity(MAX_PACKET_SIZE);
-        b.set_allocation_limit(Some(MAX_PACKET_SIZE));
+        b.set_allocation_limit(Some(0));
         pool.try_add(b).expect("to have added arena");
     }
     pool
@@ -142,7 +143,7 @@ pub async fn read_packet(stream: &mut BufReader<OwnedReadHalf>) -> Result<Packet
                         Ok(_) => {
                             // Adding new arena.
                             let b = Bump::with_capacity(MAX_PACKET_SIZE);
-                            b.set_allocation_limit(Some(MAX_PACKET_SIZE));
+                            b.set_allocation_limit(Some(0));
                             DESERIALIZE_POOL
                                 .try_add(b)
                                 .expect("to have added a new arena");
@@ -153,6 +154,10 @@ pub async fn read_packet(stream: &mut BufReader<OwnedReadHalf>) -> Result<Packet
                     }
                 }
                 // If we can't add a new arena, the loop will continue waiting.
+                if current_size >= limit {
+                    // TODO: add an env variable to disable this log
+                    warn!("insufficient arenas, considering adding more"; "size" => current_size, "limit" => limit);
+                }
             }
         }
     }

@@ -13,9 +13,7 @@ use super::{
     sendheaders::SendHeaders, tx::Tx, varint::VarInt, verack::VerAck, version::Version,
 };
 
-pub trait PacketPayload<'a, 'b: 'a>:
-    Clone + Debug + Default + DeepClone<'a, 'b> + Serializable<'a>
-{
+pub trait PacketPayload<'a, 'b: 'a>: Clone + Debug + DeepClone<'a, 'b> + Serializable<'a> {
     fn command(&self) -> &'static [u8; 12];
 }
 

@@ -12,14 +12,6 @@ pub struct Headers<'a> {
     pub inner: Supercow<'a, SupercowVec<'a, BlockHeader<'a>>>,
 }
 
-impl Default for Headers<'_> {
-    fn default() -> Self {
-        Self {
-            inner: Supercow::owned(Default::default()),
-        }
-    }
-}
-
 pub const HEADERS_COMMAND: [u8; 12] = *b"headers\0\0\0\0\0";
 
 impl<'old, 'new: 'old> PacketPayload<'old, 'new> for Headers<'old> {

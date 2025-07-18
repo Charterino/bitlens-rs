@@ -24,19 +24,6 @@ pub struct Tx<'a> {
     pub hash: [u8; 32], // calculated during deserialization
 }
 
-impl Default for Tx<'_> {
-    fn default() -> Self {
-        Self {
-            version: Default::default(),
-            locktime: Default::default(),
-            txins: Supercow::owned(Default::default()),
-            txouts: Supercow::owned(Default::default()),
-            witness_data: Default::default(),
-            hash: Default::default(),
-        }
-    }
-}
-
 impl Tx<'_> {
     pub fn is_coinbase(&self) -> bool {
         self.txins.inner.len() == 1 && self.txins.inner[0].is_empty()
@@ -137,7 +124,9 @@ impl Tx<'_> {
             version,
             locktime,
             txins: Supercow::owned(txins),
-            txouts: Supercow::owned(SupercowVec::default()),
+            txouts: Supercow::owned(SupercowVec {
+                inner: Supercow::owned(vec![]),
+            }),
             witness_data: witnesses,
             hash,
         })

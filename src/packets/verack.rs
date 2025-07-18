@@ -5,7 +5,7 @@ use super::{
 use anyhow::bail;
 use supercow::Supercow;
 
-#[derive(Default, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct VerAck {}
 
 pub const VERACK_COMMAND: [u8; 12] = *b"verack\0\0\0\0\0\0";

@@ -5,7 +5,7 @@ use super::{
 use anyhow::bail;
 use supercow::Supercow;
 
-#[derive(Default, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct SendHeaders {}
 
 pub const SENDHEADERS_COMMAND: [u8; 12] = *b"sendheaders\0";

@@ -24,21 +24,6 @@ pub struct BlockHeader<'a> {
     pub hash: [u8; 32], // calculated during deserialization
 }
 
-impl Default for BlockHeader<'_> {
-    fn default() -> Self {
-        Self {
-            version: Default::default(),
-            parent: Supercow::owned([0u8; 32]),
-            merkle_root: Supercow::owned([0u8; 32]),
-            timestamp: Default::default(),
-            bits: Default::default(),
-            nonce: Default::default(),
-            txs_count: Default::default(),
-            hash: Default::default(),
-        }
-    }
-}
-
 impl BlockHeader<'_> {
     pub fn construct(
         version: u32,

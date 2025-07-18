@@ -62,8 +62,8 @@ static METRICS_TOKEN: LazyLock<Vec<u8>> = LazyLock::new(|| {
 });
 
 static METRICS_LISTEN_ADDRESS: LazyLock<String> = LazyLock::new(|| {
-    let token = env::var("METRICS_LISTEN_ADDRESS").expect("METRICS_LISTEN_ADDRESS is not set");
-    token
+    
+    env::var("METRICS_LISTEN_ADDRESS").expect("METRICS_LISTEN_ADDRESS is not set")
 });
 
 pub async fn start() {

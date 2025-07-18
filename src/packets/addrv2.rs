@@ -12,14 +12,6 @@ pub struct AddrV2<'a> {
     pub inner: Supercow<'a, SupercowVec<'a, NetAddrV2<'a>>>,
 }
 
-impl Default for AddrV2<'_> {
-    fn default() -> Self {
-        Self {
-            inner: Supercow::owned(Default::default()),
-        }
-    }
-}
-
 pub const ADDRV2_COMMAND: [u8; 12] = *b"addrv2\0\0\0\0\0\0";
 
 impl<'old, 'new: 'old> PacketPayload<'old, 'new> for AddrV2<'old> {

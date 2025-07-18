@@ -5,7 +5,7 @@ use super::{
 use anyhow::bail;
 use supercow::Supercow;
 
-#[derive(Default, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct GetAddr {}
 
 pub const GETADDR_COMMAND: [u8; 12] = *b"getaddr\0\0\0\0\0";

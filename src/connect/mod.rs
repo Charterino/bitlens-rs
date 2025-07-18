@@ -13,8 +13,9 @@ use tokio::{
 use crate::{
     metrics::{METRIC_CONNECTIONS_IPV4, METRIC_CONNECTIONS_IPV6, METRIC_NET_DIALS_TOTAL},
     packets::{
-        deepclone::DeepClone, packetpayload::PacketPayloadType, sendaddrv2::SendAddrV2,
-        sendheaders::SendHeaders, varstr::VarStr, verack::VerAck, version::Version,
+        deepclone::DeepClone, netaddr::NetAddrShort, packetpayload::PacketPayloadType,
+        sendaddrv2::SendAddrV2, sendheaders::SendHeaders, varstr::VarStr, verack::VerAck,
+        version::Version,
     },
     types::addressportnetwork::AddressPortNetwork,
 };
@@ -54,7 +55,18 @@ async fn handshake(conn: &mut Connection) -> Result<Version<'static>> {
         nonce: rand::rng().next_u64(),
         user_agent: Supercow::owned(VarStr::from("semikek")),
         version: 70016,
-        ..Default::default()
+        addrrecv: Supercow::owned(NetAddrShort {
+            services: 0,
+            addr: Supercow::owned([0u8; 16]),
+            port: 0,
+        }),
+        addrfrom: Supercow::owned(NetAddrShort {
+            services: 0,
+            addr: Supercow::owned([0u8; 16]),
+            port: 0,
+        }),
+        start_height: 0,
+        announce_relayed_transactions: false,
     };
     conn.write_packet(&PacketPayloadType::Version(Supercow::owned(version)))
         .await?;

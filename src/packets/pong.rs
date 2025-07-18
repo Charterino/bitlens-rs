@@ -6,7 +6,7 @@ use super::{
 use anyhow::bail;
 use supercow::Supercow;
 
-#[derive(Default, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct Pong {
     pub nonce: u64,
 }

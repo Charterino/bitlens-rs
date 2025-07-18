@@ -5,7 +5,8 @@ use crate::{
     chainman::{CHAIN, validate_and_apply_headers},
     ok_or_break,
     packets::{
-        SupercowVec, blockheader::BlockHeader, getheaders::GetHeaders, packetpayload::PacketPayloadType,
+        SupercowVec, blockheader::BlockHeader, getheaders::GetHeaders,
+        packetpayload::PacketPayloadType,
     },
     with_deadline,
 };
@@ -81,11 +82,11 @@ fn handle_packet_during_headersync<'packet, 'ret: 'packet, 'params: 'ret>(
             return Some(vec![PacketPayloadType::GetHeaders(Supercow::owned(
                 GetHeaders {
                     version: 70016,
-                    block_locator: SupercowVec {
+                    block_locator: Supercow::owned(SupercowVec {
                         inner: Supercow::owned(vec![Supercow::owned(
                             headers.inner.inner.last().unwrap().hash,
                         )]),
-                    },
+                    }),
                     hash_stop: Supercow::owned([0u8; 32]),
                 },
             ))]);

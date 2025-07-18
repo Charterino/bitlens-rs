@@ -58,7 +58,7 @@ pub async fn start() {
         // which means we can update the frontpage response
         let top_downloaded_block_hash = {
             let r = CHAIN.read().unwrap();
-            get_top_downloaded_block_hash(&*r)
+            get_top_downloaded_block_hash(&r)
         };
         if let Some(top_block_hash) = top_downloaded_block_hash {
             update_frontpage_response(top_block_hash, None, None, true).await;
@@ -347,9 +347,9 @@ fn build_get_headers<'a>() -> PacketPayloadType<'a> {
         // Starting from zero!
         return PacketPayloadType::GetHeaders(Supercow::owned(GetHeaders {
             version: 70016,
-            block_locator: SupercowVec {
+            block_locator: Supercow::owned(SupercowVec {
                 inner: Supercow::owned(vec![Supercow::owned(r.top_header.header.hash)]),
-            },
+            }),
             hash_stop: Supercow::owned([0u8; 32]),
         }));
     }
@@ -385,9 +385,9 @@ fn build_get_headers<'a>() -> PacketPayloadType<'a> {
 
     PacketPayloadType::GetHeaders(Supercow::owned(GetHeaders {
         version: 70016,
-        block_locator: SupercowVec {
+        block_locator: Supercow::owned(SupercowVec {
             inner: Supercow::owned(block_locator),
-        },
+        }),
         hash_stop: Supercow::owned([0u8; 32]),
     }))
 }

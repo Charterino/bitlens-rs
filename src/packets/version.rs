@@ -20,22 +20,6 @@ pub struct Version<'a> {
     pub announce_relayed_transactions: bool,
 }
 
-impl Default for Version<'_> {
-    fn default() -> Self {
-        Self {
-            services: Default::default(),
-            timestamp: Default::default(),
-            addrrecv: Supercow::owned(NetAddrShort::default()),
-            addrfrom: Supercow::owned(NetAddrShort::default()),
-            nonce: Default::default(),
-            user_agent: Supercow::owned(VarStr::default()),
-            start_height: Default::default(),
-            version: Default::default(),
-            announce_relayed_transactions: Default::default(),
-        }
-    }
-}
-
 pub const VERSION_COMMAND: [u8; 12] = *b"version\0\0\0\0\0";
 
 impl<'old> MustOutlive<'old> for Version<'old> {

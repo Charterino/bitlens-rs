@@ -5,7 +5,7 @@ use super::{
 use anyhow::bail;
 use supercow::Supercow;
 
-#[derive(Default, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct SendAddrV2 {}
 
 pub const SENDADDRV2_COMMAND: [u8; 12] = *b"sendaddrv2\0\0";

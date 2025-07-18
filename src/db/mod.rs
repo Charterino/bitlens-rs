@@ -50,7 +50,7 @@ pub async fn write_analyzed_txs(
     // sort by hash before ingestion
     blocks_with_txs_pairs.sort_by(|a, b| a.0.cmp(b.0));
 
-    let mut collapsed: Vec<&SerializedTx> = txs.into_iter().map(|x| x.iter()).flatten().collect();
+    let mut collapsed: Vec<&SerializedTx> = txs.iter().flat_map(|x| x.iter()).collect();
     // sort by hash before ingestion
     collapsed.sort_by(|a, b| a.hash.cmp(&b.hash));
 
