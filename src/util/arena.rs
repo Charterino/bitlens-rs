@@ -3,7 +3,7 @@ use core::slice;
 use std::{
     alloc::{Layout, alloc, dealloc},
     mem::transmute,
-    ptr,
+    ptr::{self, write_bytes},
     sync::atomic::{AtomicUsize, Ordering},
 };
 
@@ -18,22 +18,38 @@ unsafe impl Sync for Arena {}
 
 impl Arena {
     pub fn new(capacity: usize) -> Self {
+        let alloced = unsafe {
+            let v = alloc(Layout::from_size_align_unchecked(capacity, 1));
+            // For now this fills the entire buffer with 0s so I can easily track memory. Soon to be changed.
+            write_bytes(v, 0, capacity);
+            v
+        };
         Self {
-            data: unsafe { alloc(Layout::from_size_align_unchecked(capacity, 1)) },
+            data: alloced,
             capacity,
             consumed: AtomicUsize::new(0),
         }
     }
 
+    pub fn used(&self) -> usize {
+        self.consumed.load(Ordering::Relaxed)
+    }
+
     #[inline(always)]
     pub fn try_alloc<T: Sized>(&self, value: T) -> Result<&mut T> {
-        let t_size = size_of::<T>();
+        let alignment = align_of::<T>();
+        let size_t = size_of::<T>();
         let mut currently_consumed = self.consumed.load(Ordering::Relaxed);
         let cap = self.capacity;
-        while currently_consumed + t_size <= cap {
+        let mut padding = if alignment != 0 {
+            alignment - ((self.data as usize + currently_consumed) % alignment)
+        } else {
+            0
+        };
+        while currently_consumed + padding + size_t <= cap {
             match self.consumed.compare_exchange_weak(
                 currently_consumed,
-                currently_consumed + t_size,
+                currently_consumed + padding + size_t,
                 Ordering::Relaxed,
                 Ordering::Relaxed,
             ) {
@@ -43,7 +59,14 @@ impl Arena {
                     casted.write(value);
                     return Ok(&mut *casted);
                 },
-                Err(new_currently_consumed) => currently_consumed = new_currently_consumed,
+                Err(new_currently_consumed) => {
+                    currently_consumed = new_currently_consumed;
+                    padding = if alignment != 0 {
+                        alignment - ((self.data as usize + currently_consumed) % alignment)
+                    } else {
+                        0
+                    };
+                }
             }
         }
         bail!("arena: out of memory")
@@ -56,15 +79,16 @@ impl Arena {
         value: T,
     ) -> Result<&mut [T]> {
         let size_t = size_of::<T>();
+        let alignment = align_of::<T>();
         let size = size_t * count;
         let mut currently_consumed = self.consumed.load(Ordering::Relaxed);
         let cap = self.capacity;
-        let mut padding = if size != 0 {
-            size - (self.data as usize + currently_consumed) % size
+        let mut padding = if alignment != 0 {
+            alignment - ((self.data as usize + currently_consumed) % alignment)
         } else {
             0
         };
-        while currently_consumed + size <= cap {
+        while currently_consumed + padding + size <= cap {
             match self.consumed.compare_exchange_weak(
                 currently_consumed,
                 currently_consumed + padding + size,
@@ -81,28 +105,34 @@ impl Arena {
                 },
                 Err(new_currently_consumed) => {
                     currently_consumed = new_currently_consumed;
-                    padding = if size != 0 {
-                        size - (self.data as usize + currently_consumed) % size
+                    padding = if alignment != 0 {
+                        alignment - ((self.data as usize + currently_consumed) % alignment)
                     } else {
                         0
                     };
                 }
             }
         }
-        bail!("arena: out of memory")
+        bail!(
+            "arena: out of memory, cap: {} currently_consumed: {}, wanted: {}",
+            cap,
+            currently_consumed,
+            size
+        )
     }
 
     #[inline(always)]
     pub fn try_alloc_array_copy<T: Sized + Copy>(&self, value: &[T]) -> Result<&mut [T]> {
+        let alignment = align_of::<T>();
         let size = size_of_val(value);
         let mut currently_consumed = self.consumed.load(Ordering::Relaxed);
         let cap = self.capacity;
-        let mut padding = if size != 0 {
-            size - (self.data as usize + currently_consumed) % size
+        let mut padding = if alignment != 0 {
+            alignment - ((self.data as usize + currently_consumed) % alignment)
         } else {
             0
         };
-        while currently_consumed + size <= cap {
+        while currently_consumed + padding + size <= cap {
             match self.consumed.compare_exchange_weak(
                 currently_consumed,
                 currently_consumed + padding + size,
@@ -117,8 +147,8 @@ impl Arena {
                 },
                 Err(new_currently_consumed) => {
                     currently_consumed = new_currently_consumed;
-                    padding = if size != 0 {
-                        size - (self.data as usize + currently_consumed) % size
+                    padding = if alignment != 0 {
+                        alignment - ((self.data as usize + currently_consumed) % alignment)
                     } else {
                         0
                     };
@@ -128,8 +158,8 @@ impl Arena {
         bail!("arena: out of memory")
     }
 
-    pub fn reset(&mut self) {
-        self.consumed.store(0, Ordering::Relaxed);
+    pub fn reset(&self) {
+        self.consumed.store(0, Ordering::SeqCst);
     }
 }
 
