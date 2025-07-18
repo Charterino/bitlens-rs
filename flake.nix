@@ -78,6 +78,7 @@
               graphviz
               libllvm
               llvmPackages_20.clang-unwrapped.lib
+              heaptrack
             ];
             shellHook = ''
               export LIBCLANG_PATH=${pkgs.libclang.lib}/lib
