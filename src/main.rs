@@ -46,16 +46,16 @@ const DNS_SEEDS: &[&str] = &[
     "seed.mainnet.achownodes.xyz",
 ];
 
-pub static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
-    tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-        .unwrap()
-});
-
 fn main() -> Result<()> {
     let _guard = setup_logging();
-    RUNTIME.block_on(async_main())
+    let runtime: Runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let _ = runtime.block_on(async_main());
+    drop(runtime);
+    drop(_guard);
+    Ok(())
 }
 
 async fn async_main() -> Result<()> {
