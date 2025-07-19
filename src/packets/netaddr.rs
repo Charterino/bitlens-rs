@@ -1,3 +1,5 @@
+use crate::util::arena::Arena;
+
 use super::{
     buffer::Buffer,
     deepclone::{DeepClone, MustOutlive},
@@ -35,7 +37,7 @@ impl<'old, 'new: 'old> DeepClone<'old, 'new> for NetAddrShort<'old> {
 
 impl<'a> Serializable<'a> for NetAddrShort<'a> {
     fn deserialize(
-        allocator: &'a bumpalo::Bump<1>,
+        allocator: &'a Arena,
         buffer: &'a [u8],
     ) -> Result<(Supercow<'a, NetAddrShort<'a>>, usize)> {
         match buffer.get(8..24) {
@@ -87,7 +89,7 @@ impl<'old, 'new: 'old> DeepClone<'old, 'new> for NetAddr<'old> {
 
 impl<'a> Serializable<'a> for NetAddr<'a> {
     fn deserialize(
-        allocator: &'a bumpalo::Bump<1>,
+        allocator: &'a Arena,
         buffer: &'a [u8],
     ) -> Result<(Supercow<'a, NetAddr<'a>>, usize)> {
         match buffer.get(12..28) {
@@ -142,7 +144,7 @@ impl<'old, 'new: 'old> DeepClone<'old, 'new> for NetAddrV2<'old> {
 
 impl<'a> Serializable<'a> for NetAddrV2<'a> {
     fn deserialize(
-        allocator: &'a bumpalo::Bump<1>,
+        allocator: &'a Arena,
         buffer: &'a [u8],
     ) -> Result<(Supercow<'a, NetAddrV2<'a>>, usize)> {
         let time = buffer.get_u32_le(0)?;

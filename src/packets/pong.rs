@@ -1,3 +1,5 @@
+use crate::util::arena::Arena;
+
 use super::{
     buffer::Buffer,
     deepclone::{DeepClone, MustOutlive},
@@ -31,7 +33,7 @@ impl<'old, 'new: 'old> DeepClone<'old, 'new> for Pong {
 
 impl<'a> Serializable<'a> for Pong {
     fn deserialize(
-        allocator: &'a bumpalo::Bump<1>,
+        allocator: &'a Arena,
         buffer: &[u8],
     ) -> anyhow::Result<(Supercow<'a, Pong>, usize)> {
         match allocator.try_alloc(Pong {

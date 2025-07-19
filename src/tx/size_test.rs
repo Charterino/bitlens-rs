@@ -1,12 +1,14 @@
-use bumpalo::Bump;
 
-use crate::packets::{packetpayload::Serializable, tx::Tx};
+use crate::{
+    packets::{packet::MAX_PACKET_SIZE, packetpayload::Serializable, tx::Tx},
+    util::arena::Arena,
+};
 
 use super::size::calculate_tx_size_wus;
 
 #[test]
 fn test_size() {
-    let allocator = Bump::new();
+    let allocator = Arena::new(MAX_PACKET_SIZE);
     // Non-witness tx 1
     // Transaction 791bd9b3bda632ee1757de37db8939b0287ece4753f3077b9a5f5c7e28545967
     let encoded_tx1 = hex::decode("0200000001d2eed35b0d55763981c635cab7788c28e3683af3d329947a17d7f6005390e6ef010000006a47304402200ffaac8f12e56f4af66109220812b76c7d6bb0e5906cf2de235b79496b3e080b0220037304894b648fa0b50e0d82ef9f58b537233ee282ab31fc04fb3d169d2c97cc0121030120a287eb98922752a89b39df64f7f3314036f6f096341c9189b0cb3c692aaeffffffff02404ff200000000001976a9140b818b11f9624e6a2d5b757a3e8fe45db3f6647788ace0b4b401000000001976a914a1e5e47fce1c5c0868107dba3851eb696c2ead5388ac00000000").unwrap();

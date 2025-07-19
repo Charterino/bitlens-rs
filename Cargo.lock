@@ -214,7 +214,6 @@ dependencies = [
  "anyhow",
  "async-scoped",
  "axum",
- "bumpalo",
  "bytes",
  "ctrlc",
  "deadpool",

@@ -5,7 +5,7 @@ use super::{
     packetpayload::SerializableValue,
     varint::VarInt,
 };
-use crate::util::compact::u256_from_compact;
+use crate::util::{arena::Arena, compact::u256_from_compact};
 use anyhow::bail;
 use primitive_types::U256;
 use sha2::{Digest, Sha256};
@@ -100,7 +100,7 @@ impl<'old, 'new: 'old> DeepClone<'old, 'new> for BlockHeader<'old> {
 
 impl<'a> Serializable<'a> for BlockHeader<'a> {
     fn deserialize(
-        allocator: &'a bumpalo::Bump<1>,
+        allocator: &'a Arena,
         buffer: &'a [u8],
     ) -> anyhow::Result<(Supercow<'a, Self>, usize)> {
         let version = buffer.get_u32_le(0)?;

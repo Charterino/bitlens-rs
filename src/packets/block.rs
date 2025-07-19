@@ -6,7 +6,7 @@ use super::{
     packetpayload::{PacketPayload, Serializable, SerializableSupercowVecOfCows},
     tx::Tx,
 };
-use crate::util::merkle::MerkleTree;
+use crate::util::{arena::Arena, merkle::MerkleTree};
 use anyhow::bail;
 use supercow::Supercow;
 
@@ -48,7 +48,7 @@ impl<'old, 'new: 'old> DeepClone<'old, 'new> for Block<'old> {
 
 impl<'a> Serializable<'a> for Block<'a> {
     fn deserialize(
-        allocator: &'a bumpalo::Bump<1>,
+        allocator: &'a Arena,
         buffer: &'a [u8],
     ) -> anyhow::Result<(Supercow<'a, Block<'a>>, usize)> {
         let (header, _) = BlockHeader::deserialize(allocator, buffer)?;

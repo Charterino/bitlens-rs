@@ -1,3 +1,5 @@
+use crate::util::arena::Arena;
+
 use super::{
     deepclone::{DeepClone, MustOutlive},
     packetpayload::{PacketPayload, Serializable},
@@ -27,10 +29,7 @@ impl<'old, 'new: 'old> DeepClone<'old, 'new> for GetAddr {
 }
 
 impl<'a> Serializable<'a> for GetAddr {
-    fn deserialize(
-        a: &'a bumpalo::Bump<1>,
-        _: &'a [u8],
-    ) -> anyhow::Result<(Supercow<'a, GetAddr>, usize)> {
+    fn deserialize(a: &'a Arena, _: &'a [u8]) -> anyhow::Result<(Supercow<'a, GetAddr>, usize)> {
         match a.try_alloc(GetAddr {}) {
             Ok(v) => Ok((Supercow::borrowed(v), 0)),
             Err(e) => bail!(e),

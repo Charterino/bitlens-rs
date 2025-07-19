@@ -2,8 +2,8 @@ use super::block::Block;
 use super::packetheader::{PacketHeader, read_header};
 use super::packetpayload::PacketPayloadType;
 use crate::packets::packetpayload::{deserialize_payload, read_payload};
+use crate::util::arena::Arena;
 use anyhow::Result;
-use bumpalo::{Bump, vec};
 use deadpool::unmanaged::Pool;
 use deadpool::unmanaged::{Object, PoolConfig};
 use ouroboros::self_referencing;
@@ -32,16 +32,15 @@ pub const INITIAL_DESERIALIZE_ARENA_COUNT: usize = 128;
 pub const MAX_DESERIALIZE_ARENA_COUNT_DURING_BLOCKSYNC: usize = 2048;
 pub static CURRENT_POOL_LIMIT: AtomicUsize = AtomicUsize::new(INITIAL_DESERIALIZE_ARENA_COUNT);
 pub static CURRENT_POOL_SIZE: AtomicUsize = AtomicUsize::new(INITIAL_DESERIALIZE_ARENA_COUNT);
-static DESERIALIZE_POOL: LazyLock<Pool<Bump<1>>> = LazyLock::new(|| {
+static DESERIALIZE_POOL: LazyLock<Pool<Arena>> = LazyLock::new(|| {
     let mut config = PoolConfig::new(1024 * 1024);
     config.runtime = Some(deadpool::Runtime::Tokio1);
     config.timeout = Some(DESERIALIZE_POOL_TIMEOUT);
 
     let pool = Pool::from_config(&config);
     for _ in 0..INITIAL_DESERIALIZE_ARENA_COUNT {
-        let b = Bump::with_capacity(MAX_PACKET_SIZE);
-        b.set_allocation_limit(Some(0));
-        pool.try_add(b).expect("to have added arena");
+        let a = Arena::new(MAX_PACKET_SIZE);
+        pool.try_add(a).expect("to have added arena");
     }
     pool
 });
@@ -89,10 +88,9 @@ impl PayloadWithAllocator {
 
 #[self_referencing]
 pub struct AllocatorWithBuffer {
-    pub allocator: Object<Bump>,
+    pub allocator: Object<Arena>,
     #[borrows(allocator)]
-    #[covariant]
-    pub buffer: bumpalo::collections::Vec<'this, u8>,
+    pub buffer: &'this mut [u8],
 }
 
 unsafe impl Send for AllocatorWithBuffer {}
@@ -142,10 +140,9 @@ pub async fn read_packet(stream: &mut BufReader<OwnedReadHalf>) -> Result<Packet
                     ) {
                         Ok(_) => {
                             // Adding new arena.
-                            let b = Bump::with_capacity(MAX_PACKET_SIZE);
-                            b.set_allocation_limit(Some(0));
+                            let a = Arena::new(MAX_PACKET_SIZE);
                             DESERIALIZE_POOL
-                                .try_add(b)
+                                .try_add(a)
                                 .expect("to have added a new arena");
                             debug!("added a new deserialize arena"; "limit" => limit, "new_size" => current_size + 1);
                             break;
@@ -161,17 +158,21 @@ pub async fn read_packet(stream: &mut BufReader<OwnedReadHalf>) -> Result<Packet
             }
         }
     }
-    let mut allocator = allocator.unwrap();
+    let allocator = allocator.unwrap();
     allocator.reset();
 
     let mut allocator_with_buffer: AllocatorWithBuffer = AllocatorWithBufferBuilder {
         allocator,
-        buffer_builder: |allocator: &Object<Bump>| vec![in allocator; 0; header.length as usize],
+        buffer_builder: |allocator: &Object<Arena>| {
+            allocator
+                .try_alloc_array_fill_copy(header.length as usize, 0u8)
+                .unwrap()
+        },
     }
     .build();
 
     allocator_with_buffer
-        .with_buffer_mut(|buffer: &mut bumpalo::collections::Vec<u8>| read_payload(stream, buffer))
+        .with_buffer_mut(|buffer: &mut &mut [u8]| read_payload(stream, buffer))
         .await?;
 
     let payload_with_allocator = PayloadWithAllocatorTryBuilder {

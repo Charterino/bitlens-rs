@@ -1,4 +1,5 @@
 pub mod arena;
+pub mod arenaarray;
 pub mod compact;
 pub mod genesis;
 pub mod hash;

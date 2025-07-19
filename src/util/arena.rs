@@ -7,6 +7,9 @@ use std::{
     sync::atomic::{AtomicUsize, Ordering},
 };
 
+use crate::util::arenaarray::ArenaArray;
+
+#[derive(Debug)]
 pub struct Arena {
     data: *mut u8,
     consumed: AtomicUsize,
@@ -16,7 +19,7 @@ pub struct Arena {
 unsafe impl Send for Arena {}
 unsafe impl Sync for Arena {}
 
-impl Arena {
+impl<'a> Arena {
     pub fn new(capacity: usize) -> Self {
         let alloced = unsafe {
             let v = alloc(Layout::from_size_align_unchecked(capacity, 1));
@@ -144,6 +147,47 @@ impl Arena {
                     let casted: *mut T = transmute(location);
                     core::ptr::copy_nonoverlapping(value.as_ptr(), casted, value.len());
                     return Ok(slice::from_raw_parts_mut(casted, value.len()));
+                },
+                Err(new_currently_consumed) => {
+                    currently_consumed = new_currently_consumed;
+                    padding = if alignment != 0 {
+                        alignment - ((self.data as usize + currently_consumed) % alignment)
+                    } else {
+                        0
+                    };
+                }
+            }
+        }
+        bail!("arena: out of memory")
+    }
+
+    #[inline(always)]
+    pub fn try_alloc_arenaarray<T: Sized>(&'a self, count: usize) -> Result<ArenaArray<'a, T>> {
+        let backing = self.try_alloc_array_uninit(count)?;
+        Ok(ArenaArray::from_raw_parts(backing, count))
+    }
+
+    fn try_alloc_array_uninit<T: Sized>(&self, count: usize) -> Result<*mut T> {
+        let alignment = align_of::<T>();
+        let size = size_of::<T>() * count;
+        let mut currently_consumed = self.consumed.load(Ordering::Relaxed);
+        let cap = self.capacity;
+        let mut padding = if alignment != 0 {
+            alignment - ((self.data as usize + currently_consumed) % alignment)
+        } else {
+            0
+        };
+        while currently_consumed + padding + size <= cap {
+            match self.consumed.compare_exchange_weak(
+                currently_consumed,
+                currently_consumed + padding + size,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => unsafe {
+                    let location = self.data.add(padding + currently_consumed);
+                    let casted: *mut T = transmute(location);
+                    return Ok(casted);
                 },
                 Err(new_currently_consumed) => {
                     currently_consumed = new_currently_consumed;

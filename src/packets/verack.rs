@@ -1,3 +1,5 @@
+use crate::util::arena::Arena;
+
 use super::{
     deepclone::{DeepClone, MustOutlive},
     packetpayload::{PacketPayload, Serializable},
@@ -27,10 +29,7 @@ impl<'old, 'new: 'old> PacketPayload<'old, 'new> for VerAck {
 }
 
 impl<'a> Serializable<'a> for VerAck {
-    fn deserialize(
-        a: &'a bumpalo::Bump<1>,
-        _: &'a [u8],
-    ) -> anyhow::Result<(Supercow<'a, VerAck>, usize)> {
+    fn deserialize(a: &'a Arena, _: &'a [u8]) -> anyhow::Result<(Supercow<'a, VerAck>, usize)> {
         match a.try_alloc(VerAck {}) {
             Ok(v) => Ok((Supercow::borrowed(v), 0)),
             Err(e) => bail!(e),

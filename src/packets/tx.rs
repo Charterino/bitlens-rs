@@ -1,3 +1,5 @@
+use crate::util::arena::Arena;
+
 use super::{
     SupercowVec,
     buffer::Buffer,
@@ -10,7 +12,6 @@ use super::{
     varstr::VarStr,
 };
 use anyhow::{Result, anyhow, bail};
-use bumpalo::{Bump, collections::Vec};
 use sha2::{Digest, Sha256};
 use supercow::Supercow;
 
@@ -176,7 +177,7 @@ impl<'old, 'new: 'old> DeepClone<'old, 'new> for Tx<'old> {
 
 impl<'a> Serializable<'a> for Tx<'a> {
     fn deserialize(
-        allocator: &'a Bump<1>,
+        allocator: &'a Arena,
         buffer: &'a [u8],
     ) -> Result<(Supercow<'a, Tx<'a>>, usize)> {
         let version = buffer.get_u32_le(0)?;
@@ -201,16 +202,15 @@ impl<'a> Serializable<'a> for Tx<'a> {
 
         let (witnesses, witnesses_start) = if has_witness_data {
             let start = offset;
-            let mut wits = Vec::with_capacity_in(txins.inner.len(), allocator);
+            let mut wits = allocator.try_alloc_arenaarray(txins.inner.len())?;
             for _ in 0..txins.inner.len() {
                 let (components, offset_delta) =
                     SupercowVec::deserialize(allocator, buffer.with_offset(offset)?)?;
                 offset += offset_delta;
                 wits.push(Supercow::borrowed(components));
             }
-            let bump_slice = wits.into_bump_slice();
             let wits = match allocator.try_alloc(SupercowVec {
-                inner: Supercow::borrowed(bump_slice),
+                inner: Supercow::borrowed(wits.into_arena_array()),
             }) {
                 Ok(v) => v,
                 Err(e) => bail!(e),
@@ -314,7 +314,7 @@ impl<'old, 'new: 'old> DeepClone<'old, 'new> for TxIn<'old> {
 
 impl<'a> Serializable<'a> for TxIn<'a> {
     fn deserialize(
-        allocator: &'a bumpalo::Bump<1>,
+        allocator: &'a Arena,
         buffer: &'a [u8],
     ) -> anyhow::Result<(Supercow<'a, TxIn<'a>>, usize)> {
         let hash = buffer.get_hash(0)?;
@@ -382,7 +382,7 @@ impl<'old, 'new: 'old> DeepClone<'old, 'new> for TxOut<'old> {
 
 impl<'a> Serializable<'a> for TxOut<'a> {
     fn deserialize(
-        allocator: &'a bumpalo::Bump<1>,
+        allocator: &'a Arena,
         buffer: &'a [u8],
     ) -> anyhow::Result<(Supercow<'a, TxOut<'a>>, usize)> {
         let value = buffer.get_u64_le(0)?;

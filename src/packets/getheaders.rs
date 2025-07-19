@@ -1,3 +1,5 @@
+use crate::util::arena::Arena;
+
 use super::{
     SupercowVec,
     buffer::Buffer,
@@ -45,14 +47,13 @@ impl<'old, 'new: 'old> DeepClone<'old, 'new> for GetHeaders<'old> {
 
 impl<'a> Serializable<'a> for GetHeaders<'a> {
     fn deserialize(
-        allocator: &'a bumpalo::Bump<1>,
+        allocator: &'a Arena,
         buffer: &'a [u8],
     ) -> anyhow::Result<(Supercow<'a, Self>, usize)> {
         let version = buffer.get_u32_le(0)?;
         let (length, mut offset) = VarInt::deserialize(buffer.with_offset(4)?)?;
         offset += 4;
-        let mut block_locator =
-            bumpalo::collections::Vec::with_capacity_in(length as usize, allocator);
+        let mut block_locator = allocator.try_alloc_arenaarray(length as usize)?;
         for _ in 0..length as usize {
             let hash = buffer.get_hash(offset)?;
             block_locator.push(Supercow::borrowed(hash));
@@ -60,7 +61,7 @@ impl<'a> Serializable<'a> for GetHeaders<'a> {
         }
         let hash_stop = buffer.get_hash(offset)?;
         match allocator.try_alloc(SupercowVec {
-            inner: Supercow::borrowed(block_locator.into_bump_slice()),
+            inner: Supercow::borrowed(block_locator.into_arena_array()),
         }) {
             Ok(v) => {
                 match allocator.try_alloc(Self {

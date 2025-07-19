@@ -1,3 +1,5 @@
+use crate::util::arena::Arena;
+
 use super::{
     SupercowVec,
     deepclone::{DeepClone, MustOutlive},
@@ -41,7 +43,7 @@ impl<'old, 'new: 'old> DeepClone<'old, 'new> for Inv<'old> {
 
 impl<'a> Serializable<'a> for Inv<'a> {
     fn deserialize(
-        allocator: &'a bumpalo::Bump<1>,
+        allocator: &'a Arena,
         buffer: &'a [u8],
     ) -> anyhow::Result<(Supercow<'a, Self>, usize)> {
         let (deserialized, consumed) = SupercowVec::deserialize(allocator, buffer)?;

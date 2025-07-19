@@ -1,3 +1,5 @@
+use crate::util::arena::Arena;
+
 use super::{
     buffer::Buffer,
     deepclone::{DeepClone, MustOutlive},
@@ -29,7 +31,7 @@ pub struct InventoryVector<'a> {
 
 impl<'a> Serializable<'a> for InventoryVector<'a> {
     fn deserialize(
-        allocator: &'a bumpalo::Bump<1>,
+        allocator: &'a Arena,
         buffer: &'a [u8],
     ) -> anyhow::Result<(Supercow<'a, InventoryVector<'a>>, usize)> {
         let raw_type = buffer.get_u32_le(0)?;

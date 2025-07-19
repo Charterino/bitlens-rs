@@ -1,3 +1,5 @@
+use crate::util::arena::Arena;
+
 use super::{
     deepclone::{DeepClone, MustOutlive},
     packetpayload::{PacketPayload, Serializable},
@@ -28,7 +30,7 @@ impl<'old, 'new: 'old> DeepClone<'old, 'new> for SendHeaders {
 
 impl<'a> Serializable<'a> for SendHeaders {
     fn deserialize(
-        a: &'a bumpalo::Bump<1>,
+        a: &'a Arena,
         _: &'a [u8],
     ) -> anyhow::Result<(Supercow<'a, SendHeaders>, usize)> {
         match a.try_alloc(SendHeaders {}) {

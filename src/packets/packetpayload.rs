@@ -1,10 +1,11 @@
 use anyhow::{Result, bail};
-use bumpalo::{Bump, collections::Vec};
 use bytes::BufMut;
 use sha2::{Digest, Sha256};
 use std::fmt::{Debug, Display};
 use supercow::Supercow;
 use tokio::io::AsyncReadExt;
+
+use crate::util::arena::Arena;
 
 use super::{
     SupercowVec, addr::Addr, addrv2::AddrV2, block::Block, buffer::Buffer, deepclone::DeepClone,
@@ -125,7 +126,7 @@ where
     // While the structs themselves are going to be allocated in the bump allocator,
     // the scripts and other byte-arrays are going to be referenced and not copied.
     fn deserialize(
-        allocator: &'bump bumpalo::Bump<1>,
+        allocator: &'bump Arena,
         buffer: &'bump [u8],
     ) -> Result<(Supercow<'bump, Self>, usize)>; // returned value is the length consumed
 
@@ -153,10 +154,7 @@ where
 pub trait SerializableSupercowVecOfCows<'bump> {
     // While the structs themselves are going to be allocated in the bump allocator,
     // the scripts and other byte-arrays are going to be referenced and not copied.
-    fn deserialize(
-        allocator: &'bump bumpalo::Bump<1>,
-        buffer: &'bump [u8],
-    ) -> Result<(&'bump Self, usize)>
+    fn deserialize(allocator: &'bump Arena, buffer: &'bump [u8]) -> Result<(&'bump Self, usize)>
     where
         Self: Sized + Clone + ToOwned; // returned value is the length consumed
 
@@ -232,10 +230,10 @@ impl PacketPayloadType<'_> {
 }
 
 impl<'a, T: Serializable<'a>> SerializableSupercowVecOfCows<'a> for SupercowVec<'a, T> {
-    fn deserialize(allocator: &'a Bump<1>, buffer: &'a [u8]) -> Result<(&'a Self, usize)> {
+    fn deserialize(allocator: &'a Arena, buffer: &'a [u8]) -> Result<(&'a Self, usize)> {
         let (len, mut offset) = VarInt::deserialize(buffer)?;
 
-        let mut result: Vec<'a, Supercow<'a, T>> = Vec::with_capacity_in(len as usize, allocator);
+        let mut result = allocator.try_alloc_arenaarray(len as usize)?;
         for _ in 0..len as usize {
             let (value, offset_delta) = T::deserialize(allocator, buffer.with_offset(offset)?)?;
             offset += offset_delta;
@@ -243,7 +241,7 @@ impl<'a, T: Serializable<'a>> SerializableSupercowVecOfCows<'a> for SupercowVec<
         }
 
         let array = match allocator.try_alloc(SupercowVec {
-            inner: Supercow::borrowed(result.into_bump_slice()),
+            inner: Supercow::borrowed(result.into_arena_array()),
         }) {
             Ok(v) => v,
             Err(e) => bail!(e),

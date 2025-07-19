@@ -1,3 +1,5 @@
+use crate::util::arena::Arena;
+
 use super::{
     deepclone::{DeepClone, MustOutlive},
     packetpayload::{DeserializableOwned, Serializable, SerializableValue},
@@ -36,7 +38,7 @@ impl<'old, 'new: 'old> DeepClone<'old, 'new> for VarStr<'old> {
 
 impl<'a> Serializable<'a> for VarStr<'a> {
     fn deserialize(
-        allocator: &'a bumpalo::Bump,
+        allocator: &'a Arena,
         buffer: &'a [u8],
     ) -> Result<(Supercow<'a, VarStr<'a>>, usize)> {
         let (length, offset) = VarInt::deserialize(buffer)?;

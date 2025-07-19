@@ -1,3 +1,5 @@
+use crate::util::arena::Arena;
+
 use super::buffer::Buffer;
 use super::deepclone::{DeepClone, MustOutlive};
 use super::packetpayload::Serializable;
@@ -50,7 +52,7 @@ impl<'old, 'new: 'old> PacketPayload<'old, 'new> for Version<'old> {
 
 impl<'a> Serializable<'a> for Version<'a> {
     fn deserialize(
-        allocator: &'a bumpalo::Bump<1>,
+        allocator: &'a Arena,
         buffer: &'a [u8],
     ) -> Result<(Supercow<'a, Version<'a>>, usize)> {
         let version = buffer.get_u32_le(0)?;
