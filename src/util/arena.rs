@@ -1,4 +1,4 @@
-use anyhow::{Result, bail};
+use anyhow::Result;
 use core::slice;
 use std::{
     alloc::{Layout, alloc, dealloc},
@@ -45,7 +45,7 @@ impl<'a> Arena {
         let mut currently_consumed = self.consumed.load(Ordering::Relaxed);
         let cap = self.capacity;
         let mut padding = if alignment != 0 {
-            alignment - ((self.data as usize + currently_consumed) % alignment)
+            (alignment - ((self.data as usize + currently_consumed) % alignment)) % alignment
         } else {
             0
         };
@@ -65,14 +65,18 @@ impl<'a> Arena {
                 Err(new_currently_consumed) => {
                     currently_consumed = new_currently_consumed;
                     padding = if alignment != 0 {
-                        alignment - ((self.data as usize + currently_consumed) % alignment)
+                        (alignment - ((self.data as usize + currently_consumed) % alignment))
+                            % alignment
                     } else {
                         0
                     };
                 }
             }
         }
-        bail!("arena: out of memory")
+        panic!(
+            "arena: out of memory, cap: {} currently_consumed: {}, wanted: {}",
+            cap, currently_consumed, size_t,
+        )
     }
 
     #[inline(always)]
@@ -87,7 +91,7 @@ impl<'a> Arena {
         let mut currently_consumed = self.consumed.load(Ordering::Relaxed);
         let cap = self.capacity;
         let mut padding = if alignment != 0 {
-            alignment - ((self.data as usize + currently_consumed) % alignment)
+            (alignment - ((self.data as usize + currently_consumed) % alignment)) % alignment
         } else {
             0
         };
@@ -109,18 +113,17 @@ impl<'a> Arena {
                 Err(new_currently_consumed) => {
                     currently_consumed = new_currently_consumed;
                     padding = if alignment != 0 {
-                        alignment - ((self.data as usize + currently_consumed) % alignment)
+                        (alignment - ((self.data as usize + currently_consumed) % alignment))
+                            % alignment
                     } else {
                         0
                     };
                 }
             }
         }
-        bail!(
+        panic!(
             "arena: out of memory, cap: {} currently_consumed: {}, wanted: {}",
-            cap,
-            currently_consumed,
-            size
+            cap, currently_consumed, size,
         )
     }
 
@@ -131,7 +134,7 @@ impl<'a> Arena {
         let mut currently_consumed = self.consumed.load(Ordering::Relaxed);
         let cap = self.capacity;
         let mut padding = if alignment != 0 {
-            alignment - ((self.data as usize + currently_consumed) % alignment)
+            (alignment - ((self.data as usize + currently_consumed) % alignment)) % alignment
         } else {
             0
         };
@@ -151,14 +154,18 @@ impl<'a> Arena {
                 Err(new_currently_consumed) => {
                     currently_consumed = new_currently_consumed;
                     padding = if alignment != 0 {
-                        alignment - ((self.data as usize + currently_consumed) % alignment)
+                        (alignment - ((self.data as usize + currently_consumed) % alignment))
+                            % alignment
                     } else {
                         0
                     };
                 }
             }
         }
-        bail!("arena: out of memory")
+        panic!(
+            "arena: out of memory, cap: {} currently_consumed: {}, wanted: {}",
+            cap, currently_consumed, size,
+        )
     }
 
     #[inline(always)]
@@ -173,7 +180,7 @@ impl<'a> Arena {
         let mut currently_consumed = self.consumed.load(Ordering::Relaxed);
         let cap = self.capacity;
         let mut padding = if alignment != 0 {
-            alignment - ((self.data as usize + currently_consumed) % alignment)
+            (alignment - ((self.data as usize + currently_consumed) % alignment)) % alignment
         } else {
             0
         };
@@ -192,14 +199,18 @@ impl<'a> Arena {
                 Err(new_currently_consumed) => {
                     currently_consumed = new_currently_consumed;
                     padding = if alignment != 0 {
-                        alignment - ((self.data as usize + currently_consumed) % alignment)
+                        (alignment - ((self.data as usize + currently_consumed) % alignment))
+                            % alignment
                     } else {
                         0
                     };
                 }
             }
         }
-        bail!("arena: out of memory")
+        panic!(
+            "arena: out of memory, cap: {} currently_consumed: {}, wanted: {}",
+            cap, currently_consumed, size,
+        )
     }
 
     pub fn reset(&self) {
