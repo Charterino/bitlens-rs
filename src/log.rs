@@ -38,6 +38,7 @@ pub fn setup_logging() -> GlobalLoggerGuard {
         .build()
         .fuse();
     let drain = Async::new(Duplicate::new(file_drain, stdout_drain).fuse())
+        .overflow_strategy(slog_async::OverflowStrategy::Block)
         .build()
         .fuse();
     let logger = Logger::root(drain, o!());
