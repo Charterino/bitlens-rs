@@ -36,3 +36,4 @@ bitlens-txs
 bitlens-txouts
 bitlens-blocktxs
 result
+*.sst
