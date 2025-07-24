@@ -1,7 +1,6 @@
-use crate::packets::buffer::Buffer;
-use crate::packets::packetpayload::SerializableValue;
-use crate::packets::tx::TxOut;
-use crate::packets::varint::VarInt;
+use crate::packets::deserialize_array_owned;
+use crate::packets::tx::TxOutOwned;
+use crate::packets::varint::deserialize_varint;
 use crate::tx::AnalyzedTx;
 use crate::tx::deserialize_analyzed_tx;
 use anyhow::Result;
@@ -58,7 +57,7 @@ pub struct SerializedTx<'a> {
 }
 
 // for now this does the regular alloc stuff and returns owned data with 'static lifetime
-pub async fn get_transaction_outputs(hash: [u8; 32]) -> Result<Vec<TxOut<'static>>> {
+pub async fn get_transaction_outputs(hash: [u8; 32]) -> Result<Vec<TxOutOwned>> {
     let _g = READ_SEMAPHORE
         .acquire()
         .await
@@ -71,13 +70,7 @@ pub async fn get_transaction_outputs(hash: [u8; 32]) -> Result<Vec<TxOut<'static
                 bail!("data empty")
             }
 
-            let (count, mut continue_at) = VarInt::deserialize(&data)?;
-            let mut result = Vec::with_capacity(count as usize);
-            for _ in 0..count {
-                let (txout, len) = TxOut::deserialize((&data).with_offset(continue_at)?)?;
-                continue_at += len;
-                result.push(txout);
-            }
+            let (result, _) = deserialize_array_owned(&data)?;
             Ok(result)
         }
     })
@@ -168,7 +161,7 @@ pub async fn get_block_tx_hashes(hash: [u8; 32]) -> Result<Vec<[u8; 32]>> {
                 bail!("data empty")
             }
 
-            let (count, mut continue_at) = VarInt::deserialize(&data)?;
+            let (count, mut continue_at) = deserialize_varint(&data)?;
             let mut result = Vec::with_capacity(count as usize);
             for _ in 0..count {
                 let mut tx_hash: [u8; 32] = [0u8; 32];

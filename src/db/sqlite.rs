@@ -5,12 +5,11 @@ use std::{
 };
 
 use rusqlite::Connection;
-use supercow::Supercow;
 use tokio::{sync::mpsc::Sender, time::Instant};
 
 use crate::{
     metrics::METRIC_SQLITE_REQUESTS_TIME,
-    packets::blockheader::BlockHeader,
+    packets::blockheader::BlockHeaderOwned,
     types::{
         addressportnetwork::AddressPortNetwork, blockheaderwithnumber::BlockHeaderWithNumber,
         blockmetrics::BlockMetrics,
@@ -150,7 +149,7 @@ pub async fn update_peer_from_version(
         .unwrap();
 }
 
-pub async fn get_all_headers() -> Vec<BlockHeaderWithNumber<'static>> {
+pub async fn get_all_headers() -> Vec<BlockHeaderWithNumber> {
     let conn = CONNECTION.lock().unwrap();
     let start = Instant::now();
     let mut stmt = conn.prepare_cached("SELECT version, previous_block, merkle_root, timestamp, bits, nonce, block_number, block_hash, fetched_full FROM headers ORDER BY block_number ASC;").unwrap();
@@ -158,10 +157,10 @@ pub async fn get_all_headers() -> Vec<BlockHeaderWithNumber<'static>> {
     work_totals.insert(GENESIS_HEADER.hash, GENESIS_HEADER.get_work());
     let iter = stmt
         .query_map([], |row| {
-            let header = BlockHeader {
+            let header = BlockHeaderOwned {
                 version: row.get(0)?,
-                parent: Supercow::owned(row.get(1)?),
-                merkle_root: Supercow::owned(row.get(2)?),
+                parent: row.get(1)?,
+                merkle_root: row.get(2)?,
                 timestamp: row.get(3)?,
                 bits: row.get(4)?,
                 nonce: row.get(5)?,
@@ -189,11 +188,11 @@ pub async fn get_all_headers() -> Vec<BlockHeaderWithNumber<'static>> {
     result
 }
 
-pub async fn insert_header(header: &BlockHeaderWithNumber<'_>) {
+pub async fn insert_header(header: &BlockHeaderWithNumber) {
     INSERT_HEADER_QUEUE
         .send(InsertHeaderRequest {
-            parent: *header.header.parent,
-            merkle_root: *header.header.merkle_root,
+            parent: header.header.parent,
+            merkle_root: header.header.merkle_root,
             timestamp: header.header.timestamp,
             bits: header.header.bits,
             nonce: header.header.nonce,

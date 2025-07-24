@@ -13,8 +13,8 @@ use crate::{
         magic::ACTIVE_MAGIC,
         network_id::NetworkId,
         packet::{Packet, SERIALIZE_POOL, read_packet},
-        packetpayload::PacketPayloadType,
-        version::Version,
+        packetpayload::PayloadToSend,
+        version::VersionOwned,
     },
 };
 
@@ -40,7 +40,7 @@ impl Drop for Connection {
 }
 
 impl Connection {
-    pub async fn write_packet(&mut self, packet: &PacketPayloadType<'_>) -> Result<()> {
+    pub async fn write_packet(&mut self, packet: &PayloadToSend) -> Result<()> {
         let mut serialize_buffer = SERIALIZE_POOL.get().await.unwrap();
         let buf = serialize_buffer.deref_mut();
         packet.serialize(buf);
@@ -67,7 +67,7 @@ impl Connection {
 }
 
 #[derive(Debug)]
-pub struct HandshakedConnection<'a> {
+pub struct HandshakedConnection {
     pub inner: Connection,
-    pub remote_version: Version<'a>,
+    pub remote_version: VersionOwned,
 }

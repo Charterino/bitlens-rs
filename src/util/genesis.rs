@@ -1,9 +1,9 @@
 use std::sync::LazyLock;
 
-use crate::packets::blockheader::BlockHeader;
+use crate::packets::blockheader::BlockHeaderOwned;
 
-pub static GENESIS_HEADER: LazyLock<BlockHeader> = LazyLock::new(|| {
-    BlockHeader::construct(
+pub static GENESIS_HEADER: LazyLock<BlockHeaderOwned> = LazyLock::new(|| {
+    BlockHeaderOwned::construct(
         0x01,
         [0u8; 32],
         [

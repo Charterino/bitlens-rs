@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 
 use crate::{
-    packets::deepclone::DeepClone,
     types::blockheaderwithnumber::BlockHeaderWithNumber,
     util::{
         genesis::GENESIS_HEADER,
@@ -9,16 +8,16 @@ use crate::{
     },
 };
 
-pub struct Chain<'a> {
-    pub top_header: BlockHeaderWithNumber<'a>,
-    pub known_headers: HashMap<[u8; 32], BlockHeaderWithNumber<'a>>,
+pub struct Chain {
+    pub top_header: BlockHeaderWithNumber,
+    pub known_headers: HashMap<[u8; 32], BlockHeaderWithNumber>,
 }
 
-impl Default for Chain<'_> {
+impl Default for Chain {
     fn default() -> Self {
         let mut known = HashMap::new();
         let genesis = BlockHeaderWithNumber {
-            header: GENESIS_HEADER.deep_clone(),
+            header: *GENESIS_HEADER,
             number: 0,
             fetched_full: false,
             total_work: GENESIS_HEADER.get_work(),
@@ -31,12 +30,12 @@ impl Default for Chain<'_> {
     }
 }
 
-impl<'a> Chain<'a> {
-    pub fn get_ancestor(
+impl Chain {
+    pub fn get_ancestor<'a>(
         &'a self,
-        header: &'a BlockHeaderWithNumber<'a>,
+        header: &'a BlockHeaderWithNumber,
         height: u64,
-    ) -> Option<&'a BlockHeaderWithNumber<'a>> {
+    ) -> Option<&'a BlockHeaderWithNumber> {
         let mut top = header;
         while top.number > height {
             let next = self.known_headers.get(top.header.parent.as_slice());

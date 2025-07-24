@@ -1,61 +1,52 @@
 use crate::util::arena::Arena;
 
 use super::{
-    SupercowVec,
-    deepclone::{DeepClone, MustOutlive},
-    netaddr::NetAddrV2,
-    packetpayload::{PacketPayload, Serializable, SerializableSupercowVecOfCows},
+    deserialize_array,
+    netaddr::{NetAddrV2Borrowed, NetAddrV2Owned},
+    packetpayload::{DeserializableBorrowed, PacketPayload, Serializable},
+    serialize_array,
 };
-use anyhow::bail;
-use supercow::Supercow;
 
-#[derive(Debug, Clone)]
-pub struct AddrV2<'a> {
-    pub inner: Supercow<'a, SupercowVec<'a, NetAddrV2<'a>>>,
+#[derive(Debug, Clone, Copy, Default)]
+pub struct AddrV2Borrowed<'a> {
+    pub inner: &'a [NetAddrV2Borrowed<'a>],
 }
 
 pub const ADDRV2_COMMAND: [u8; 12] = *b"addrv2\0\0\0\0\0\0";
 
-impl<'old, 'new: 'old> PacketPayload<'old, 'new> for AddrV2<'old> {
+impl<'a> PacketPayload<'a, AddrV2Owned> for AddrV2Borrowed<'a> {
     fn command(&self) -> &'static [u8; 12] {
         &ADDRV2_COMMAND
     }
 }
 
-impl<'old> MustOutlive<'old> for AddrV2<'old> {
-    type WithLifetime<'new: 'old> = AddrV2<'new>;
-}
-
-impl<'old, 'new: 'old> DeepClone<'old, 'new> for AddrV2<'old> {
-    fn deep_clone(&self) -> Self::WithLifetime<'new> {
-        let addys = (&*self.inner.inner)
-            .deep_clone()
-            .into_iter()
-            .map(Supercow::owned)
-            .collect();
-        Self::WithLifetime {
-            inner: Supercow::owned(SupercowVec {
-                inner: Supercow::owned(addys),
-            }),
-        }
-    }
-}
-
-impl<'a> Serializable<'a> for AddrV2<'a> {
-    fn deserialize(
+impl<'a> DeserializableBorrowed<'a> for AddrV2Borrowed<'a> {
+    fn deserialize_borrowed(
+        &mut self,
         allocator: &'a Arena,
         buffer: &'a [u8],
-    ) -> anyhow::Result<(Supercow<'a, Self>, usize)> {
-        let (deserialized, consumed) = SupercowVec::deserialize(allocator, buffer)?;
-        match allocator.try_alloc(AddrV2 {
-            inner: Supercow::borrowed(deserialized),
-        }) {
-            Ok(result) => Ok((Supercow::borrowed(result), consumed)),
-            Err(e) => bail!(e),
-        }
+    ) -> anyhow::Result<usize> {
+        let (deserialized, consumed) = deserialize_array(allocator, buffer)?;
+        self.inner = deserialized;
+        Ok(consumed)
     }
+}
 
+#[derive(Debug, Clone, Default)]
+pub struct AddrV2Owned {
+    pub inner: Vec<NetAddrV2Owned>,
+}
+
+impl Serializable for AddrV2Owned {
     fn serialize(&self, stream: &mut impl bytes::BufMut) {
-        self.inner.serialize(stream);
+        serialize_array(&self.inner, stream);
+    }
+}
+
+impl From<AddrV2Borrowed<'_>> for AddrV2Owned {
+    fn from(value: AddrV2Borrowed<'_>) -> Self {
+        Self {
+            inner: value.inner.iter().map(|v| (*v).into()).collect(),
+        }
     }
 }

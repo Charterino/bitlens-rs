@@ -1,22 +1,20 @@
 use crate::util::arena::Arena;
 
-use super::buffer::Buffer;
-use super::deepclone::{DeepClone, MustOutlive};
-use super::packetpayload::Serializable;
-use super::varstr::VarStr;
-use super::{netaddr::NetAddrShort, packetpayload::PacketPayload};
-use anyhow::{Result, anyhow, bail};
+use super::netaddr::{NetAddrShortBorrowed, NetAddrShortOwned};
+use super::packetpayload::{DeserializableBorrowed, Serializable};
+use super::varstr::{deserialize_varstr, serialize_varstr};
+use super::{buffer::Buffer, packetpayload::PacketPayload};
+use anyhow::Result;
 use bytes::BufMut;
-use supercow::Supercow;
 
-#[derive(Debug, Clone)]
-pub struct Version<'a> {
+#[derive(Debug, Clone, Copy, Default)]
+pub struct VersionBorrowed<'a> {
     pub services: u64,
     pub timestamp: u64,
-    pub addrrecv: Supercow<'a, NetAddrShort<'a>>,
-    pub addrfrom: Supercow<'a, NetAddrShort<'a>>,
+    pub addrrecv: NetAddrShortBorrowed<'a>,
+    pub addrfrom: NetAddrShortBorrowed<'a>,
     pub nonce: u64,
-    pub user_agent: Supercow<'a, VarStr<'a>>,
+    pub user_agent: &'a [u8],
     pub start_height: u32,
     pub version: u32,
     pub announce_relayed_transactions: bool,
@@ -24,71 +22,49 @@ pub struct Version<'a> {
 
 pub const VERSION_COMMAND: [u8; 12] = *b"version\0\0\0\0\0";
 
-impl<'old> MustOutlive<'old> for Version<'old> {
-    type WithLifetime<'new: 'old> = Version<'new>;
-}
-
-impl<'old, 'new: 'old> DeepClone<'old, 'new> for Version<'old> {
-    fn deep_clone(&self) -> Self::WithLifetime<'new> {
-        Self::WithLifetime {
-            services: self.services,
-            timestamp: self.timestamp,
-            addrrecv: Supercow::owned(self.addrrecv.deep_clone()),
-            addrfrom: Supercow::owned(self.addrfrom.deep_clone()),
-            nonce: self.nonce,
-            user_agent: Supercow::owned(self.user_agent.deep_clone()),
-            start_height: self.start_height,
-            version: self.version,
-            announce_relayed_transactions: self.announce_relayed_transactions,
-        }
-    }
-}
-
-impl<'old, 'new: 'old> PacketPayload<'old, 'new> for Version<'old> {
+impl<'a> PacketPayload<'a, VersionOwned> for VersionBorrowed<'a> {
     fn command(&self) -> &'static [u8; 12] {
         &VERSION_COMMAND
     }
 }
 
-impl<'a> Serializable<'a> for Version<'a> {
-    fn deserialize(
-        allocator: &'a Arena,
-        buffer: &'a [u8],
-    ) -> Result<(Supercow<'a, Version<'a>>, usize)> {
-        let version = buffer.get_u32_le(0)?;
-        let services = buffer.get_u64_le(4)?;
-        let timestamp = buffer.get_u64_le(12)?;
-        let (addrrecv, _) = NetAddrShort::deserialize(allocator, buffer.with_offset(20)?)?;
-        let (addrfrom, _) = NetAddrShort::deserialize(allocator, buffer.with_offset(46)?)?;
-        let nonce = buffer.get_u64_le(72)?;
-        let (ua, offset) =
-            <VarStr as Serializable>::deserialize(allocator, buffer.with_offset(80)?)?;
-        let start_height = buffer.get_u32_le(80 + offset)?;
-        match allocator.try_alloc(Version {
-            services,
-            timestamp,
-            addrrecv,
-            addrfrom,
-            nonce,
-            user_agent: ua,
-            start_height,
-            version,
-            announce_relayed_transactions: false,
-        }) {
-            Ok(result) => {
-                if version >= 70001 {
-                    result.announce_relayed_transactions = *buffer
-                        .get(84 + offset)
-                        .ok_or(anyhow!("missing last byte in version"))?
-                        != 0;
-                    return Ok((Supercow::borrowed(result), offset + 85));
-                }
-                Ok((Supercow::borrowed(result), offset + 84))
+impl<'a> DeserializableBorrowed<'a> for VersionBorrowed<'a> {
+    fn deserialize_borrowed(&mut self, allocator: &'a Arena, buffer: &'a [u8]) -> Result<usize> {
+        self.version = buffer.get_u32_le(0)?;
+        self.services = buffer.get_u64_le(4)?;
+        self.timestamp = buffer.get_u64_le(12)?;
+        self.addrrecv
+            .deserialize_borrowed(allocator, buffer.with_offset(20)?)?;
+        self.addrfrom
+            .deserialize_borrowed(allocator, buffer.with_offset(46)?)?;
+        self.nonce = buffer.get_u64_le(72)?;
+        let (ua, offset) = deserialize_varstr(buffer.with_offset(80)?)?;
+        self.user_agent = ua;
+        self.start_height = buffer.get_u32_le(80 + offset)?;
+        if self.version >= 70001 {
+            if let Some(b) = buffer.get(84 + offset) {
+                self.announce_relayed_transactions = *b != 0;
+                return Ok(offset + 85);
             }
-            Err(e) => bail!(e),
         }
+        Ok(offset + 84)
     }
+}
 
+#[derive(Debug, Clone, Default)]
+pub struct VersionOwned {
+    pub services: u64,
+    pub timestamp: u64,
+    pub addrrecv: NetAddrShortOwned,
+    pub addrfrom: NetAddrShortOwned,
+    pub nonce: u64,
+    pub user_agent: Vec<u8>,
+    pub start_height: u32,
+    pub version: u32,
+    pub announce_relayed_transactions: bool,
+}
+
+impl Serializable for VersionOwned {
     fn serialize(&self, stream: &mut impl BufMut) {
         stream.put_u32_le(self.version);
         stream.put_u64_le(self.services);
@@ -96,10 +72,26 @@ impl<'a> Serializable<'a> for Version<'a> {
         self.addrrecv.serialize(stream);
         self.addrfrom.serialize(stream);
         stream.put_u64_le(self.nonce);
-        Serializable::serialize(&*self.user_agent, stream);
+        serialize_varstr(&self.user_agent, stream);
         stream.put_u32_le(self.start_height);
         if self.version >= 70001 {
             stream.put_u8(self.announce_relayed_transactions as u8);
+        }
+    }
+}
+
+impl From<VersionBorrowed<'_>> for VersionOwned {
+    fn from(value: VersionBorrowed<'_>) -> Self {
+        VersionOwned {
+            services: value.services,
+            timestamp: value.timestamp,
+            addrrecv: value.addrrecv.into(),
+            addrfrom: value.addrfrom.into(),
+            nonce: value.nonce,
+            user_agent: value.user_agent.to_vec(),
+            start_height: value.start_height,
+            version: value.version,
+            announce_relayed_transactions: value.announce_relayed_transactions,
         }
     }
 }

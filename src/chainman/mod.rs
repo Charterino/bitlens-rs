@@ -2,8 +2,8 @@ use crate::{
     db::{self, rocksdb::SerializedTx},
     metrics::{METRIC_FULL_BLOCKS_DOWNLOADED, METRIC_TOP_HEADER_HEIGHT},
     packets::{
-        SupercowVec, blockheader::BlockHeader, deepclone::DeepClone, getheaders::GetHeaders,
-        packetpayload::PacketPayloadType,
+        blockheader::BlockHeaderBorrowed,
+        getheaders::GetHeadersOwned, packetpayload::PayloadToSend,
     },
     some_or_break,
     types::{
@@ -26,7 +26,6 @@ use std::{
     },
     time::{SystemTime, UNIX_EPOCH},
 };
-use supercow::Supercow;
 
 const FRONTPAGE_TXS_COUNT: usize = 50;
 const FRONTPAGE_BLOCKS_COUNT: usize = 50;
@@ -135,12 +134,12 @@ async fn update_frontpage_response(
                 });
             }
 
-            if *current_header.header.parent == [0u8; 32] {
+            if current_header.header.parent == [0u8; 32] {
                 break; // reached the genesis block
             }
             current_header = {
                 let r = CHAIN.read().unwrap();
-                r.known_headers[&*current_header.header.parent].clone()
+                r.known_headers[&current_header.header.parent].clone()
             };
         }
 
@@ -190,7 +189,7 @@ async fn update_frontpage_response(
 
             i -= 1;
             if i != 0 {
-                current_header = &r.known_headers[&*current_header.header.parent];
+                current_header = &r.known_headers[&current_header.header.parent];
             }
         }
 
@@ -235,7 +234,7 @@ async fn calculate_stats(top: [u8; 32], cache: Option<&[BlockMetrics]>) -> Stats
             if last.header.parent == [0u8; 32] {
                 break;
             }
-            last = &r.known_headers[&*last.header.parent];
+            last = &r.known_headers[&last.header.parent];
             if last.header.timestamp < cutoff {
                 break;
             }
@@ -341,24 +340,22 @@ fn need_ibd() -> bool {
 }
 
 // Constructs a `getheaders` packet with `BlockLocator` that allows the remote peer to detect that we are on the wrong branch
-fn build_get_headers<'a>() -> PacketPayloadType<'a> {
+fn build_get_headers() -> PayloadToSend {
     let r = CHAIN.read().unwrap();
     if r.top_header.number == 0 {
         // Starting from zero!
-        return PacketPayloadType::GetHeaders(Supercow::owned(GetHeaders {
+        return PayloadToSend::GetHeaders(GetHeadersOwned {
             version: 70016,
-            block_locator: Supercow::owned(SupercowVec {
-                inner: Supercow::owned(vec![Supercow::owned(r.top_header.header.hash)]),
-            }),
-            hash_stop: Supercow::owned([0u8; 32]),
-        }));
+            block_locator: vec![r.top_header.header.hash],
+            hash_stop: [0u8; 32],
+        });
     }
 
     let mut block_locator = Vec::with_capacity(10);
     let mut step = 1;
 
     let mut current = &r.top_header;
-    block_locator.push(Supercow::owned(current.header.hash));
+    block_locator.push(current.header.hash);
 
     while current.number > 0 {
         if block_locator.len() >= 10 {
@@ -370,7 +367,7 @@ fn build_get_headers<'a>() -> PacketPayloadType<'a> {
         match r.get_ancestor(current, current.number - step) {
             Some(new) => {
                 current = new;
-                block_locator.push(Supercow::owned(current.header.hash));
+                block_locator.push(current.header.hash);
             }
             None => {
                 // Should never happen?!
@@ -383,16 +380,14 @@ fn build_get_headers<'a>() -> PacketPayloadType<'a> {
         }
     }
 
-    PacketPayloadType::GetHeaders(Supercow::owned(GetHeaders {
+    PayloadToSend::GetHeaders(GetHeadersOwned {
         version: 70016,
-        block_locator: Supercow::owned(SupercowVec {
-            inner: Supercow::owned(block_locator),
-        }),
-        hash_stop: Supercow::owned([0u8; 32]),
-    }))
+        block_locator,
+        hash_stop: [0u8; 32],
+    })
 }
 
-fn validate_and_apply_header_inner(header: &BlockHeader, w: &mut Chain) -> Result<()> {
+fn validate_and_apply_header_inner(header: &BlockHeaderBorrowed, w: &mut Chain) -> Result<()> {
     let duplicate = w.known_headers.contains_key(&header.hash);
     let parent = match w.known_headers.get(header.parent.as_slice()) {
         Some(parent) => parent,
@@ -418,7 +413,7 @@ fn validate_and_apply_header_inner(header: &BlockHeader, w: &mut Chain) -> Resul
 
     let new_total_work = parent.total_work + header.get_work();
     let new_header = BlockHeaderWithNumber {
-        header: header.deep_clone(),
+        header: (*header).into(),
         number: parent.number + 1,
         fetched_full: false,
         total_work: new_total_work,
@@ -426,7 +421,7 @@ fn validate_and_apply_header_inner(header: &BlockHeader, w: &mut Chain) -> Resul
 
     if new_header.total_work > w.top_header.total_work {
         // since top_header is changing, we might need to adjust DOWNLOADED_BLOCKS
-        let should_recount = *new_header.header.parent != w.top_header.header.hash;
+        let should_recount = new_header.header.parent != w.top_header.header.hash;
         w.top_header = new_header.clone();
         METRIC_TOP_HEADER_HEIGHT.set(new_header.number as i64);
         if should_recount {
@@ -445,7 +440,7 @@ fn validate_and_apply_header_inner(header: &BlockHeader, w: &mut Chain) -> Resul
     Ok(())
 }
 
-fn validate_and_apply_headers(headers: &[&BlockHeader]) -> Result<()> {
+fn validate_and_apply_headers(headers: &[BlockHeaderBorrowed]) -> Result<()> {
     let mut w = CHAIN.write().unwrap();
     for header in headers {
         validate_and_apply_header_inner(header, &mut w)?;

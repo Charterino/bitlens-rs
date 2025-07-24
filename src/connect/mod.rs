@@ -3,7 +3,6 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use anyhow::{Result, bail};
 use connection::{Connection, HandshakedConnection};
 use rand::RngCore;
-use supercow::Supercow;
 use tokio::{
     io::{BufReader, BufWriter},
     select,
@@ -13,9 +12,11 @@ use tokio::{
 use crate::{
     metrics::{METRIC_CONNECTIONS_IPV4, METRIC_CONNECTIONS_IPV6, METRIC_NET_DIALS_TOTAL},
     packets::{
-        deepclone::DeepClone, netaddr::NetAddrShort, packetpayload::PacketPayloadType,
-        sendaddrv2::SendAddrV2, sendheaders::SendHeaders, varstr::VarStr, verack::VerAck,
-        version::Version,
+        packetpayload::{PayloadToSend, ReceivedPayload},
+        sendaddrv2::SendAddrV2,
+        sendheaders::SendHeaders,
+        verack::VerAck,
+        version::VersionOwned,
     },
     types::addressportnetwork::AddressPortNetwork,
 };
@@ -24,9 +25,7 @@ pub mod connection;
 
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 
-pub async fn connect_and_handshake(
-    peer: &AddressPortNetwork,
-) -> Result<HandshakedConnection<'static>> {
+pub async fn connect_and_handshake(peer: &AddressPortNetwork) -> Result<HandshakedConnection> {
     let mut conn = connect(peer).await?;
 
     let deadline = Instant::now().checked_add(HANDSHAKE_TIMEOUT).unwrap();
@@ -45,33 +44,24 @@ pub async fn connect_and_handshake(
     }
 }
 
-async fn handshake(conn: &mut Connection) -> Result<Version<'static>> {
-    let version = Version {
+async fn handshake(conn: &mut Connection) -> Result<VersionOwned> {
+    let version = VersionOwned {
         services: 9,
         timestamp: SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs(),
         nonce: rand::rng().next_u64(),
-        user_agent: Supercow::owned(VarStr::from("semikek")),
+        user_agent: b"semikek".to_vec(),
         version: 70016,
-        addrrecv: Supercow::owned(NetAddrShort {
-            services: 0,
-            addr: Supercow::owned([0u8; 16]),
-            port: 0,
-        }),
-        addrfrom: Supercow::owned(NetAddrShort {
-            services: 0,
-            addr: Supercow::owned([0u8; 16]),
-            port: 0,
-        }),
+        addrrecv: Default::default(),
+        addrfrom: Default::default(),
         start_height: 0,
         announce_relayed_transactions: false,
     };
-    conn.write_packet(&PacketPayloadType::Version(Supercow::owned(version)))
-        .await?;
+    conn.write_packet(&PayloadToSend::Version(version)).await?;
 
-    let mut remote_version: Option<Version> = None;
+    let mut remote_version: Option<VersionOwned> = None;
     let mut finished = false;
 
     while !finished {
@@ -85,8 +75,8 @@ async fn handshake(conn: &mut Connection) -> Result<Version<'static>> {
         })?;
         drop(packet);
         if let Some(responses) = responses {
-            for r in &responses {
-                conn.write_packet(r).await?;
+            for r in responses {
+                conn.write_packet(&r).await?;
             }
         }
     }
@@ -94,37 +84,33 @@ async fn handshake(conn: &mut Connection) -> Result<Version<'static>> {
     Ok(remote_version.unwrap())
 }
 
-fn handle_packet_during_handshaking<'packet, 'ret: 'packet, 'params: 'ret>(
-    packet: &PacketPayloadType<'packet>,
+fn handle_packet_during_handshaking(
+    packet: &ReceivedPayload<'_>,
     success: &mut bool,
-    remote_version: &mut Option<Version<'params>>,
-) -> Result<Option<Vec<PacketPayloadType<'ret>>>> {
+    remote_version: &mut Option<VersionOwned>,
+) -> Result<Option<Vec<PayloadToSend>>> {
     match packet {
-        PacketPayloadType::Version(v) => {
+        ReceivedPayload::Version(v) => {
             if remote_version.is_some() {
                 bail!("sent the version packet more than once")
             }
-            let n = v.deep_clone();
+            let n = (**v).into();
             *remote_version = Some(n);
         }
-        PacketPayloadType::VerAck(_) => {
+        ReceivedPayload::VerAck(_) => {
             if remote_version.is_none() {
                 bail!("sent verack before version")
             }
             let rv = remote_version.as_ref().unwrap();
-            let mut res: Vec<PacketPayloadType<'ret>> = vec![];
+            let mut res: Vec<PayloadToSend> = vec![];
             // BIP 155
             if rv.version > 70016 {
-                res.push(PacketPayloadType::SendAddrV2(Supercow::owned(
-                    SendAddrV2 {},
-                )));
+                res.push(PayloadToSend::SendAddrV2(SendAddrV2 {}));
             }
-            res.push(PacketPayloadType::VerAck(Supercow::owned(VerAck {})));
+            res.push(PayloadToSend::VerAck(VerAck {}));
             // BIP 130
             if rv.version > 70012 {
-                res.push(PacketPayloadType::SendHeaders(Supercow::owned(
-                    SendHeaders {},
-                )));
+                res.push(PayloadToSend::SendHeaders(SendHeaders {}));
             }
             *success = true;
             return Ok(Some(res));

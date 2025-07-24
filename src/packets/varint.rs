@@ -1,40 +1,10 @@
-use super::{buffer::Buffer, packetpayload::SerializableValue};
-use anyhow::Result;
+use super::buffer::Buffer;
+use anyhow::{Result, bail};
 use bytes::BufMut;
 
 pub type VarInt = u64;
 
-impl<'a> SerializableValue<'a> for VarInt {
-    fn deserialize(buffer: &'a [u8]) -> Result<(VarInt, usize)> {
-        let leader = buffer[0];
-        Ok(if leader < 0xFD {
-            (leader as u64, 1)
-        } else if leader == 0xFD {
-            (buffer.get_u16_le(1)? as u64, 3)
-        } else if leader == 0xFE {
-            (buffer.get_u32_le(1)? as u64, 5)
-        } else {
-            (buffer.get_u64_le(1)?, 9)
-        })
-    }
-
-    fn serialize(&self, stream: &mut impl BufMut) {
-        if *self < 0xFD {
-            stream.put_u8(*self as u8);
-        } else if *self < 0xFFFF {
-            stream.put_u8(0xFD);
-            stream.put_u16_le(*self as u16);
-        } else if *self < 0xFFFFFFFF {
-            stream.put_u8(0xFE);
-            stream.put_u32_le(*self as u32);
-        } else {
-            stream.put_u8(0xFF);
-            stream.put_u64_le(*self);
-        }
-    }
-}
-
-pub const fn varint_len(v: VarInt) -> usize {
+pub const fn length_varint(v: VarInt) -> usize {
     if v < 0xFD {
         1
     } else if v < 0xFFFF {
@@ -46,7 +16,42 @@ pub const fn varint_len(v: VarInt) -> usize {
     }
 }
 
-pub fn varint_serialize(v: VarInt, into: &mut [u8]) -> usize {
+pub fn serialize_varint(v: VarInt, into: &mut impl BufMut) -> usize {
+    if v < 0xFD {
+        into.put_u8(v as u8);
+        1
+    } else if v < 0xFFFF {
+        into.put_u8(0xFD);
+        into.put_u16_le(v as u16);
+        3
+    } else if v < 0xFFFFFFFF {
+        into.put_u8(0xFE);
+        into.put_u32_le(v as u32);
+        5
+    } else {
+        into.put_u8(0xFF);
+        into.put_u64_le(v);
+        9
+    }
+}
+
+pub fn deserialize_varint(buffer: &[u8]) -> Result<(VarInt, usize)> {
+    if buffer.is_empty() {
+        bail!("not enough bytes for varint")
+    }
+    let leader = buffer[0];
+    Ok(if leader < 0xFD {
+        (leader as u64, 1)
+    } else if leader == 0xFD {
+        (buffer.get_u16_le(1)? as u64, 3)
+    } else if leader == 0xFE {
+        (buffer.get_u32_le(1)? as u64, 5)
+    } else {
+        (buffer.get_u64_le(1)?, 9)
+    })
+}
+
+pub fn serialize_varint_into_slice(v: VarInt, into: &mut [u8]) -> usize {
     if v < 0xFD {
         into[0] = v as u8;
         1

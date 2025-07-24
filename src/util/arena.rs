@@ -79,6 +79,10 @@ impl<'a> Arena {
         )
     }
 
+    pub fn try_alloc_default<T: Default>(&self) -> Result<&mut T> {
+        self.try_alloc(T::default())
+    }
+
     #[inline(always)]
     pub fn try_alloc_array_fill_copy<T: Sized + Copy>(
         &self,

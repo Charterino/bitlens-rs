@@ -217,6 +217,7 @@ dependencies = [
  "bytes",
  "ctrlc",
  "deadpool",
+ "either",
  "file-rotate",
  "hex",
  "k256",
@@ -239,7 +240,6 @@ dependencies = [
  "slog-json",
  "slog-scope",
  "slog-term",
- "supercow",
  "time",
  "tokio",
  "tracking-allocator",
@@ -1959,12 +1959,6 @@ name = "subtle"
 version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
-
-[[package]]
-name = "supercow"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "171758edb47aa306a78dfa4ab9aeb5167405bd4e3dc2b64e88f6a84bbe98bd63"
 
 [[package]]
 name = "syn"

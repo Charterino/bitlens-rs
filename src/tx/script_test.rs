@@ -1,12 +1,7 @@
 use k256::elliptic_curve::rand_core::OsRng;
-use supercow::Supercow;
 
 use crate::{
-    packets::{
-        SupercowVec,
-        tx::{Tx, TxIn, TxOut},
-        varstr::VarStr,
-    },
+    packets::tx::{TxInOwned, TxOutOwned, TxOutRef, TxOwned, TxRef},
     tx::{
         opcodes::{OP_0, OP_1, OP_2, OP_CHECKMULTISIG, OP_CHECKSIG, OP_ENDIF, OP_IF},
         script::{
@@ -80,30 +75,8 @@ fn test_get_transaction_sigop_cost() {
 
     // Multisig script (legacy counting)
     {
-        let mut creation_tx = Tx {
-            version: 0,
-            locktime: 0,
-            txins: Supercow::owned(SupercowVec {
-                inner: Supercow::owned(vec![]),
-            }),
-            txouts: Supercow::owned(SupercowVec {
-                inner: Supercow::owned(vec![]),
-            }),
-            witness_data: None,
-            hash: [0u8; 32],
-        };
-        let mut spending_tx = Tx {
-            version: 0,
-            locktime: 0,
-            txins: Supercow::owned(SupercowVec {
-                inner: Supercow::owned(vec![]),
-            }),
-            txouts: Supercow::owned(SupercowVec {
-                inner: Supercow::owned(vec![]),
-            }),
-            witness_data: None,
-            hash: [0u8; 32],
-        };
+        let mut creation_tx = TxOwned::default();
+        let mut spending_tx = TxOwned::default();
         let mut script_pubkey = vec![];
         script_pubkey.append_item(AppendableToScript::Int64(1));
         script_pubkey.append_item(AppendableToScript::ByteArray(&pubkey));
@@ -122,40 +95,18 @@ fn test_get_transaction_sigop_cost() {
 
         assert_eq!(
             0,
-            get_transaction_sigop_cost(&spending_tx, &deps, flags_no_witness)
+            get_transaction_sigop_cost(TxRef::Owned(&spending_tx), &deps, flags_no_witness)
         );
         assert_eq!(
             MAX_PUBKEYS_PER_MULTISIG * 4,
-            get_transaction_sigop_cost(&creation_tx, &[], flags_no_witness)
+            get_transaction_sigop_cost(TxRef::Owned(&creation_tx), &[], flags_no_witness)
         );
     }
 
     // Multisig nested in P2SH
     {
-        let mut creation_tx = Tx {
-            version: 0,
-            locktime: 0,
-            txins: Supercow::owned(SupercowVec {
-                inner: Supercow::owned(vec![]),
-            }),
-            txouts: Supercow::owned(SupercowVec {
-                inner: Supercow::owned(vec![]),
-            }),
-            witness_data: None,
-            hash: [0u8; 32],
-        };
-        let mut spending_tx = Tx {
-            version: 0,
-            locktime: 0,
-            txins: Supercow::owned(SupercowVec {
-                inner: Supercow::owned(vec![]),
-            }),
-            txouts: Supercow::owned(SupercowVec {
-                inner: Supercow::owned(vec![]),
-            }),
-            witness_data: None,
-            hash: [0u8; 32],
-        };
+        let mut creation_tx = TxOwned::default();
+        let mut spending_tx = TxOwned::default();
         let mut redeem_script = vec![];
         redeem_script.append_item(AppendableToScript::Int64(1));
         redeem_script.append_item(AppendableToScript::ByteArray(&pubkey));
@@ -177,36 +128,14 @@ fn test_get_transaction_sigop_cost() {
 
         assert_eq!(
             8,
-            get_transaction_sigop_cost(&spending_tx, &deps, flags_no_witness)
+            get_transaction_sigop_cost(TxRef::Owned(&spending_tx), &deps, flags_no_witness)
         );
     }
 
     // P2WPKH witness program
     {
-        let mut creation_tx = Tx {
-            version: 0,
-            locktime: 0,
-            txins: Supercow::owned(SupercowVec {
-                inner: Supercow::owned(vec![]),
-            }),
-            txouts: Supercow::owned(SupercowVec {
-                inner: Supercow::owned(vec![]),
-            }),
-            witness_data: None,
-            hash: [0u8; 32],
-        };
-        let mut spending_tx = Tx {
-            version: 0,
-            locktime: 0,
-            txins: Supercow::owned(SupercowVec {
-                inner: Supercow::owned(vec![]),
-            }),
-            txouts: Supercow::owned(SupercowVec {
-                inner: Supercow::owned(vec![]),
-            }),
-            witness_data: None,
-            hash: [0u8; 32],
-        };
+        let mut creation_tx = TxOwned::default();
+        let mut spending_tx = TxOwned::default();
         let mut script_pubkey = get_script_for_destination(Destination::WitnessV0KeyHash(&pubkey));
         let script_sig = vec![];
 
@@ -219,12 +148,12 @@ fn test_get_transaction_sigop_cost() {
         );
         assert_eq!(
             1,
-            get_transaction_sigop_cost(&spending_tx, &deps, flags_witness)
+            get_transaction_sigop_cost(TxRef::Owned(&spending_tx), &deps, flags_witness)
         );
         // No signature operations if we dont verify the witness
         assert_eq!(
             0,
-            get_transaction_sigop_cost(&spending_tx, &deps, flags_no_witness)
+            get_transaction_sigop_cost(TxRef::Owned(&spending_tx), &deps, flags_no_witness)
         );
 
         // The sigop cost for witness != 0 is zero
@@ -239,7 +168,7 @@ fn test_get_transaction_sigop_cost() {
         );
         assert_eq!(
             0,
-            get_transaction_sigop_cost(&spending_tx, &deps, flags_witness)
+            get_transaction_sigop_cost(TxRef::Owned(&spending_tx), &deps, flags_witness)
         );
 
         script_pubkey[0] = 0x00;
@@ -251,44 +180,22 @@ fn test_get_transaction_sigop_cost() {
             Some(vec![vec![], vec![]]),
         );
         // The witness of a coinbase transaction is not taken into account
-        spending_tx.txins = Supercow::owned(SupercowVec::from_owned(vec![TxIn {
-            prevout_hash: Supercow::owned([0u8; 32]),
+        spending_tx.txins = vec![TxInOwned {
+            prevout_hash: [0u8; 32],
             prevout_index: 0xFFFFFFFF,
             sequence: 0,
-            sig_script: Supercow::owned(VarStr::from_owned(script_sig)),
-        }]));
+            sig_script: script_sig,
+        }];
         assert_eq!(
             0,
-            get_transaction_sigop_cost(&spending_tx, &deps, flags_witness)
+            get_transaction_sigop_cost(TxRef::Owned(&spending_tx), &deps, flags_witness)
         );
     }
 
     // P2WPKH nested in P2SH
     {
-        let mut creation_tx = Tx {
-            version: 0,
-            locktime: 0,
-            txins: Supercow::owned(SupercowVec {
-                inner: Supercow::owned(vec![]),
-            }),
-            txouts: Supercow::owned(SupercowVec {
-                inner: Supercow::owned(vec![]),
-            }),
-            witness_data: None,
-            hash: [0u8; 32],
-        };
-        let mut spending_tx = Tx {
-            version: 0,
-            locktime: 0,
-            txins: Supercow::owned(SupercowVec {
-                inner: Supercow::owned(vec![]),
-            }),
-            txouts: Supercow::owned(SupercowVec {
-                inner: Supercow::owned(vec![]),
-            }),
-            witness_data: None,
-            hash: [0u8; 32],
-        };
+        let mut creation_tx = TxOwned::default();
+        let mut spending_tx = TxOwned::default();
         let mut script_sig = get_script_for_destination(Destination::WitnessV0KeyHash(&pubkey));
         let script_pubkey = get_script_for_destination(Destination::ScriptHash(&script_sig));
         let mut script_sig2 = vec![];
@@ -305,36 +212,14 @@ fn test_get_transaction_sigop_cost() {
 
         assert_eq!(
             1,
-            get_transaction_sigop_cost(&spending_tx, &deps, flags_witness)
+            get_transaction_sigop_cost(TxRef::Owned(&spending_tx), &deps, flags_witness)
         );
     }
 
     // P2WSH witness program
     {
-        let mut creation_tx = Tx {
-            version: 0,
-            locktime: 0,
-            txins: Supercow::owned(SupercowVec {
-                inner: Supercow::owned(vec![]),
-            }),
-            txouts: Supercow::owned(SupercowVec {
-                inner: Supercow::owned(vec![]),
-            }),
-            witness_data: None,
-            hash: [0u8; 32],
-        };
-        let mut spending_tx = Tx {
-            version: 0,
-            locktime: 0,
-            txins: Supercow::owned(SupercowVec {
-                inner: Supercow::owned(vec![]),
-            }),
-            txouts: Supercow::owned(SupercowVec {
-                inner: Supercow::owned(vec![]),
-            }),
-            witness_data: None,
-            hash: [0u8; 32],
-        };
+        let mut creation_tx = TxOwned::default();
+        let mut spending_tx = TxOwned::default();
         let mut witness_script = vec![];
         witness_script.append_item(AppendableToScript::Int64(1));
         witness_script.append_item(AppendableToScript::ByteArray(&pubkey));
@@ -356,41 +241,19 @@ fn test_get_transaction_sigop_cost() {
 
         assert_eq!(
             2,
-            get_transaction_sigop_cost(&spending_tx, &deps, flags_witness)
+            get_transaction_sigop_cost(TxRef::Owned(&spending_tx), &deps, flags_witness)
         );
         // no sig ops if we dont verify the witness
         assert_eq!(
             0,
-            get_transaction_sigop_cost(&spending_tx, &deps, flags_no_witness)
+            get_transaction_sigop_cost(TxRef::Owned(&spending_tx), &deps, flags_no_witness)
         );
     }
 
     // P2WSH nested in P2SH
     {
-        let mut creation_tx = Tx {
-            version: 0,
-            locktime: 0,
-            txins: Supercow::owned(SupercowVec {
-                inner: Supercow::owned(vec![]),
-            }),
-            txouts: Supercow::owned(SupercowVec {
-                inner: Supercow::owned(vec![]),
-            }),
-            witness_data: None,
-            hash: [0u8; 32],
-        };
-        let mut spending_tx = Tx {
-            version: 0,
-            locktime: 0,
-            txins: Supercow::owned(SupercowVec {
-                inner: Supercow::owned(vec![]),
-            }),
-            txouts: Supercow::owned(SupercowVec {
-                inner: Supercow::owned(vec![]),
-            }),
-            witness_data: None,
-            hash: [0u8; 32],
-        };
+        let mut creation_tx = TxOwned::default();
+        let mut spending_tx = TxOwned::default();
         let mut witness_script = vec![];
         witness_script.append_item(AppendableToScript::Int64(1));
         witness_script.append_item(AppendableToScript::ByteArray(&pubkey));
@@ -414,46 +277,38 @@ fn test_get_transaction_sigop_cost() {
 
         assert_eq!(
             2,
-            get_transaction_sigop_cost(&spending_tx, &deps, flags_witness)
+            get_transaction_sigop_cost(TxRef::Owned(&spending_tx), &deps, flags_witness)
         );
     }
 }
 
 fn build_txs<'creation>(
-    spending_tx: &mut Tx,
-    creation_tx: &'creation mut Tx,
+    spending_tx: &mut TxOwned,
+    creation_tx: &'creation mut TxOwned,
     script_pubkey: Vec<u8>,
     script_sig: Vec<u8>,
     witness: Option<Vec<Vec<u8>>>,
-) -> Vec<&'creation TxOut<'creation>> {
+) -> Vec<TxOutRef<'creation>> {
     creation_tx.version = 1;
-    creation_tx.txins = Supercow::owned(SupercowVec {
-        inner: Supercow::owned(vec![]),
-    });
-    creation_tx.txouts = Supercow::owned(SupercowVec::from_owned(vec![TxOut {
+    creation_tx.txins = vec![];
+    creation_tx.txouts = vec![TxOutOwned {
         value: 1,
-        script: Supercow::owned(VarStr::from_owned(script_pubkey)),
-    }]));
+        script: script_pubkey,
+    }];
     creation_tx.witness_data = None;
 
     spending_tx.version = 1;
-    spending_tx.txins = Supercow::owned(SupercowVec::from_owned(vec![TxIn {
-        prevout_hash: Supercow::owned(creation_tx.hash),
+    spending_tx.txins = vec![TxInOwned {
+        prevout_hash: creation_tx.hash,
         prevout_index: 0,
         sequence: 0,
-        sig_script: Supercow::owned(VarStr::from_owned(script_sig)),
-    }]));
+        sig_script: script_sig,
+    }];
     if let Some(witness) = witness {
-        let mapped_to_varstrs = witness
-            .into_iter()
-            .map(VarStr::from_owned)
-            .collect::<Vec<VarStr>>();
-        spending_tx.witness_data = Some(Supercow::owned(SupercowVec::from_owned(vec![
-            SupercowVec::from_owned(mapped_to_varstrs),
-        ])));
+        spending_tx.witness_data = Some(vec![witness]);
     } else {
         spending_tx.witness_data = None;
     }
 
-    vec![&creation_tx.txouts.inner.first().unwrap()]
+    vec![TxOutRef::Owned(creation_tx.txouts.first().unwrap())]
 }

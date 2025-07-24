@@ -1,7 +1,6 @@
-use super::block::Block;
+use super::block::BlockBorrowed;
 use super::packetheader::{PacketHeader, read_header};
-use super::packetpayload::PacketPayloadType;
-use crate::packets::packetpayload::{deserialize_payload, read_payload};
+use crate::packets::packetpayload::{ReceivedPayload, deserialize_payload, read_payload};
 use crate::util::arena::Arena;
 use anyhow::Result;
 use deadpool::unmanaged::Pool;
@@ -55,17 +54,16 @@ pub struct PayloadWithAllocator {
     pub allocator_with_buffer: AllocatorWithBuffer,
     #[borrows(allocator_with_buffer)]
     #[covariant]
-    pub payload: Option<PacketPayloadType<'this>>,
+    pub payload: Option<ReceivedPayload<'this>>,
 }
 
 impl PayloadWithAllocator {
     pub fn with_block<F, R>(&self, user: F) -> R
     where
-        F: FnOnce(&Block) -> R,
+        F: FnOnce(&BlockBorrowed) -> R,
     {
         let payload = self.borrow_payload();
-        if let PacketPayloadType::Block(b) = payload.as_ref().expect("the payload to not be empty")
-        {
+        if let ReceivedPayload::Block(b) = payload.as_ref().expect("the payload to not be empty") {
             user(b)
         } else {
             unreachable!()
@@ -74,11 +72,10 @@ impl PayloadWithAllocator {
 
     pub async fn with_block_async<F>(&self, user: F)
     where
-        F: AsyncFnOnce(&Block) + Send,
+        F: AsyncFnOnce(&BlockBorrowed) + Send,
     {
         let payload = self.borrow_payload();
-        if let PacketPayloadType::Block(b) = payload.as_ref().expect("the payload to not be empty")
-        {
+        if let ReceivedPayload::Block(b) = payload.as_ref().expect("the payload to not be empty") {
             user(b).await
         } else {
             unreachable!()

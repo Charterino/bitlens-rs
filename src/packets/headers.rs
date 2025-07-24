@@ -1,61 +1,52 @@
 use crate::util::arena::Arena;
 
 use super::{
-    SupercowVec,
-    blockheader::BlockHeader,
-    deepclone::{DeepClone, MustOutlive},
-    packetpayload::{PacketPayload, Serializable, SerializableSupercowVecOfCows},
+    blockheader::{BlockHeaderBorrowed, BlockHeaderOwned},
+    deserialize_array,
+    packetpayload::{DeserializableBorrowed, PacketPayload, Serializable},
+    serialize_array,
 };
-use anyhow::bail;
-use supercow::Supercow;
 
-#[derive(Debug, Clone)]
-pub struct Headers<'a> {
-    pub inner: Supercow<'a, SupercowVec<'a, BlockHeader<'a>>>,
+#[derive(Debug, Clone, Copy, Default)]
+pub struct HeadersBorrowed<'a> {
+    pub inner: &'a [BlockHeaderBorrowed<'a>],
 }
 
 pub const HEADERS_COMMAND: [u8; 12] = *b"headers\0\0\0\0\0";
 
-impl<'old, 'new: 'old> PacketPayload<'old, 'new> for Headers<'old> {
+impl<'a> PacketPayload<'a, HeadersOwned> for HeadersBorrowed<'a> {
     fn command(&self) -> &'static [u8; 12] {
         &HEADERS_COMMAND
     }
 }
 
-impl<'old> MustOutlive<'old> for Headers<'old> {
-    type WithLifetime<'new: 'old> = Headers<'new>;
-}
-
-impl<'old, 'new: 'old> DeepClone<'old, 'new> for Headers<'old> {
-    fn deep_clone(&self) -> Self::WithLifetime<'new> {
-        let addys = (&*self.inner.inner)
-            .deep_clone()
-            .into_iter()
-            .map(Supercow::owned)
-            .collect();
-        Self::WithLifetime {
-            inner: Supercow::owned(SupercowVec {
-                inner: Supercow::owned(addys),
-            }),
-        }
-    }
-}
-
-impl<'a> Serializable<'a> for Headers<'a> {
-    fn deserialize(
+impl<'a> DeserializableBorrowed<'a> for HeadersBorrowed<'a> {
+    fn deserialize_borrowed(
+        &mut self,
         allocator: &'a Arena,
         buffer: &'a [u8],
-    ) -> anyhow::Result<(Supercow<'a, Self>, usize)> {
-        let (deserialized, consumed) = SupercowVec::deserialize(allocator, buffer)?;
-        match allocator.try_alloc(Self {
-            inner: Supercow::borrowed(deserialized),
-        }) {
-            Ok(result) => Ok((Supercow::borrowed(result), consumed)),
-            Err(e) => bail!(e),
-        }
+    ) -> anyhow::Result<usize> {
+        let (deserialized, consumed) = deserialize_array(allocator, buffer)?;
+        self.inner = deserialized;
+        Ok(consumed)
     }
+}
 
+#[derive(Debug, Clone, Default)]
+pub struct HeadersOwned {
+    pub inner: Vec<BlockHeaderOwned>,
+}
+
+impl Serializable for HeadersOwned {
     fn serialize(&self, stream: &mut impl bytes::BufMut) {
-        self.inner.serialize(stream);
+        serialize_array(&self.inner, stream);
+    }
+}
+
+impl From<HeadersBorrowed<'_>> for HeadersOwned {
+    fn from(value: HeadersBorrowed<'_>) -> Self {
+        Self {
+            inner: value.inner.iter().map(|v| (*v).into()).collect(),
+        }
     }
 }

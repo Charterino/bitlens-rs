@@ -2,8 +2,8 @@ use crate::{
     db::{self, rocksdb::SerializedTx},
     packets::{
         buffer::Buffer,
-        tx::{Tx, TxOut},
-        varint::{VarInt, varint_len, varint_serialize},
+        tx::{TxOutRef, TxOwned, TxRef},
+        varint::{VarInt, length_varint, serialize_varint_into_slice},
     },
     util::arena::Arena,
 };
@@ -28,7 +28,7 @@ pub struct AnalyzedTx {
     pub txouts_sum: u64,
     pub size_wus: u32,
     pub sigops: u32,
-    pub tx: Tx<'static>,
+    pub tx: TxOwned,
 }
 
 pub fn deserialize_analyzed_tx(data: &[u8], hash: [u8; 32]) -> AnalyzedTx {
@@ -37,7 +37,7 @@ pub fn deserialize_analyzed_tx(data: &[u8], hash: [u8; 32]) -> AnalyzedTx {
     let size_wus = data.get_u32_le(16).expect("to deserialize size_wus");
     let sigops = data.get_u32_le(20).expect("to deserialize sigops");
 
-    let tx = Tx::deserialize_without_txouts(
+    let tx = TxOwned::deserialize_without_txouts(
         data.with_offset(24)
             .expect("to offset before deserializing tx"),
         hash,
@@ -54,8 +54,8 @@ pub fn deserialize_analyzed_tx(data: &[u8], hash: [u8; 32]) -> AnalyzedTx {
 }
 
 pub fn analyze_tx<'arena, 'data>(
-    tx: &'data Tx,
-    dependencies: &'data [&'data TxOut],
+    tx: TxRef<'data>,
+    dependencies: &'data [TxOutRef<'data>],
     arena: &'arena Arena,
 ) -> db::rocksdb::SerializedTx<'arena> {
     let fee = if tx.is_coinbase() {
@@ -64,12 +64,12 @@ pub fn analyze_tx<'arena, 'data>(
         calculate_fee(tx, dependencies)
     };
 
-    let txouts_sum: u64 = tx.txouts.inner.iter().map(|x| x.value).sum();
+    let txouts_sum: u64 = tx.txouts().map(|x| x.value()).sum();
 
     let size_wus = calculate_tx_size_wus(tx);
 
     let mut flags = SCRIPT_VERIFY_P2SH;
-    if tx.witness_data.is_some() {
+    if tx.witness_data().is_some() {
         flags |= SCRIPT_VERIFY_WITNESS;
     }
 
@@ -89,7 +89,7 @@ pub fn analyze_tx<'arena, 'data>(
 
     let tx_outs = serialize_txouts(tx, arena);
     SerializedTx {
-        hash: tx.hash,
+        hash: tx.hash(),
         analyzed_tx: Some(analyzed_tx),
         tx_outs: Some(tx_outs),
         fee,
@@ -98,24 +98,22 @@ pub fn analyze_tx<'arena, 'data>(
     }
 }
 
-fn serialize_txouts<'arena>(tx: &Tx, arena: &'arena Arena) -> &'arena [u8] {
-    let len_size = varint_len(tx.txouts.inner.len() as VarInt);
-    let mut size = len_size;
-    for txout in tx.txouts.inner.iter() {
+fn serialize_txouts<'arena>(tx: TxRef, arena: &'arena Arena) -> &'arena [u8] {
+    let mut size = length_varint(tx.txouts().count() as VarInt);
+    for txout in tx.txouts() {
         size += txout.serialized_length();
     }
     let result = arena
         .try_alloc_array_fill_copy(size, 0u8)
         .expect("to allocate space for txouts");
 
-    varint_serialize(tx.txouts.inner.len() as VarInt, result);
-    let mut new_size = len_size;
-    for txout in tx.txouts.inner.iter() {
-        let with_offset = result.get_mut(new_size..).unwrap();
-        new_size += txout.flat_serialize(with_offset);
+    let mut offset = serialize_varint_into_slice(tx.txouts().count() as VarInt, result);
+    for txout in tx.txouts() {
+        let with_offset = result.get_mut(offset..).unwrap();
+        offset += txout.flat_serialize(with_offset);
     }
 
-    debug_assert_eq!(size, new_size);
+    debug_assert_eq!(size, offset);
 
     result
 }

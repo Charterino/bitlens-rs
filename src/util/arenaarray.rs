@@ -1,5 +1,6 @@
 use std::{marker::PhantomData, ptr};
 
+#[derive(Debug, Clone, Copy)]
 pub struct ArenaArray<'arena, T> {
     ptr: *mut T,
     len: usize,

@@ -2,10 +2,7 @@ use rocksdb::{SerializedTx, setup_rocksdb, write_block_txs, write_txouts, write_
 use sqlite::{mark_blocks_as_downloaded, setup_sqlite};
 
 use crate::{
-    packets::{
-        packetpayload::SerializableValue,
-        varint::{VarInt, varint_len},
-    },
+    packets::varint::{VarInt, length_varint, serialize_varint},
     types::blockmetrics::BlockMetrics,
 };
 
@@ -34,9 +31,9 @@ pub async fn write_analyzed_txs(
         .iter()
         .map(|block| block.iter().map(|tx| tx.hash).collect::<Vec<[u8; 32]>>())
         .map(|hashes| {
-            let length = varint_len(hashes.len() as VarInt);
+            let length = length_varint(hashes.len() as VarInt);
             let mut serialized = Vec::with_capacity(length + (hashes.len() * 32));
-            (hashes.len() as VarInt).serialize(&mut serialized);
+            serialize_varint(hashes.len() as VarInt, &mut serialized);
 
             for tx in hashes {
                 serialized.extend_from_slice(&tx);

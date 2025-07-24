@@ -2,7 +2,6 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Error, Result, bail};
 use slog_scope::{debug, info};
-use supercow::Supercow;
 use tokio::time::{self, Instant, sleep};
 
 use crate::{
@@ -11,7 +10,7 @@ use crate::{
     packets::{
         getaddr::GetAddr,
         network_id::NetworkId,
-        packetpayload::{InvalidChecksum, PacketPayloadType},
+        packetpayload::{InvalidChecksum, PayloadToSend, ReceivedPayload},
     },
     types::addressportnetwork::AddressPortNetwork,
 };
@@ -156,12 +155,12 @@ async fn crawl(peer: &AddressPortNetwork, res: &mut CrawlResult) -> Result<()> {
         peer.clone(),
         connection.remote_version.services,
         connection.remote_version.start_height,
-        connection.remote_version.user_agent.inner.to_vec(),
+        connection.remote_version.user_agent,
     )
     .await;
     connection
         .inner
-        .write_packet(&PacketPayloadType::GetAddr(Supercow::owned(GetAddr {})))
+        .write_packet(&PayloadToSend::GetAddr(GetAddr {}))
         .await?;
     loop {
         {
@@ -177,15 +176,15 @@ async fn crawl(peer: &AddressPortNetwork, res: &mut CrawlResult) -> Result<()> {
     }
 }
 
-fn handle_payload(payload: &PacketPayloadType) {
+fn handle_payload(payload: &ReceivedPayload) {
     match payload {
-        PacketPayloadType::Addr(addys) => {
+        ReceivedPayload::Addr(addys) => {
             let time = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_secs();
-            let mut apns = Vec::with_capacity(addys.inner.inner.len());
-            for addy in addys.inner.inner.iter() {
+            let mut apns = Vec::with_capacity(addys.inner.len());
+            for addy in addys.inner.iter() {
                 let (network_id, addy_bytes) = match *addy.addr {
                     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, a, b, c, d] => {
                         (NetworkId::IPv4, vec![a, b, c, d])
@@ -200,16 +199,16 @@ fn handle_payload(payload: &PacketPayloadType) {
             }
             tokio::spawn(peers_seen(apns, time));
         }
-        PacketPayloadType::AddrV2(addys) => {
+        ReceivedPayload::AddrV2(addys) => {
             let time = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_secs();
-            let mut apns = Vec::with_capacity(addys.inner.inner.len());
-            for addy in addys.inner.inner.iter() {
-                let (network_id, addy_bytes) = match (addy.network_id, addy.address.inner.len()) {
-                    (NetworkId::IPv4, 4) => (NetworkId::IPv4, addy.address.inner.to_vec()),
-                    (NetworkId::IPv6, 16) => match addy.address.inner.get(0..16).unwrap() {
+            let mut apns = Vec::with_capacity(addys.inner.len());
+            for addy in addys.inner.iter() {
+                let (network_id, addy_bytes) = match (addy.network_id, addy.address.len()) {
+                    (NetworkId::IPv4, 4) => (NetworkId::IPv4, addy.address.to_vec()),
+                    (NetworkId::IPv6, 16) => match addy.address.get(0..16).unwrap() {
                         [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, a, b, c, d] => {
                             (NetworkId::IPv4, vec![*a, *b, *c, *d])
                         }
@@ -227,10 +226,10 @@ fn handle_payload(payload: &PacketPayloadType) {
             }
             tokio::spawn(peers_seen(apns, time));
         }
-        PacketPayloadType::Block(_block) => {
+        ReceivedPayload::Block(_block) => {
             // TODO
         }
-        PacketPayloadType::Inv(_inv) => {
+        ReceivedPayload::Inv(_inv) => {
             // TODO
         }
         _ => {}

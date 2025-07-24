@@ -1,110 +1,53 @@
-use crate::util::arena::Arena;
+use anyhow::{Result, bail};
+use bytes::BufMut;
 
 use super::{
-    deepclone::{DeepClone, MustOutlive},
-    packetpayload::{DeserializableOwned, Serializable, SerializableValue},
-    varint::VarInt,
+    packetpayload::{DeserializableBorrowed, DeserializableOwned, Serializable},
+    varint::{deserialize_varint, length_varint, serialize_varint},
 };
-use anyhow::{Result, anyhow, bail};
-use bytes::BufMut;
-use supercow::Supercow;
 
-// not necessarily valid UTF-8
-#[derive(Debug, Clone)]
-pub struct VarStr<'a> {
-    pub inner: Supercow<'a, Vec<u8>, [u8]>,
+const fn length_varstr(v: &[u8]) -> usize {
+    length_varint(v.len() as u64) + v.len()
 }
 
-impl VarStr<'_> {
-    pub fn from_owned(data: Vec<u8>) -> Self {
-        Self {
-            inner: Supercow::owned(data),
-        }
+pub fn serialize_varstr(v: &[u8], into: &mut impl BufMut) -> usize {
+    let starting = serialize_varint(v.len() as u64, into);
+    into.put_slice(v);
+    starting + v.len()
+}
+
+pub fn deserialize_varstr(buffer: &[u8]) -> Result<(&[u8], usize)> {
+    let (length, offset) = deserialize_varint(buffer)?;
+    if buffer.len() < length as usize + offset {
+        bail!("not enough data")
     }
+    Ok((
+        &buffer[offset..(offset + length as usize)],
+        offset + length as usize,
+    ))
 }
 
-impl<'old> MustOutlive<'old> for VarStr<'old> {
-    type WithLifetime<'new: 'old> = VarStr<'new>;
-}
-
-impl<'old, 'new: 'old> DeepClone<'old, 'new> for VarStr<'old> {
-    fn deep_clone(&self) -> Self::WithLifetime<'new> {
-        let cloned = self.inner.as_ref().to_vec();
-        Self::WithLifetime {
-            inner: Supercow::owned(cloned),
-        }
-    }
-}
-
-impl<'a> Serializable<'a> for VarStr<'a> {
-    fn deserialize(
-        allocator: &'a Arena,
+impl<'a> DeserializableBorrowed<'a> for &'a [u8] {
+    fn deserialize_borrowed(
+        &mut self,
+        _: &'a crate::util::arena::Arena,
         buffer: &'a [u8],
-    ) -> Result<(Supercow<'a, VarStr<'a>>, usize)> {
-        let (length, offset) = VarInt::deserialize(buffer)?;
-
-        match buffer.get(offset..offset + length as usize) {
-            Some(v) => match allocator.try_alloc(Self {
-                inner: Supercow::borrowed(v),
-            }) {
-                Ok(v) => Ok((Supercow::borrowed(v), offset + length as usize)),
-                Err(e) => bail!(e),
-            },
-            None => Err(anyhow!("not enough bytes for varstr")),
-        }
+    ) -> Result<usize> {
+        let (res, consumed) = deserialize_varstr(buffer)?;
+        *self = res;
+        Ok(consumed)
     }
+}
 
+impl Serializable for Vec<u8> {
     fn serialize(&self, stream: &mut impl BufMut) {
-        let len = self.inner.len() as VarInt;
-        len.serialize(stream);
-        let r = self.inner.as_ref();
-        stream.put(r);
+        serialize_varstr(self, stream);
     }
 }
 
-impl<'buffer, 'result: 'buffer> SerializableValue<'buffer> for VarStr<'result> {
-    fn deserialize(buffer: &'buffer [u8]) -> Result<(VarStr<'result>, usize)> {
-        let (length, offset) = VarInt::deserialize(buffer)?;
-
-        match buffer.get(offset..offset + length as usize) {
-            Some(v) => Ok((
-                Self {
-                    inner: Supercow::owned(v.to_vec()),
-                },
-                offset + length as usize,
-            )),
-            None => Err(anyhow!("not enough bytes for varstr")),
-        }
-    }
-
-    fn serialize(&self, stream: &mut impl BufMut) {
-        let len = self.inner.len() as VarInt;
-        len.serialize(stream);
-        let r = self.inner.as_ref();
-        stream.put(r);
-    }
-}
-
-impl From<&str> for VarStr<'_> {
-    fn from(value: &str) -> Self {
-        Self {
-            inner: Supercow::owned(value.as_bytes().to_vec()),
-        }
-    }
-}
-
-impl DeserializableOwned for VarStr<'static> {
-    fn deserialize_owned(buffer: &[u8]) -> Result<(Supercow<'static, Self>, usize)> {
-        let (length, offset) = VarInt::deserialize(buffer)?;
-
-        match buffer.get(offset..offset + length as usize) {
-            Some(v) => Ok((
-                Supercow::owned(Self {
-                    inner: Supercow::owned(v.to_vec()),
-                }),
-                offset + length as usize,
-            )),
-            None => Err(anyhow!("not enough bytes for varstr")),
-        }
+impl DeserializableOwned for Vec<u8> {
+    fn deserialize_owned(buffer: &[u8]) -> Result<(Self, usize)> {
+        let (res, consumed) = deserialize_varstr(buffer)?;
+        Ok((res.to_vec(), consumed))
     }
 }

@@ -5,13 +5,12 @@ use crate::{
     chainman::{CHAIN, validate_and_apply_headers},
     ok_or_break,
     packets::{
-        SupercowVec, blockheader::BlockHeader, getheaders::GetHeaders,
-        packetpayload::PacketPayloadType,
+        getheaders::GetHeadersOwned,
+        packetpayload::{PayloadToSend, ReceivedPayload},
     },
     with_deadline,
 };
 use slog_scope::info;
-use supercow::Supercow;
 use tokio::time::Instant;
 
 use super::{SYNCING_HEADERS, build_get_headers, need_ihd};
@@ -40,8 +39,8 @@ pub async fn sync_headers() {
             drop(packet);
 
             if let Some(responses) = responses {
-                for r in &responses {
-                    if connection.inner.write_packet(r).await.is_err() {
+                for r in responses {
+                    if connection.inner.write_packet(&r).await.is_err() {
                         need_break = true;
                         continue;
                     }
@@ -52,26 +51,17 @@ pub async fn sync_headers() {
     SYNCING_HEADERS.store(false, Ordering::Relaxed);
 }
 
-fn handle_packet_during_headersync<'packet, 'ret: 'packet, 'params: 'ret>(
-    packet: &PacketPayloadType<'packet>,
+fn handle_packet_during_headersync(
+    packet: &ReceivedPayload<'_>,
     need_break: &mut bool,
     deadline: &mut Instant,
-) -> Option<Vec<PacketPayloadType<'ret>>> {
-    if let PacketPayloadType::Headers(headers) = packet {
-        if headers.inner.inner.is_empty() {
+) -> Option<Vec<PayloadToSend>> {
+    if let ReceivedPayload::Headers(headers) = packet {
+        if headers.inner.is_empty() {
             *need_break = true;
             return None;
         }
-        if validate_and_apply_headers(
-            &headers
-                .inner
-                .inner
-                .iter()
-                .map(|x| x.as_ref())
-                .collect::<Vec<&BlockHeader>>(),
-        )
-        .is_err()
-        {
+        if validate_and_apply_headers(headers.inner).is_err() {
             *need_break = true;
             return None;
         }
@@ -79,17 +69,11 @@ fn handle_packet_during_headersync<'packet, 'ret: 'packet, 'params: 'ret>(
         info!("chainman: header sync progress"; "top hash" => r.top_header.header.human_hash(), "top number" => r.top_header.number);
         *deadline = Instant::now().checked_add(HEADERS_TIMEOUT).unwrap();
         if need_ihd() {
-            return Some(vec![PacketPayloadType::GetHeaders(Supercow::owned(
-                GetHeaders {
-                    version: 70016,
-                    block_locator: Supercow::owned(SupercowVec {
-                        inner: Supercow::owned(vec![Supercow::owned(
-                            headers.inner.inner.last().unwrap().hash,
-                        )]),
-                    }),
-                    hash_stop: Supercow::owned([0u8; 32]),
-                },
-            ))]);
+            return Some(vec![PayloadToSend::GetHeaders(GetHeadersOwned {
+                version: 70016,
+                block_locator: vec![headers.inner.last().unwrap().hash],
+                hash_stop: [0u8; 32],
+            })]);
         } else {
             *need_break = true;
             return None;

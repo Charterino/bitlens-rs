@@ -96,7 +96,7 @@ pub fn get_alive_peer(services: Option<u64>) -> Option<AddressPortNetwork> {
     r.random(services)
 }
 
-pub async fn connect_to_good_peer(services: Option<u64>) -> HandshakedConnection<'static> {
+pub async fn connect_to_good_peer(services: Option<u64>) -> HandshakedConnection {
     loop {
         let peer = get_alive_peer(services);
         match peer {

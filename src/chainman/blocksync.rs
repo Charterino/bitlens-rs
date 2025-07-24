@@ -7,7 +7,6 @@ use std::{
 };
 
 use slog_scope::info;
-use supercow::Supercow;
 use tokio::{
     join,
     sync::mpsc::{Receiver, Sender, channel},
@@ -19,14 +18,12 @@ use crate::{
     db::{self, rocksdb::SerializedTx, write_analyzed_txs},
     ok_or_break, ok_or_continue, ok_or_return,
     packets::{
-        SupercowVec,
-        block::Block,
-        getdata::GetData,
-        invvector::{InventoryVector, InventoryVectorType},
+        block::BlockBorrowed,
+        getdata::GetDataOwned,
+        invvector::{InventoryVectorOwned, InventoryVectorType},
         packet::{self, MAX_PACKET_SIZE, PayloadWithAllocator},
-        packetpayload::PacketPayloadType,
-        tx::TxOut,
-        varstr::VarStr,
+        packetpayload::{PayloadToSend, ReceivedPayload},
+        tx::{TxOutBorrowed, TxOutOwned, TxOutRef, TxRef},
     },
     some_or_return, tx,
     types::blockmetrics::BlockMetrics,
@@ -294,7 +291,7 @@ async fn run_download_worker(master: Sender<DownloadWorkerMessage>) {
             let packet = ok_or_break!(with_deadline!(connection.inner.read_packet(), deadline));
             // We have a packet from the remote peer we're connected to!
             let should_send = packet.payload.with_payload(|payload| {
-                if let Some(PacketPayloadType::Block(b)) = payload {
+                if let Some(ReceivedPayload::Block(b)) = payload {
                     return b.header.hash == job;
                 }
                 false
@@ -328,23 +325,21 @@ async fn fetch_job(
     }
 }
 
-fn job_to_getdata(hash: [u8; 32]) -> PacketPayloadType<'static> {
-    PacketPayloadType::GetData(Supercow::owned(GetData {
-        inner: Supercow::owned(SupercowVec {
-            inner: Supercow::owned(vec![Supercow::owned(InventoryVector {
-                inv_type: InventoryVectorType::WitnessBlock,
-                hash: Supercow::owned(hash),
-            })]),
-        }),
-    }))
+fn job_to_getdata(hash: [u8; 32]) -> PayloadToSend {
+    PayloadToSend::GetData(GetDataOwned {
+        inner: vec![InventoryVectorOwned {
+            inv_type: InventoryVectorType::WitnessBlock,
+            hash,
+        }],
+    })
 }
 
 const MAX_BLOCKS_PER_FLUSH: usize = 1024;
 const ANALYZED_OVERHEAD_PER_BLOCK: usize = 4096 * 24;
 type AnalyzedBlock<'a> = &'a [SerializedTx<'a>];
 struct ChainSyncState<'current, 'previous> {
-    current_txouts: HashMap<[u8; 32], Vec<&'current TxOut<'current>>>,
-    previous_txouts: HashMap<[u8; 32], Vec<&'previous TxOut<'previous>>>,
+    current_txouts: HashMap<[u8; 32], Vec<&'current TxOutBorrowed<'current>>>,
+    previous_txouts: HashMap<[u8; 32], Vec<&'previous TxOutBorrowed<'previous>>>,
     current_analyzed: Vec<AnalyzedBlock<'current>>,
     current_metrics: Vec<BlockMetrics>,
 }
@@ -459,7 +454,7 @@ async fn get_next_batch_to_flush<'current, 'previous>(
                     b.0.borrow_payload()
                         .as_ref()
                         .expect("the payload to not be empty");
-                if let PacketPayloadType::Block(block) = payload {
+                if let ReceivedPayload::Block(block) = payload {
                     current_blocks.push(block.header.hash);
                     let mut w = current_state.write().unwrap();
                     insert_transactions_from_block(block, current_arena, &mut w.current_txouts)
@@ -489,21 +484,19 @@ async fn get_next_batch_to_flush<'current, 'previous>(
     current_blocks
 }
 
+// Moves all txouts from the block's arena into the current arena
 fn insert_transactions_from_block<'arena>(
-    block: &Block<'_>,
+    block: &BlockBorrowed<'_>,
     arena: &'arena Arena,
-    txouts: &mut HashMap<[u8; 32], Vec<&'arena TxOut<'arena>>>,
+    txouts: &mut HashMap<[u8; 32], Vec<&'arena TxOutBorrowed<'arena>>>,
 ) -> Result<()> {
-    for tx in block.txs.inner.iter() {
-        let mut cloned = Vec::with_capacity(tx.txouts.inner.len());
-        for txout in tx.txouts.inner.iter() {
-            let cloned_script = arena.try_alloc_array_copy(txout.script.inner.as_ref())?;
-            let cloned_varstr = arena.try_alloc(VarStr {
-                inner: Supercow::borrowed(cloned_script),
-            })?;
-            let txout = arena.try_alloc(TxOut {
+    for tx in block.txs.iter() {
+        let mut cloned = Vec::with_capacity(tx.txouts.len());
+        for txout in tx.txouts.iter() {
+            let cloned_script = arena.try_alloc_array_copy(txout.script)?;
+            let txout = arena.try_alloc(TxOutBorrowed {
                 value: txout.value,
-                script: Supercow::borrowed(cloned_varstr),
+                script: cloned_script,
             })?;
             cloned.push(&*txout);
         }
@@ -533,42 +526,41 @@ async fn process_block<'arena>(
             // - previous_txouts: last batch of block that is already processed and is being flushed to disk
             // - deps_from_disk
             let analyzed_txs = analyzed_arena
-                .try_alloc_array_fill_copy(block.txs.inner.len(), SerializedTx::default())
+                .try_alloc_array_fill_copy(block.txs.len(), SerializedTx::default())
                 .expect("to have allocated analyzed_txs");
 
             // keep track of metrics as we go
             let mut fees_total = 0;
             let mut volume = 0;
-            let mut fee_rates = Vec::with_capacity(block.txs.inner.len() - 1);
+            let mut fee_rates = Vec::with_capacity(block.txs.len() - 1);
 
-            for (tx_idx, tx) in block.txs.inner.iter().enumerate() {
+            for (tx_idx, tx) in block.txs.iter().enumerate() {
                 // Assemble the dependencies
-                let mut deps = Vec::with_capacity(tx.txins.inner.len());
-                for txin_idx in 0..tx.txins.inner.len() {
-                    let txin = &tx.txins.inner[txin_idx];
+                let mut deps = Vec::with_capacity(tx.txins.len());
+                for txin_idx in 0..tx.txins.len() {
+                    let txin = &tx.txins[txin_idx];
                     if *txin.prevout_hash == [0u8; 32] {
                         continue;
                     }
                     // Is it in current_txouts?..
-                    if let Some(txouts) = current_txouts.get(&*txin.prevout_hash) {
+                    if let Some(txouts) = current_txouts.get(txin.prevout_hash) {
                         let p = *txouts.get(txin.prevout_index as usize).unwrap();
-                        deps.push(p);
+                        deps.push(TxOutRef::Borrowed(p));
                         continue;
                     }
                     // Maybe in previous_txouts?..
-                    if let Some(txouts) = previous_txouts.get(&*txin.prevout_hash) {
+                    if let Some(txouts) = previous_txouts.get(txin.prevout_hash) {
                         let p = *txouts.get(txin.prevout_index as usize).unwrap();
-                        deps.push(p);
+                        deps.push(TxOutRef::Borrowed(p));
                         continue;
                     }
                     // Must be in deps_from_disk at `current_deps_index`
-                    let dep: &TxOut<'static> = &deps_from_disk[deps_from_disk_index];
-                    let c: &TxOut<'arena> = dep.covariant();
-                    deps.push(c);
+                    let dep: &TxOutOwned = &deps_from_disk[deps_from_disk_index];
+                    deps.push(TxOutRef::Owned(dep));
                     deps_from_disk_index += 1;
                 }
                 // Analyze this tx
-                let analyzed = tx::analyze_tx(tx, &deps, analyzed_arena);
+                let analyzed = tx::analyze_tx(TxRef::Borrowed(tx), &deps, analyzed_arena);
                 analyzed_txs[tx_idx] = analyzed;
                 if tx_idx != 0 {
                     let size_vbytes = f64::ceil(analyzed.size_wus as f64 / 4.);
@@ -599,7 +591,7 @@ async fn process_block<'arena>(
             w.current_metrics[index_into_analyzed_and_metrics] = BlockMetrics {
                 fees_total,
                 volume,
-                txs_count: block.txs.inner.len() as u64,
+                txs_count: block.txs.len() as u64,
                 average_fee_rate: average,
                 lowest_fee_rate: lowest,
                 highest_fee_rate: highest,
@@ -610,27 +602,27 @@ async fn process_block<'arena>(
 }
 
 async fn fetch_missing_dependencies(
-    block: &Block<'_>,
+    block: &BlockBorrowed<'_>,
     current_state: Arc<RwLock<ChainSyncState<'_, '_>>>,
-) -> Vec<TxOut<'static>> {
+) -> Vec<TxOutOwned> {
     let loaded_deps = Arc::new(Mutex::new(Vec::new()));
     let mut loaded_deps_handles = Vec::new();
     {
         let r = current_state.read().unwrap();
         let mut w = loaded_deps.lock().unwrap();
-        for tx in block.txs.inner.iter() {
-            for txin_idx in 0..tx.txins.inner.len() {
-                let txin = &tx.txins.inner[txin_idx];
+        for tx in block.txs.iter() {
+            for txin_idx in 0..tx.txins.len() {
+                let txin = &tx.txins[txin_idx];
                 // Skip empty hashes
                 if *txin.prevout_hash == [0u8; 32] {
                     continue;
                 }
                 // Skip hashes that we have in current_txouts
-                if r.current_txouts.contains_key(&*txin.prevout_hash) {
+                if r.current_txouts.contains_key(txin.prevout_hash) {
                     continue;
                 }
                 // Skip hashes that we have in previous_txouts
-                if r.previous_txouts.contains_key(&*txin.prevout_hash) {
+                if r.previous_txouts.contains_key(txin.prevout_hash) {
                     continue;
                 }
                 w.push(None);
@@ -667,7 +659,7 @@ async fn fetch_missing_dependencies(
 async fn fetch_dependency_and_insert(
     txout_hash: [u8; 32],
     txout_index: usize,
-    deps: Arc<Mutex<Vec<Option<TxOut<'static>>>>>,
+    deps: Arc<Mutex<Vec<Option<TxOutOwned>>>>,
     deps_index: usize,
 ) {
     let txouts = db::rocksdb::get_transaction_outputs(txout_hash)

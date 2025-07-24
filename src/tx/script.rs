@@ -8,7 +8,7 @@ use super::{
     },
 };
 use crate::{
-    packets::tx::{Tx, TxOut},
+    packets::tx::{TxOutRef, TxRef},
     some_or_break,
     tx::opcodes::OP_INVALIDOPCODE,
     util::hash::hash160,
@@ -133,7 +133,7 @@ pub fn get_script_for_destination(destination: Destination) -> Vec<u8> {
     }
 }
 
-pub fn get_transaction_sigop_cost(tx: &Tx, dependencies: &[&TxOut], flags: ScriptFlags) -> u32 {
+pub fn get_transaction_sigop_cost(tx: TxRef, dependencies: &[TxOutRef], flags: ScriptFlags) -> u32 {
     let mut sigops = 4 * get_legacy_sigops(tx);
 
     if tx.is_coinbase() {
@@ -145,40 +145,37 @@ pub fn get_transaction_sigop_cost(tx: &Tx, dependencies: &[&TxOut], flags: Scrip
     }
 
     if flags & SCRIPT_VERIFY_WITNESS != 0 {
-        debug_assert!(tx.witness_data.is_some());
+        debug_assert!(tx.witness_data().is_some());
 
-        for (txin_idx, txin) in tx.txins.inner.iter().enumerate() {
-            let txout = dependencies[txin_idx];
+        for (txin_idx, txin) in tx.txins().enumerate() {
+            let txout = &dependencies[txin_idx];
 
-            let a = &tx.witness_data.as_ref().unwrap().inner[txin_idx];
-            sigops += count_witness_sigops(
-                &txin.sig_script.inner,
-                &txout.script.inner,
-                &a.inner
-                    .iter()
-                    .map(|x| x.inner.as_ref())
-                    .collect::<Vec<&[u8]>>(),
-                flags,
-            );
+            let wd = tx.witness_data().unwrap();
+            match wd {
+                either::Either::Left(wd) => {
+                    let a: Vec<_> = wd[txin_idx].iter().map(|v| v.as_slice()).collect();
+                    sigops += count_witness_sigops(txin.sig_script(), txout.script(), &a, flags);
+                }
+                either::Either::Right(wd) => {
+                    let a = wd[txin_idx];
+                    sigops += count_witness_sigops(txin.sig_script(), txout.script(), a, flags);
+                }
+            }
         }
     }
 
     sigops
 }
 
-pub fn get_legacy_sigops(tx: &Tx) -> u32 {
+pub fn get_legacy_sigops(tx: TxRef) -> u32 {
     let txins_sigops: u32 = tx
-        .txins
-        .inner
-        .iter()
-        .map(|x| get_sigop_count(&x.sig_script.inner, false))
+        .txins()
+        .map(|x| get_sigop_count(x.sig_script(), false))
         .sum();
 
     let txouts_sigops: u32 = tx
-        .txouts
-        .inner
-        .iter()
-        .map(|x| get_sigop_count(&x.script.inner, false))
+        .txouts()
+        .map(|x| get_sigop_count(x.script(), false))
         .sum();
 
     txins_sigops + txouts_sigops
@@ -208,18 +205,18 @@ pub fn get_sigop_count(script: &[u8], accurate: bool) -> u32 {
     total
 }
 
-pub fn get_p2sh_sigop_count(tx: &Tx, dependencies: &[&TxOut]) -> u32 {
+pub fn get_p2sh_sigop_count(tx: TxRef, dependencies: &[TxOutRef]) -> u32 {
     if tx.is_coinbase() {
         return 0;
     }
 
     let mut total = 0;
 
-    for (i, txin) in tx.txins.inner.iter().enumerate() {
-        let txout = dependencies[i];
+    for (i, txin) in tx.txins().enumerate() {
+        let txout = &dependencies[i];
 
-        if is_pay_to_script_hash(&txout.script.inner) {
-            total += get_sigop_count2(&txout.script.inner, &txin.sig_script.inner);
+        if is_pay_to_script_hash(txout.script()) {
+            total += get_sigop_count2(txout.script(), txin.sig_script());
         }
     }
 

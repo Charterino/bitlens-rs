@@ -1,13 +1,13 @@
 use std::{alloc::System, sync::atomic::AtomicUsize};
 
-use supercow::Supercow;
 use tracking_allocator::{
     AllocationGroupId, AllocationGroupToken, AllocationRegistry, AllocationTracker, Allocator,
 };
 
-use crate::{packets::tx::Tx, util::arena::Arena};
-
-use super::packetpayload::Serializable;
+use crate::{
+    packets::{packetpayload::DeserializableBorrowed, tx::TxBorrowed},
+    util::arena::Arena,
+};
 
 // This is where we actually set the global allocator to be the shim allocator implementation from `tracking_allocator`.
 // This allocator is purely a facade to the logic provided by the crate, which is controlled by setting a global tracker
@@ -75,12 +75,11 @@ fn test_deserialize_safety() {
     let alloc_guard = token.enter();
 
     {
-        let MAX_PACKET_SIZE: usize = 4 * 1024 * 1024;
-        let b = Arena::new(MAX_PACKET_SIZE);
-        let deserialized: (Supercow<Tx>, usize) =
-            Serializable::deserialize(&b, &raw_block).unwrap();
-        println!("{}", deserialized.1);
-        drop(deserialized);
+        let max_packet_size: usize = 4 * 1024 * 1024;
+        let b = Arena::new(max_packet_size);
+        let tx = b.try_alloc_default::<TxBorrowed>().unwrap();
+        let consumed = tx.deserialize_borrowed(&b, &raw_block).unwrap();
+        println!("{}", consumed);
     }
 
     drop(alloc_guard);

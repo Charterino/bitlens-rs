@@ -1,186 +1,41 @@
 use crate::util::arena::Arena;
 
 use super::{
-    SupercowVec,
+    EMPTY_HASH,
     buffer::Buffer,
-    deepclone::{DeepClone, MustOutlive},
-    packetpayload::{
-        DeserializableOwned, PacketPayload, Serializable, SerializableSupercowVecOfCows,
-        SerializableSupercowVecOfCowsOwned, SerializableValue,
-    },
-    varint::{VarInt, varint_len, varint_serialize},
-    varstr::VarStr,
+    deserialize_array, deserialize_array_owned,
+    packetpayload::{DeserializableBorrowed, DeserializableOwned, PacketPayload, Serializable},
+    serialize_array,
+    varint::{VarInt, length_varint, serialize_varint, serialize_varint_into_slice},
+    varstr::{deserialize_varstr, serialize_varstr},
 };
 use anyhow::{Result, anyhow, bail};
+use either::Either;
 use sha2::{Digest, Sha256};
-use supercow::Supercow;
 
-#[derive(Debug, Clone)]
-pub struct Tx<'a> {
+#[derive(Debug, Clone, Copy, Default)]
+pub struct TxBorrowed<'a> {
     pub version: u32,
     pub locktime: u32,
-    pub txins: Supercow<'a, SupercowVec<'a, TxIn<'a>>>,
-    pub txouts: Supercow<'a, SupercowVec<'a, TxOut<'a>>>,
-    pub witness_data: Option<Supercow<'a, SupercowVec<'a, SupercowVec<'a, VarStr<'a>>>>>,
+    pub txins: &'a [TxInBorrowed<'a>],
+    pub txouts: &'a [TxOutBorrowed<'a>],
+    pub witness_data: Option<&'a [&'a [&'a [u8]]]>,
     pub hash: [u8; 32], // calculated during deserialization
 }
 
-impl Tx<'_> {
-    pub fn is_coinbase(&self) -> bool {
-        self.txins.inner.len() == 1 && self.txins.inner[0].is_empty()
-    }
-
-    pub fn serialized_without_txouts_size(&self) -> usize {
-        let mut total = 4; // version
-        if self.witness_data.is_some() {
-            total += 2; // witness marker
-        }
-        total += varint_len(self.txins.inner.len() as VarInt); // txins len len
-        for txin in self.txins.inner.iter() {
-            total += 40; // hash + index + sequence
-            total += varint_len(txin.sig_script.inner.len() as VarInt); // script len len
-            total += txin.sig_script.inner.len(); // script len
-        }
-
-        if let Some(witnesses) = &self.witness_data {
-            for i in 0..witnesses.inner.len() {
-                let witness = &witnesses.inner[i];
-                total += varint_len(witness.inner.len() as VarInt); // component count len
-                for j in 0..witness.inner.len() {
-                    let component = &witness.inner[j];
-                    total += varint_len(component.inner.len() as VarInt); // component size len
-                    total += component.inner.len(); // component len
-                }
-            }
-        }
-
-        total += 4; // locktime
-
-        total
-    }
-
-    pub fn serialize_without_txouts(&self, stream: &mut impl bytes::BufMut) {
-        stream.put_u32_le(self.version);
-        // If we have witness data, insert 0x0001 marker
-        if self.witness_data.is_some() {
-            stream.put_u16(0x0001);
-        }
-        let length = self.txins.inner.len() as VarInt;
-        length.serialize(stream);
-        for n in 0..length as usize {
-            self.txins.inner[n].serialize(stream);
-        }
-
-        if let Some(witnesses) = &self.witness_data {
-            for i in 0..witnesses.inner.len() {
-                let witness = &witnesses.inner[i];
-                let witness_length = witness.inner.len() as VarInt;
-                witness_length.serialize(stream);
-                for j in 0..witness_length as usize {
-                    let witness_component = &witness.inner[j];
-                    Serializable::serialize(&**witness_component, stream);
-                }
-            }
-        }
-
-        stream.put_u32_le(self.locktime);
-    }
-
-    pub fn deserialize_without_txouts(buffer: &[u8], hash: [u8; 32]) -> Result<Tx<'static>> {
-        let version = buffer.get_u32_le(0)?;
-
-        let has_witness_data = match buffer.get(4..6) {
-            Some(v) => *v == [0x00, 0x01],
-            None => return Err(anyhow!("not enough data")),
-        };
-
-        let mut offset = if has_witness_data { 6 } else { 4 };
-
-        let (txins, offset_delta) = SupercowVec::deserialize_owned(buffer.with_offset(offset)?)?;
-        offset += offset_delta;
-        if txins.inner.is_empty() {
-            bail!("0 txins")
-        }
-
-        let (witnesses, _) = if has_witness_data {
-            let start = offset;
-            let mut wits = std::vec::Vec::with_capacity(txins.inner.len());
-            for _ in 0..txins.inner.len() {
-                let (components, offset_delta) =
-                    SupercowVec::deserialize_owned(buffer.with_offset(offset)?)?;
-                offset += offset_delta;
-                wits.push(Supercow::owned(components));
-            }
-            let wits = SupercowVec {
-                inner: Supercow::owned(wits),
-            };
-            (Some(Supercow::owned(wits)), start)
-        } else {
-            (None, 0)
-        };
-
-        let locktime = buffer.get_u32_le(offset)?;
-
-        Ok(Tx {
-            version,
-            locktime,
-            txins: Supercow::owned(txins),
-            txouts: Supercow::owned(SupercowVec {
-                inner: Supercow::owned(vec![]),
-            }),
-            witness_data: witnesses,
-            hash,
-        })
-    }
-}
+impl TxBorrowed<'_> {}
 
 pub const TX_COMMAND: [u8; 12] = *b"tx\0\0\0\0\0\0\0\0\0\0";
 
-impl<'old, 'new: 'old> PacketPayload<'old, 'new> for Tx<'old> {
+impl<'a> PacketPayload<'a, TxOwned> for TxBorrowed<'a> {
     fn command(&self) -> &'static [u8; 12] {
         &TX_COMMAND
     }
 }
 
-impl<'old> MustOutlive<'old> for Tx<'old> {
-    type WithLifetime<'new: 'old> = Tx<'new>;
-}
-
-impl<'old, 'new: 'old> DeepClone<'old, 'new> for Tx<'old> {
-    fn deep_clone(&self) -> Self::WithLifetime<'new> {
-        // This is kind of suboptimal, but it'll do for now.
-        let txins = (&*self.txins.inner)
-            .deep_clone()
-            .into_iter()
-            .map(Supercow::owned)
-            .collect();
-        let txouts = (&*self.txouts.inner)
-            .deep_clone()
-            .into_iter()
-            .map(Supercow::owned)
-            .collect();
-
-        Self::WithLifetime {
-            version: self.version,
-            locktime: self.locktime,
-            txins: Supercow::owned(SupercowVec {
-                inner: Supercow::owned(txins),
-            }),
-            txouts: Supercow::owned(SupercowVec {
-                inner: Supercow::owned(txouts),
-            }),
-            witness_data: None,
-            hash: self.hash,
-        }
-    }
-}
-
-impl<'a> Serializable<'a> for Tx<'a> {
-    fn deserialize(
-        allocator: &'a Arena,
-        buffer: &'a [u8],
-    ) -> Result<(Supercow<'a, Tx<'a>>, usize)> {
-        let version = buffer.get_u32_le(0)?;
+impl<'a> DeserializableBorrowed<'a> for TxBorrowed<'a> {
+    fn deserialize_borrowed(&mut self, allocator: &'a Arena, buffer: &'a [u8]) -> Result<usize> {
+        self.version = buffer.get_u32_le(0)?;
 
         let has_witness_data = match buffer.get(4..6) {
             Some(v) => *v == [0x00, 0x01],
@@ -189,39 +44,34 @@ impl<'a> Serializable<'a> for Tx<'a> {
 
         let mut offset = if has_witness_data { 6 } else { 4 };
 
-        let (txins, offset_delta) =
-            SupercowVec::deserialize(allocator, buffer.with_offset(offset)?)?;
+        let (txins, offset_delta) = deserialize_array(allocator, buffer.with_offset(offset)?)?;
         offset += offset_delta;
-        if txins.inner.is_empty() {
+        if txins.is_empty() {
             bail!("0 txins")
         }
+        self.txins = txins;
 
-        let (txouts, offset_delta) =
-            SupercowVec::deserialize(allocator, buffer.with_offset(offset)?)?;
+        let (txouts, offset_delta) = deserialize_array(allocator, buffer.with_offset(offset)?)?;
         offset += offset_delta;
+        self.txouts = txouts;
 
         let (witnesses, witnesses_start) = if has_witness_data {
             let start = offset;
-            let mut wits = allocator.try_alloc_arenaarray(txins.inner.len())?;
-            for _ in 0..txins.inner.len() {
+            let mut wits = allocator.try_alloc_arenaarray(txins.len())?;
+            for _ in 0..txins.len() {
                 let (components, offset_delta) =
-                    SupercowVec::deserialize(allocator, buffer.with_offset(offset)?)?;
+                    deserialize_array(allocator, buffer.with_offset(offset)?)?;
                 offset += offset_delta;
-                wits.push(Supercow::borrowed(components));
+                wits.push(components);
             }
-            let wits = match allocator.try_alloc(SupercowVec {
-                inner: Supercow::borrowed(wits.into_arena_array()),
-            }) {
-                Ok(v) => v,
-                Err(e) => bail!(e),
-            };
-            (Some(Supercow::borrowed(wits)), start)
+            (Some(wits.into_arena_array()), start)
         } else {
             (None, 0)
         };
+        self.witness_data = witnesses;
         let witnesses_end = offset;
 
-        let locktime = buffer.get_u32_le(offset)?;
+        self.locktime = buffer.get_u32_le(offset)?;
 
         let first_pass = if has_witness_data {
             let mut sha = Sha256::new();
@@ -232,48 +82,36 @@ impl<'a> Serializable<'a> for Tx<'a> {
         } else {
             Sha256::digest(buffer.get(0..offset + 4).unwrap())
         };
-        let second_pass = Sha256::digest(first_pass);
+        self.hash = Sha256::digest(first_pass).into();
 
-        match allocator.try_alloc(Tx {
-            version,
-            locktime,
-            txins: Supercow::borrowed(txins),
-            txouts: Supercow::borrowed(txouts),
-            witness_data: witnesses,
-            hash: second_pass.into(),
-        }) {
-            Ok(result) => Ok((Supercow::borrowed(result), offset + 4)),
-            Err(e) => bail!(e),
-        }
+        Ok(offset + 4)
     }
+}
 
+#[derive(Debug, Clone, Default)]
+pub struct TxOwned {
+    pub version: u32,
+    pub locktime: u32,
+    pub txins: Vec<TxInOwned>,
+    pub txouts: Vec<TxOutOwned>,
+    pub witness_data: Option<Vec<Vec<Vec<u8>>>>,
+    pub hash: [u8; 32], // calculated during deserialization
+}
+
+impl Serializable for TxOwned {
     fn serialize(&self, stream: &mut impl bytes::BufMut) {
         stream.put_u32_le(self.version);
         // If we have witness data, insert 0x0001 marker
         if self.witness_data.is_some() {
             stream.put_u16(0x0001);
         }
-        let length = self.txins.inner.len() as VarInt;
-        length.serialize(stream);
-        for n in 0..length as usize {
-            self.txins.inner[n].serialize(stream);
-        }
 
-        let length = self.txouts.inner.len() as VarInt;
-        length.serialize(stream);
-        for n in 0..length as usize {
-            Serializable::serialize(&*self.txouts.inner[n], stream);
-        }
+        serialize_array(&self.txins, stream);
+        serialize_array(&self.txouts, stream);
 
         if let Some(witnesses) = &self.witness_data {
-            for i in 0..witnesses.inner.len() {
-                let witness = &witnesses.inner[i];
-                let witness_length = witness.inner.len() as VarInt;
-                witness_length.serialize(stream);
-                for j in 0..witness_length as usize {
-                    let witness_component = &witness.inner[j];
-                    Serializable::serialize(&**witness_component, stream);
-                }
+            for witness in witnesses {
+                serialize_array(witness, stream);
             }
         }
 
@@ -281,160 +119,435 @@ impl<'a> Serializable<'a> for Tx<'a> {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct TxIn<'a> {
-    pub prevout_hash: Supercow<'a, [u8; 32]>,
+impl From<TxBorrowed<'_>> for TxOwned {
+    fn from(value: TxBorrowed<'_>) -> Self {
+        Self {
+            version: value.version,
+            locktime: value.locktime,
+            txins: value.txins.iter().map(|v| (*v).into()).collect(),
+            txouts: value.txouts.iter().map(|v| (*v).into()).collect(),
+            witness_data: value.witness_data.map(|value| {
+                value
+                    .iter()
+                    .map(|v| v.iter().map(|j| j.to_vec()).collect())
+                    .collect()
+            }),
+            hash: value.hash,
+        }
+    }
+}
+
+impl TxOwned {
+    pub fn deserialize_without_txouts(buffer: &[u8], hash: [u8; 32]) -> Result<TxOwned> {
+        let version = buffer.get_u32_le(0)?;
+
+        let has_witness_data = match buffer.get(4..6) {
+            Some(v) => *v == [0x00, 0x01],
+            None => return Err(anyhow!("not enough data")),
+        };
+
+        let mut offset = if has_witness_data { 6 } else { 4 };
+
+        let (txins, offset_delta) = deserialize_array_owned(buffer.with_offset(offset)?)?;
+        offset += offset_delta;
+        if txins.is_empty() {
+            bail!("0 txins")
+        }
+
+        let (witnesses, _) = if has_witness_data {
+            let start = offset;
+            let mut wits = Vec::with_capacity(txins.len());
+            for _ in 0..txins.len() {
+                let (components, offset_delta) =
+                    deserialize_array_owned(buffer.with_offset(offset)?)?;
+                offset += offset_delta;
+                wits.push(components);
+            }
+            (Some(wits), start)
+        } else {
+            (None, 0)
+        };
+
+        let locktime = buffer.get_u32_le(offset)?;
+
+        Ok(TxOwned {
+            version,
+            locktime,
+            txins,
+            txouts: vec![],
+            witness_data: witnesses,
+            hash,
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum TxRef<'a> {
+    Borrowed(&'a TxBorrowed<'a>),
+    Owned(&'a TxOwned),
+}
+
+impl TxRef<'_> {
+    pub fn is_coinbase(&self) -> bool {
+        let txins: Vec<TxInRef> = self.txins().collect();
+        txins.len() == 1 && txins[0].is_empty()
+    }
+
+    pub fn txins(&self) -> impl Iterator<Item = TxInRef> {
+        match self {
+            TxRef::Borrowed(tx_borrowed) => {
+                either::Left(tx_borrowed.txins.iter().map(TxInRef::Borrowed))
+            }
+            TxRef::Owned(tx_owned) => either::Right(tx_owned.txins.iter().map(TxInRef::Owned)),
+        }
+    }
+
+    pub fn txouts(&self) -> impl Iterator<Item = TxOutRef> {
+        match self {
+            TxRef::Borrowed(tx_borrowed) => {
+                either::Left(tx_borrowed.txouts.iter().map(TxOutRef::Borrowed))
+            }
+            TxRef::Owned(tx_owned) => either::Right(tx_owned.txouts.iter().map(TxOutRef::Owned)),
+        }
+    }
+
+    pub fn witness_data(&self) -> Option<Either<&[Vec<Vec<u8>>], &[&[&[u8]]]>> {
+        match self {
+            TxRef::Borrowed(tx_borrowed) => tx_borrowed.witness_data.map(either::Right),
+            TxRef::Owned(tx_owned) => tx_owned
+                .witness_data
+                .as_ref()
+                .map(|wd| either::Left(wd.as_slice())),
+        }
+    }
+
+    pub fn hash(&self) -> [u8; 32] {
+        match self {
+            TxRef::Borrowed(tx_borrowed) => tx_borrowed.hash,
+            TxRef::Owned(tx_owned) => tx_owned.hash,
+        }
+    }
+
+    pub fn version(&self) -> u32 {
+        match self {
+            TxRef::Borrowed(tx_borrowed) => tx_borrowed.version,
+            TxRef::Owned(tx_owned) => tx_owned.version,
+        }
+    }
+
+    pub fn locktime(&self) -> u32 {
+        match self {
+            TxRef::Borrowed(tx_borrowed) => tx_borrowed.locktime,
+            TxRef::Owned(tx_owned) => tx_owned.locktime,
+        }
+    }
+
+    pub fn serialized_without_txouts_size(&self) -> usize {
+        let mut total = 4; // version
+        if self.witness_data().is_some() {
+            total += 2; // witness marker
+        }
+        total += length_varint(self.txins().count() as VarInt); // txins len len
+        for txin in self.txins() {
+            total += 40; // hash + index + sequence
+            total += length_varint(txin.sig_script().len() as VarInt); // script len len
+            total += txin.sig_script().len(); // script len
+        }
+
+        if let Some(witnesses) = &self.witness_data() {
+            match witnesses {
+                Either::Left(witnesses) => {
+                    for i in 0..witnesses.len() {
+                        let witness = &witnesses[i];
+                        total += length_varint(witness.len() as VarInt); // component count len
+                        for j in 0..witness.len() {
+                            let component = &witness[j];
+                            total += length_varint(component.len() as VarInt); // component size len
+                            total += component.len(); // component len
+                        }
+                    }
+                }
+                Either::Right(witnesses) => {
+                    for i in 0..witnesses.len() {
+                        let witness = witnesses[i];
+                        total += length_varint(witness.len() as VarInt); // component count len
+                        for j in 0..witness.len() {
+                            let component = witness[j];
+                            total += length_varint(component.len() as VarInt); // component size len
+                            total += component.len(); // component len
+                        }
+                    }
+                }
+            }
+        }
+
+        total += 4; // locktime
+
+        total
+    }
+
+    pub fn serialize_without_txouts(&self, stream: &mut impl bytes::BufMut) {
+        stream.put_u32_le(self.version());
+        // If we have witness data, insert 0x0001 marker
+        if self.witness_data().is_some() {
+            stream.put_u16(0x0001);
+        }
+        serialize_varint(self.txins().count() as VarInt, stream);
+        for txin in self.txins() {
+            txin.serialize(stream);
+        }
+
+        if let Some(witnesses) = self.witness_data() {
+            match witnesses {
+                Either::Left(witnesses) => {
+                    for witness in witnesses.iter() {
+                        serialize_varint(witness.len() as VarInt, stream);
+                        for witness_component in witness.iter() {
+                            serialize_varstr(witness_component, stream);
+                        }
+                    }
+                }
+                Either::Right(witnesses) => {
+                    for witness in witnesses.iter() {
+                        serialize_varint(witness.len() as VarInt, stream);
+                        for witness_component in witness.iter() {
+                            serialize_varstr(witness_component, stream);
+                        }
+                    }
+                }
+            }
+        }
+
+        stream.put_u32_le(self.locktime());
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct TxInBorrowed<'a> {
+    pub prevout_hash: &'a [u8; 32],
     pub prevout_index: u32,
     pub sequence: u32,
-    pub sig_script: Supercow<'a, VarStr<'a>>,
+    pub sig_script: &'a [u8],
 }
 
-impl TxIn<'_> {
-    pub fn is_empty(&self) -> bool {
-        self.prevout_hash == [0u8; 32] && self.prevout_index == 0xFFFFFFFF
-    }
-}
-
-impl<'old> MustOutlive<'old> for TxIn<'old> {
-    type WithLifetime<'new: 'old> = TxIn<'new>;
-}
-
-impl<'old, 'new: 'old> DeepClone<'old, 'new> for TxIn<'old> {
-    fn deep_clone(&self) -> Self::WithLifetime<'new> {
-        let prevout_hash = *self.prevout_hash;
-        let sig_script = self.sig_script.deep_clone();
-        Self::WithLifetime {
-            prevout_hash: Supercow::owned(prevout_hash),
-            prevout_index: self.prevout_index,
-            sequence: self.sequence,
-            sig_script: Supercow::owned(sig_script),
+impl Default for TxInBorrowed<'_> {
+    fn default() -> Self {
+        Self {
+            prevout_hash: &EMPTY_HASH,
+            prevout_index: Default::default(),
+            sequence: Default::default(),
+            sig_script: Default::default(),
         }
     }
 }
 
-impl<'a> Serializable<'a> for TxIn<'a> {
-    fn deserialize(
-        allocator: &'a Arena,
-        buffer: &'a [u8],
-    ) -> anyhow::Result<(Supercow<'a, TxIn<'a>>, usize)> {
-        let hash = buffer.get_hash(0)?;
-        let index = buffer.get_u32_le(32)?;
-        let (script, offset) =
-            <VarStr as Serializable>::deserialize(allocator, buffer.with_offset(36)?)?;
-        let sequence = buffer.get_u32_le(offset + 36)?;
-        match allocator.try_alloc(TxIn {
-            prevout_hash: Supercow::borrowed(hash),
-            prevout_index: index,
-            sequence,
-            sig_script: script,
-        }) {
-            Ok(result) => Ok((Supercow::borrowed(result), offset + 40)),
-            Err(e) => bail!(e),
-        }
+impl<'a> DeserializableBorrowed<'a> for TxInBorrowed<'a> {
+    fn deserialize_borrowed(&mut self, _: &'a Arena, buffer: &'a [u8]) -> anyhow::Result<usize> {
+        self.prevout_hash = buffer.get_hash(0)?;
+        self.prevout_index = buffer.get_u32_le(32)?;
+        let (script, offset) = deserialize_varstr(buffer.with_offset(36)?)?;
+        self.sig_script = script;
+        self.sequence = buffer.get_u32_le(offset + 36)?;
+        Ok(offset + 40)
     }
+}
 
+impl Serializable for TxInBorrowed<'_> {
     fn serialize(&self, stream: &mut impl bytes::BufMut) {
         stream.put(self.prevout_hash.as_slice());
         stream.put_u32_le(self.prevout_index);
-        Serializable::serialize(&*self.sig_script, stream);
+        serialize_varstr(self.sig_script, stream);
         stream.put_u32_le(self.sequence);
     }
 }
 
-impl DeserializableOwned for TxIn<'static> {
-    fn deserialize_owned(buffer: &[u8]) -> Result<(Supercow<'static, Self>, usize)> {
+#[derive(Debug, Clone, Default)]
+pub struct TxInOwned {
+    pub prevout_hash: [u8; 32],
+    pub prevout_index: u32,
+    pub sequence: u32,
+    pub sig_script: Vec<u8>,
+}
+
+impl DeserializableOwned for TxInOwned {
+    fn deserialize_owned(buffer: &[u8]) -> Result<(Self, usize)> {
         let hash = buffer.get_hash(0)?;
         let index = buffer.get_u32_le(32)?;
-        let (script, offset) =
-            <VarStr as DeserializableOwned>::deserialize_owned(buffer.with_offset(36)?)?;
+        let (script, offset) = deserialize_varstr(buffer.with_offset(36)?)?;
         let sequence = buffer.get_u32_le(offset + 36)?;
         Ok((
-            Supercow::owned(TxIn {
-                prevout_hash: Supercow::owned(*hash),
+            TxInOwned {
+                prevout_hash: *hash,
                 prevout_index: index,
                 sequence,
-                sig_script: script,
-            }),
+                sig_script: script.to_vec(),
+            },
             offset + 40,
         ))
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct TxOut<'a> {
-    pub value: u64,
-    pub script: Supercow<'a, VarStr<'a>>,
+impl Serializable for TxInOwned {
+    fn serialize(&self, stream: &mut impl bytes::BufMut) {
+        stream.put(self.prevout_hash.as_slice());
+        stream.put_u32_le(self.prevout_index);
+        serialize_varstr(&self.sig_script, stream);
+        stream.put_u32_le(self.sequence);
+    }
 }
 
-impl<'old> MustOutlive<'old> for TxOut<'old> {
-    type WithLifetime<'new: 'old> = TxOut<'new>;
-}
-
-impl<'old, 'new: 'old> DeepClone<'old, 'new> for TxOut<'old> {
-    fn deep_clone(&self) -> Self::WithLifetime<'new> {
-        let script = self.script.deep_clone();
-        Self::WithLifetime {
-            value: self.value,
-            script: Supercow::owned(script),
+impl From<TxInBorrowed<'_>> for TxInOwned {
+    fn from(value: TxInBorrowed<'_>) -> Self {
+        Self {
+            prevout_hash: *value.prevout_hash,
+            prevout_index: value.prevout_index,
+            sequence: value.sequence,
+            sig_script: value.sig_script.to_vec(),
         }
     }
 }
 
-impl<'a> Serializable<'a> for TxOut<'a> {
-    fn deserialize(
-        allocator: &'a Arena,
-        buffer: &'a [u8],
-    ) -> anyhow::Result<(Supercow<'a, TxOut<'a>>, usize)> {
-        let value = buffer.get_u64_le(0)?;
-        let (script, offset) =
-            <VarStr as Serializable>::deserialize(allocator, buffer.with_offset(8)?)?;
-        match allocator.try_alloc(TxOut { value, script }) {
-            Ok(result) => Ok((Supercow::borrowed(result), offset + 8)),
-            Err(e) => bail!(e),
+#[derive(Clone, Copy, Debug)]
+pub enum TxInRef<'a> {
+    Borrowed(&'a TxInBorrowed<'a>),
+    Owned(&'a TxInOwned),
+}
+
+impl TxInRef<'_> {
+    pub fn sig_script(&self) -> &[u8] {
+        match self {
+            TxInRef::Borrowed(tx_in_borrowed) => tx_in_borrowed.sig_script,
+            TxInRef::Owned(tx_in_owned) => &tx_in_owned.sig_script,
+        }
+    }
+
+    pub fn prevout_hash(&self) -> [u8; 32] {
+        match self {
+            TxInRef::Borrowed(tx_in_borrowed) => *tx_in_borrowed.prevout_hash,
+            TxInRef::Owned(tx_in_owned) => tx_in_owned.prevout_hash,
+        }
+    }
+
+    pub fn prevout_index(&self) -> u32 {
+        match self {
+            TxInRef::Borrowed(tx_in_borrowed) => tx_in_borrowed.prevout_index,
+            TxInRef::Owned(tx_in_owned) => tx_in_owned.prevout_index,
+        }
+    }
+
+    pub fn sequence(&self) -> u32 {
+        match self {
+            TxInRef::Borrowed(tx_in_borrowed) => tx_in_borrowed.sequence,
+            TxInRef::Owned(tx_in_owned) => tx_in_owned.sequence,
         }
     }
 
     fn serialize(&self, stream: &mut impl bytes::BufMut) {
-        stream.put_u64_le(self.value);
-        Serializable::serialize(&*self.script, stream);
+        stream.put(self.prevout_hash().as_slice());
+        stream.put_u32_le(self.prevout_index());
+        serialize_varstr(self.sig_script(), stream);
+        stream.put_u32_le(self.sequence());
     }
 }
 
-impl<'script> SerializableValue<'script> for TxOut<'static> {
-    fn deserialize(buffer: &'script [u8]) -> Result<(Self, usize)> {
+impl TxInRef<'_> {
+    pub fn is_empty(&self) -> bool {
+        match self {
+            TxInRef::Borrowed(tx_in_borrowed) => {
+                *tx_in_borrowed.prevout_hash == EMPTY_HASH
+                    && tx_in_borrowed.prevout_index == 0xFFFFFFFF
+            }
+            TxInRef::Owned(tx_in_owned) => {
+                tx_in_owned.prevout_hash == EMPTY_HASH && tx_in_owned.prevout_index == 0xFFFFFFFF
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug, Copy, Default)]
+pub struct TxOutBorrowed<'a> {
+    pub value: u64,
+    pub script: &'a [u8],
+}
+
+impl<'a> DeserializableBorrowed<'a> for TxOutBorrowed<'a> {
+    fn deserialize_borrowed(&mut self, _: &'a Arena, buffer: &'a [u8]) -> anyhow::Result<usize> {
+        self.value = buffer.get_u64_le(0)?;
+        let (script, offset) = deserialize_varstr(buffer.with_offset(8)?)?;
+        self.script = script;
+        Ok(offset + 8)
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct TxOutOwned {
+    pub value: u64,
+    pub script: Vec<u8>,
+}
+
+impl DeserializableOwned for TxOutOwned {
+    fn deserialize_owned(buffer: &[u8]) -> anyhow::Result<(Self, usize)> {
         let value = buffer.get_u64_le(0)?;
-        let (script, offset) = <VarStr as SerializableValue>::deserialize(buffer.with_offset(8)?)?;
+        let (script, offset) = deserialize_varstr(buffer.with_offset(8)?)?;
         Ok((
-            TxOut {
+            Self {
                 value,
-                script: Supercow::owned(script),
+                script: script.to_vec(),
             },
             offset + 8,
         ))
     }
+}
 
+impl Serializable for TxOutOwned {
     fn serialize(&self, stream: &mut impl bytes::BufMut) {
         stream.put_u64_le(self.value);
-        Serializable::serialize(&*self.script, stream);
+        serialize_varstr(&self.script, stream);
     }
 }
 
-impl<'short, 'long: 'short> TxOut<'long> {
-    pub fn covariant(&self) -> &TxOut<'short> {
-        unsafe { std::mem::transmute(self) }
+impl From<TxOutBorrowed<'_>> for TxOutOwned {
+    fn from(value: TxOutBorrowed<'_>) -> Self {
+        Self {
+            value: value.value,
+            script: value.script.to_vec(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum TxOutRef<'a> {
+    Borrowed(&'a TxOutBorrowed<'a>),
+    Owned(&'a TxOutOwned),
+}
+
+impl TxOutRef<'_> {
+    pub fn value(&self) -> u64 {
+        match self {
+            TxOutRef::Borrowed(tx_out_borrowed) => tx_out_borrowed.value,
+            TxOutRef::Owned(tx_out_owned) => tx_out_owned.value,
+        }
+    }
+
+    pub fn script(&self) -> &[u8] {
+        match self {
+            TxOutRef::Borrowed(tx_out_borrowed) => tx_out_borrowed.script,
+            TxOutRef::Owned(tx_out_owned) => &tx_out_owned.script,
+        }
     }
 
     pub fn serialized_length(&self) -> usize {
-        8 + varint_len(self.script.inner.len() as VarInt) + self.script.inner.len()
+        let s = self.script();
+        8 + length_varint(s.len() as VarInt) + s.len()
     }
 
     pub fn flat_serialize(&self, slice: &mut [u8]) -> usize {
-        let b = self.value.to_le_bytes();
+        let b = self.value().to_le_bytes();
         slice.get_mut(0..8).unwrap().copy_from_slice(b.as_slice());
+        let script = self.script();
         let start_of_script =
-            8 + varint_serialize(self.script.inner.len() as VarInt, &mut slice[8..]);
-        slice[start_of_script..start_of_script + self.script.inner.len()]
-            .copy_from_slice(&self.script.inner);
-        start_of_script + self.script.inner.len()
+            8 + serialize_varint_into_slice(script.len() as VarInt, &mut slice[8..]);
+        slice[start_of_script..start_of_script + script.len()].copy_from_slice(script);
+        start_of_script + script.len()
     }
 }
