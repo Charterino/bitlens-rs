@@ -2,8 +2,7 @@ use crate::{
     db::{self, rocksdb::SerializedTx},
     metrics::{METRIC_FULL_BLOCKS_DOWNLOADED, METRIC_TOP_HEADER_HEIGHT},
     packets::{
-        blockheader::BlockHeaderBorrowed,
-        getheaders::GetHeadersOwned, packetpayload::PayloadToSend,
+        blockheader::BlockHeaderBorrowed, getheaders::GetHeadersOwned, packetpayload::PayloadToSend,
     },
     some_or_break,
     types::{

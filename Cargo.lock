@@ -226,6 +226,7 @@ dependencies = [
  "num-traits",
  "num_cpus",
  "ouroboros",
+ "pin-project-lite",
  "primitive-types",
  "prometheus",
  "rand 0.9.1",

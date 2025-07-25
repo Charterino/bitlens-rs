@@ -1,11 +1,3 @@
-use anyhow::{Result, bail};
-use bytes::BufMut;
-use sha2::{Digest, Sha256};
-use std::fmt::{Debug, Display};
-use tokio::io::AsyncReadExt;
-
-use crate::util::arena::Arena;
-
 use super::{
     addr::{ADDR_COMMAND, AddrBorrowed, AddrOwned},
     addrv2::{ADDRV2_COMMAND, AddrV2Borrowed, AddrV2Owned},
@@ -24,20 +16,16 @@ use super::{
     verack::{VERACK_COMMAND, VerAck},
     version::{VERSION_COMMAND, VersionBorrowed, VersionOwned},
 };
+use crate::util::arena::Arena;
+use anyhow::{Result, bail};
+use bytes::BufMut;
+use sha2::{Digest, Sha256};
+use std::fmt::{Debug, Display};
 
 pub trait PacketPayload<'a, Owned: Serializable + From<Self>>:
     Clone + Debug + DeserializableBorrowed<'a>
 {
     fn command(&self) -> &'static [u8; 12];
-}
-
-pub async fn read_payload(
-    stream: &mut (impl AsyncReadExt + Unpin),
-    buffer: &mut [u8],
-) -> Result<()> {
-    // Read the entire packet into buffer
-    stream.read_exact(buffer).await?;
-    Ok(())
 }
 
 #[derive(Debug)]

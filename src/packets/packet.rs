@@ -1,7 +1,8 @@
 use super::block::BlockBorrowed;
 use super::packetheader::{PacketHeader, read_header};
-use crate::packets::packetpayload::{ReceivedPayload, deserialize_payload, read_payload};
+use crate::packets::packetpayload::{ReceivedPayload, deserialize_payload};
 use crate::util::arena::Arena;
+use crate::util::speedtracker::read_payload;
 use anyhow::Result;
 use deadpool::unmanaged::Pool;
 use deadpool::unmanaged::{Object, PoolConfig};
