@@ -78,8 +78,7 @@ fn test_deserialize_safety() {
         let max_packet_size: usize = 4 * 1024 * 1024;
         let b = Arena::new(max_packet_size);
         let tx = b.try_alloc_default::<TxBorrowed>().unwrap();
-        let consumed = tx.deserialize_borrowed(&b, &raw_block).unwrap();
-        println!("{}", consumed);
+        tx.deserialize_borrowed(&b, &raw_block).unwrap();
     }
 
     drop(alloc_guard);
