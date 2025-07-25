@@ -63,7 +63,6 @@ impl<'a> DeserializableBorrowed<'a> for TxBorrowed<'a> {
                 let (components, offset_delta) =
                     //deserialize_array(allocator, buffer.with_offset(offset)?)?;
                     deserialize_array_of_varstr_as_varstr(buffer.with_offset(offset)?)?;
-                info!("length of components is"; "l" => components.len());
                 offset += offset_delta;
                 wits.push(components);
             }
