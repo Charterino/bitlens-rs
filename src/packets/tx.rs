@@ -1,4 +1,4 @@
-use crate::util::arena::Arena;
+use crate::{packets::varstr::deserialize_array_of_varstr_as_varstr, util::arena::Arena};
 
 use super::{
     EMPTY_HASH,
@@ -7,11 +7,12 @@ use super::{
     packetpayload::{DeserializableBorrowed, DeserializableOwned, PacketPayload, Serializable},
     serialize_array,
     varint::{VarInt, length_varint, serialize_varint, serialize_varint_into_slice},
-    varstr::{deserialize_varstr, serialize_varstr},
+    varstr::{deserialize_array_of_varstr_as_varstr_owned, deserialize_varstr, serialize_varstr},
 };
 use anyhow::{Result, anyhow, bail};
 use either::Either;
 use sha2::{Digest, Sha256};
+use slog_scope::info;
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct TxBorrowed<'a> {
@@ -19,7 +20,7 @@ pub struct TxBorrowed<'a> {
     pub locktime: u32,
     pub txins: &'a [TxInBorrowed<'a>],
     pub txouts: &'a [TxOutBorrowed<'a>],
-    pub witness_data: Option<&'a [&'a [&'a [u8]]]>,
+    pub witness_data: Option<&'a [&'a [u8]]>,
     pub hash: [u8; 32], // calculated during deserialization
 }
 
@@ -60,7 +61,9 @@ impl<'a> DeserializableBorrowed<'a> for TxBorrowed<'a> {
             let mut wits = allocator.try_alloc_arenaarray(txins.len())?;
             for _ in 0..txins.len() {
                 let (components, offset_delta) =
-                    deserialize_array(allocator, buffer.with_offset(offset)?)?;
+                    //deserialize_array(allocator, buffer.with_offset(offset)?)?;
+                    deserialize_array_of_varstr_as_varstr(buffer.with_offset(offset)?)?;
+                info!("length of components is"; "l" => components.len());
                 offset += offset_delta;
                 wits.push(components);
             }
@@ -94,7 +97,7 @@ pub struct TxOwned {
     pub locktime: u32,
     pub txins: Vec<TxInOwned>,
     pub txouts: Vec<TxOutOwned>,
-    pub witness_data: Option<Vec<Vec<Vec<u8>>>>,
+    pub witness_data: Option<Vec<Vec<u8>>>,
     pub hash: [u8; 32], // calculated during deserialization
 }
 
@@ -110,9 +113,7 @@ impl Serializable for TxOwned {
         serialize_array(&self.txouts, stream);
 
         if let Some(witnesses) = &self.witness_data {
-            for witness in witnesses {
-                serialize_array(witness, stream);
-            }
+            serialize_array(witnesses, stream);
         }
 
         stream.put_u32_le(self.locktime);
@@ -126,12 +127,9 @@ impl From<TxBorrowed<'_>> for TxOwned {
             locktime: value.locktime,
             txins: value.txins.iter().map(|v| (*v).into()).collect(),
             txouts: value.txouts.iter().map(|v| (*v).into()).collect(),
-            witness_data: value.witness_data.map(|value| {
-                value
-                    .iter()
-                    .map(|v| v.iter().map(|j| j.to_vec()).collect())
-                    .collect()
-            }),
+            witness_data: value
+                .witness_data
+                .map(|value| value.iter().map(|v| v.to_vec()).collect()),
             hash: value.hash,
         }
     }
@@ -159,7 +157,8 @@ impl TxOwned {
             let mut wits = Vec::with_capacity(txins.len());
             for _ in 0..txins.len() {
                 let (components, offset_delta) =
-                    deserialize_array_owned(buffer.with_offset(offset)?)?;
+                    //deserialize_array_owned(buffer.with_offset(offset)?)?;
+                    deserialize_array_of_varstr_as_varstr_owned(buffer.with_offset(offset)?)?;
                 offset += offset_delta;
                 wits.push(components);
             }
@@ -211,7 +210,7 @@ impl TxRef<'_> {
         }
     }
 
-    pub fn witness_data(&self) -> Option<Either<&[Vec<Vec<u8>>], &[&[&[u8]]]>> {
+    pub fn witness_data(&self) -> Option<Either<&[Vec<u8>], &[&[u8]]>> {
         match self {
             TxRef::Borrowed(tx_borrowed) => tx_borrowed.witness_data.map(either::Right),
             TxRef::Owned(tx_owned) => tx_owned
@@ -260,22 +259,24 @@ impl TxRef<'_> {
                     for i in 0..witnesses.len() {
                         let witness = &witnesses[i];
                         total += length_varint(witness.len() as VarInt); // component count len
-                        for j in 0..witness.len() {
+                        total += witness.len();
+                        /*for j in 0..witness.len() {
                             let component = &witness[j];
                             total += length_varint(component.len() as VarInt); // component size len
                             total += component.len(); // component len
-                        }
+                        }*/
                     }
                 }
                 Either::Right(witnesses) => {
                     for i in 0..witnesses.len() {
                         let witness = witnesses[i];
                         total += length_varint(witness.len() as VarInt); // component count len
-                        for j in 0..witness.len() {
+                        total += witness.len();
+                        /*for j in 0..witness.len() {
                             let component = witness[j];
                             total += length_varint(component.len() as VarInt); // component size len
                             total += component.len(); // component len
-                        }
+                        }*/
                     }
                 }
             }
@@ -301,18 +302,20 @@ impl TxRef<'_> {
             match witnesses {
                 Either::Left(witnesses) => {
                     for witness in witnesses.iter() {
-                        serialize_varint(witness.len() as VarInt, stream);
+                        /*serialize_varint(witness.len() as VarInt, stream);
                         for witness_component in witness.iter() {
                             serialize_varstr(witness_component, stream);
-                        }
+                        }*/
+                        serialize_varstr(&witness, stream);
                     }
                 }
                 Either::Right(witnesses) => {
                     for witness in witnesses.iter() {
-                        serialize_varint(witness.len() as VarInt, stream);
+                        /*serialize_varint(witness.len() as VarInt, stream);
                         for witness_component in witness.iter() {
                             serialize_varstr(witness_component, stream);
-                        }
+                        }*/
+                        serialize_varstr(witness, stream);
                     }
                 }
             }

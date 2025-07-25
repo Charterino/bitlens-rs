@@ -1,10 +1,10 @@
-use anyhow::{Result, bail};
-use bytes::BufMut;
-
 use super::{
+    buffer::Buffer,
     packetpayload::{DeserializableBorrowed, DeserializableOwned, Serializable},
     varint::{deserialize_varint, length_varint, serialize_varint},
 };
+use anyhow::{Result, bail};
+use bytes::BufMut;
 
 const fn length_varstr(v: &[u8]) -> usize {
     length_varint(v.len() as u64) + v.len()
@@ -49,5 +49,68 @@ impl DeserializableOwned for Vec<u8> {
     fn deserialize_owned(buffer: &[u8]) -> Result<(Self, usize)> {
         let (res, consumed) = deserialize_varstr(buffer)?;
         Ok((res.to_vec(), consumed))
+    }
+}
+
+pub fn deserialize_array_of_varstr_as_varstr(buffer: &[u8]) -> Result<(&[u8], usize)> {
+    let (remaining_varstrs, mut offset) = deserialize_varint(buffer)?;
+    for _ in 0..remaining_varstrs {
+        let (varstr_length, consumed) = deserialize_varint(buffer.with_offset(offset)?)?;
+        offset += consumed;
+        offset += varstr_length as usize;
+    }
+
+    match buffer.get(0..offset) {
+        Some(r) => Ok((r, offset)),
+        None => bail!("not enough bytes"),
+    }
+}
+
+pub fn deserialize_array_of_varstr_as_varstr_owned(buffer: &[u8]) -> Result<(Vec<u8>, usize)> {
+    let (remaining_varstrs, mut offset) = deserialize_varint(buffer)?;
+    for _ in 0..remaining_varstrs {
+        let (varstr_length, consumed) = deserialize_varint(buffer.with_offset(offset)?)?;
+        offset += consumed;
+        offset += varstr_length as usize;
+    }
+
+    match buffer.get(0..offset) {
+        Some(r) => Ok((r.to_vec(), offset)),
+        None => bail!("not enough bytes"),
+    }
+}
+
+pub fn deserialize_array_of_varsrs_iter(buffer: &[u8]) -> Result<VarStrIter> {
+    let (count, consumed) = deserialize_varint(buffer)?;
+    Ok(VarStrIter {
+        offset: consumed,
+        buffer: buffer,
+        remaining: count,
+    })
+}
+pub struct VarStrIter<'a> {
+    offset: usize,
+    buffer: &'a [u8],
+    remaining: u64,
+}
+
+impl<'a> Iterator for VarStrIter<'a> {
+    type Item = &'a [u8];
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.remaining == 0 {
+            return None;
+        }
+        match self.buffer.with_offset(self.offset) {
+            Ok(v) => match deserialize_varstr(v) {
+                Ok((result, consumed)) => {
+                    self.offset += consumed;
+                    self.remaining -= 1;
+                    Some(result)
+                }
+                Err(_) => None,
+            },
+            Err(_) => None,
+        }
     }
 }

@@ -8,7 +8,10 @@ use super::{
     },
 };
 use crate::{
-    packets::tx::{TxOutRef, TxRef},
+    packets::{
+        tx::{TxOutRef, TxRef},
+        varstr::deserialize_array_of_varsrs_iter,
+    },
     some_or_break,
     tx::opcodes::OP_INVALIDOPCODE,
     util::hash::hash160,
@@ -153,7 +156,7 @@ pub fn get_transaction_sigop_cost(tx: TxRef, dependencies: &[TxOutRef], flags: S
             let wd = tx.witness_data().unwrap();
             match wd {
                 either::Either::Left(wd) => {
-                    let a: Vec<_> = wd[txin_idx].iter().map(|v| v.as_slice()).collect();
+                    let a = &wd[txin_idx];
                     sigops += count_witness_sigops(txin.sig_script(), txout.script(), &a, flags);
                 }
                 either::Either::Right(wd) => {
@@ -226,7 +229,7 @@ pub fn get_p2sh_sigop_count(tx: TxRef, dependencies: &[TxOutRef]) -> u32 {
 pub fn count_witness_sigops(
     script: &[u8],
     script_pub_key: &[u8],
-    witness_components: &[&[u8]],
+    witness_components: &[u8],
     flags: ScriptFlags,
 ) -> u32 {
     if flags & SCRIPT_VERIFY_WITNESS == 0 {
@@ -367,14 +370,17 @@ pub fn get_witness_program(script: &[u8]) -> Option<(u8, &[u8])> {
     None
 }
 
-pub fn witness_sigops(version: u8, witprogram: &[u8], witness: &[&[u8]]) -> u32 {
+pub fn witness_sigops(version: u8, witprogram: &[u8], witness: &[u8]) -> u32 {
     if version == 0 {
         if witprogram.len() == WITNESS_V0_KEYHASH_SIZE {
             return 1;
         }
 
-        if witprogram.len() == WITNESS_V0_SCRIPTHASH_SIZE && !witness.is_empty() {
-            let subscript = witness[witness.len() - 1];
+        // ensure there's at least 1 witness component
+        if witprogram.len() == WITNESS_V0_SCRIPTHASH_SIZE && !witness.is_empty() && witness[0] != 0
+        {
+            let witness_components = deserialize_array_of_varsrs_iter(witness).unwrap();
+            let subscript = witness_components.last().unwrap();
             return get_sigop_count(subscript, true);
         }
     }

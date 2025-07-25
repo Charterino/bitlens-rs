@@ -48,14 +48,7 @@ fn calculate_tx_size_wus_owned(tx: &TxOwned) -> u32 {
         result += 2;
 
         for witness in witness_data.iter() {
-            // length of the number of components in this witness block
-            result += length_varint(witness.len() as VarInt);
-            for component in witness.iter() {
-                // Length of the length of this component
-                result += length_varint(component.len() as VarInt);
-                // Length of this component
-                result += component.len();
-            }
+            result += witness.len();
         }
     }
 
@@ -100,14 +93,7 @@ fn calculate_tx_size_wus_borrowed(tx: &TxBorrowed) -> u32 {
         result += 2;
 
         for witness in witness_data.iter() {
-            // length of the number of components in this witness block
-            result += length_varint(witness.len() as VarInt);
-            for component in witness.iter() {
-                // Length of the length of this component
-                result += length_varint(component.len() as VarInt);
-                // Length of this component
-                result += component.len();
-            }
+            result += witness.len();
         }
     }
 

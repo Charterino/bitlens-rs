@@ -1,7 +1,10 @@
 use k256::elliptic_curve::rand_core::OsRng;
 
 use crate::{
-    packets::tx::{TxInOwned, TxOutOwned, TxOutRef, TxOwned, TxRef},
+    packets::{
+        serialize_array,
+        tx::{TxInOwned, TxOutOwned, TxOutRef, TxOwned, TxRef},
+    },
     tx::{
         opcodes::{OP_0, OP_1, OP_2, OP_CHECKMULTISIG, OP_CHECKSIG, OP_ENDIF, OP_IF},
         script::{
@@ -305,7 +308,9 @@ fn build_txs<'creation>(
         sig_script: script_sig,
     }];
     if let Some(witness) = witness {
-        spending_tx.witness_data = Some(vec![witness]);
+        let mut serialized = Vec::new();
+        serialize_array(&witness, &mut serialized);
+        spending_tx.witness_data = Some(vec![serialized]);
     } else {
         spending_tx.witness_data = None;
     }
