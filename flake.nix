@@ -36,6 +36,7 @@
             cargoLock = {
               lockFile = ./Cargo.lock;
             };
+            hardeningDisable = [ "fortify" ];
             env = {
               LIBCLANG_PATH = "${pkgs.libclang.lib}/lib";
               TAR_OPTIONS = "--no-same-owner";
@@ -79,7 +80,9 @@
               libllvm
               llvmPackages_20.clang-unwrapped.lib
               heaptrack
+              valgrind
             ];
+            hardeningDisable = [ "fortify" ];
             shellHook = ''
               export LIBCLANG_PATH=${pkgs.libclang.lib}/lib
             '';
