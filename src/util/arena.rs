@@ -39,7 +39,7 @@ impl<'a> Arena {
     }
 
     #[inline(always)]
-    pub fn try_alloc<T: Sized>(&self, value: T) -> Result<&mut T> {
+    pub fn try_alloc<T: Sized + Copy>(&self, value: T) -> Result<&mut T> {
         let alignment = align_of::<T>();
         let size_t = size_of::<T>();
         let mut currently_consumed = self.consumed.load(Ordering::Relaxed);
@@ -79,7 +79,7 @@ impl<'a> Arena {
         )
     }
 
-    pub fn try_alloc_default<T: Default>(&self) -> Result<&mut T> {
+    pub fn try_alloc_default<T: Default + Copy>(&self) -> Result<&mut T> {
         self.try_alloc(T::default())
     }
 
@@ -173,12 +173,15 @@ impl<'a> Arena {
     }
 
     #[inline(always)]
-    pub fn try_alloc_arenaarray<T: Sized>(&'a self, count: usize) -> Result<ArenaArray<'a, T>> {
+    pub fn try_alloc_arenaarray<T: Sized + Copy>(
+        &'a self,
+        count: usize,
+    ) -> Result<ArenaArray<'a, T>> {
         let backing = self.try_alloc_array_uninit(count)?;
         Ok(ArenaArray::from_raw_parts(backing, count))
     }
 
-    fn try_alloc_array_uninit<T: Sized>(&self, count: usize) -> Result<*mut T> {
+    fn try_alloc_array_uninit<T: Sized + Copy>(&self, count: usize) -> Result<*mut T> {
         let alignment = align_of::<T>();
         let size = size_of::<T>() * count;
         let mut currently_consumed = self.consumed.load(Ordering::Relaxed);

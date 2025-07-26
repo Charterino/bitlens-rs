@@ -8,7 +8,7 @@ pub struct ArenaArray<'arena, T> {
     b: PhantomData<&'arena ()>,
 }
 
-impl<'arena, T> ArenaArray<'arena, T> {
+impl<'arena, T: Copy> ArenaArray<'arena, T> {
     #[inline(always)]
     pub fn from_raw_parts(ptr: *mut T, cap: usize) -> Self {
         Self {
