@@ -187,8 +187,17 @@ pub enum TxRef<'a> {
 
 impl TxRef<'_> {
     pub fn is_coinbase(&self) -> bool {
-        let txins: Vec<TxInRef> = self.txins().collect();
-        txins.len() == 1 && txins[0].is_empty()
+        let mut txins = self.txins();
+        let first = txins.next();
+        let second = txins.next();
+        if second.is_some() {
+            return false;
+        }
+        if let Some(txin) = first {
+            txin.is_empty()
+        } else {
+            false
+        }
     }
 
     pub fn txins(&self) -> impl Iterator<Item = TxInRef> {
