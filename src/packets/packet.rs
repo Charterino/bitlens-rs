@@ -32,7 +32,7 @@ pub const INITIAL_DESERIALIZE_ARENA_COUNT: usize = 128;
 pub const MAX_DESERIALIZE_ARENA_COUNT_DURING_BLOCKSYNC: usize = 2048;
 pub static CURRENT_POOL_LIMIT: AtomicUsize = AtomicUsize::new(INITIAL_DESERIALIZE_ARENA_COUNT);
 pub static CURRENT_POOL_SIZE: AtomicUsize = AtomicUsize::new(INITIAL_DESERIALIZE_ARENA_COUNT);
-static DESERIALIZE_POOL: LazyLock<Pool<Arena>> = LazyLock::new(|| {
+pub static DESERIALIZE_POOL: LazyLock<Pool<Arena>> = LazyLock::new(|| {
     let mut config = PoolConfig::new(1024 * 1024);
     config.runtime = Some(deadpool::Runtime::Tokio1);
     config.timeout = Some(DESERIALIZE_POOL_TIMEOUT);
@@ -90,9 +90,6 @@ pub struct AllocatorWithBuffer {
     #[borrows(allocator)]
     pub buffer: &'this mut [u8],
 }
-
-unsafe impl Send for AllocatorWithBuffer {}
-unsafe impl Sync for AllocatorWithBuffer {}
 
 pub async fn read_packet(stream: &mut BufReader<OwnedReadHalf>) -> Result<Packet> {
     let header = read_header(stream).await?;
