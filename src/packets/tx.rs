@@ -12,7 +12,6 @@ use super::{
 use anyhow::{Result, anyhow, bail};
 use either::Either;
 use sha2::{Digest, Sha256};
-use slog_scope::info;
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct TxBorrowed<'a> {

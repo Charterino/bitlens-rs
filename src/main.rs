@@ -7,8 +7,12 @@ use std::{
 };
 
 use anyhow::{Result, bail};
+use deadpool::unmanaged::Object;
 use log::setup_logging;
-use packets::network_id::NetworkId;
+use packets::{
+    network_id::NetworkId,
+    packet::{DESERIALIZE_POOL, SERIALIZE_POOL},
+};
 use slog_scope::{debug, info};
 use tokio::{
     runtime::Runtime,
@@ -30,6 +34,13 @@ pub mod packets;
 pub mod tx;
 pub mod types;
 pub mod util;
+
+#[cfg(all(not(test), not(target_env = "msvc")))]
+use tikv_jemallocator::Jemalloc;
+
+#[cfg(all(not(test), not(target_env = "msvc")))]
+#[global_allocator]
+static GLOBAL: Jemalloc = Jemalloc;
 
 const DNS_SEEDS: &[&str] = &[
     "seed.bitcoin.sipa.be",
