@@ -7,12 +7,8 @@ use std::{
 };
 
 use anyhow::{Result, bail};
-use deadpool::unmanaged::Object;
 use log::setup_logging;
-use packets::{
-    network_id::NetworkId,
-    packet::{DESERIALIZE_POOL, SERIALIZE_POOL},
-};
+use packets::network_id::NetworkId;
 use slog_scope::{debug, info};
 use tokio::{
     runtime::Runtime,

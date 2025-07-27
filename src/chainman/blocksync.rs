@@ -6,9 +6,9 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use slog_scope::info;
+use slog_scope::{debug, info};
 use tokio::{
-    join,
+    join, select,
     sync::mpsc::{Receiver, Sender, channel},
     time::Instant,
 };
@@ -27,14 +27,16 @@ use crate::{
     },
     some_or_return, tx,
     types::blockmetrics::BlockMetrics,
-    util::arena::Arena,
+    util::{arena::Arena, speedtracker::TOTAL_IN, timetracker::TimeTracker},
     with_deadline,
 };
 use anyhow::Result;
 
 use super::{get_block_hashes_to_download, mark_as_downloaded, update_frontpage_response};
 
-const BLOCK_TIMEOUT: Duration = Duration::from_millis(1000);
+const BLOCK_TIMEOUT: Duration = Duration::from_millis(5000);
+const INITIAL_WORKER_COUNT: usize = 20;
+const MAX_WORKERS: usize = 200;
 
 pub enum DownloadWorkerMessage {
     PullFirstJob(tokio::sync::oneshot::Sender<BlockHashWithNumber>),
@@ -55,101 +57,177 @@ pub async fn sync_blocks() {
     );
     let (flush_tx, flush_rx) = channel(1);
     let (master_tx, master_rx) = channel(1);
-    let master = tokio::spawn(run_master(master_rx, flush_tx));
-    // Todo: spawn and kill workers dynamically
-    let mut handles = vec![];
-    for _ in 0..50 {
-        handles.push(tokio::spawn(run_download_worker(master_tx.clone())));
-    }
-    tokio::spawn(async move {
-        for h in handles {
-            let _ = h.await;
-        }
-        drop(master_tx);
-        info!("done with all workers");
-    });
+    let master = tokio::spawn(run_master(master_tx, master_rx, flush_tx));
     let block_writer = tokio::spawn(receive_and_process_blocks(flush_rx));
     let _ = join!(master, block_writer);
     packet::CURRENT_POOL_LIMIT.store(packet::INITIAL_DESERIALIZE_ARENA_COUNT, Ordering::Relaxed);
 }
 
-async fn run_master(mut master: Receiver<DownloadWorkerMessage>, flush: Sender<BlockWithNumber>) {
+struct MasterState {
+    missing_blocks: Vec<[u8; 32]>,
+    first_missing_number: u64,
+    last_request_times: Vec<u64>,
+    next_to_apply: usize,
+    next_never_asked_for: usize,
+    backlog: Vec<BlockWithNumber>,
+    block_avg_size: f64,
+    alpha: f64,
+    received_since_last_update: usize,
+    flush_time_tracker: TimeTracker,
+}
+
+async fn run_master(
+    master_tx: Sender<DownloadWorkerMessage>,
+    mut master_rx: Receiver<DownloadWorkerMessage>,
+    flush: Sender<BlockWithNumber>,
+) {
+    let mut workers = Vec::with_capacity(INITIAL_WORKER_COUNT);
+    // Spawn initial workers
+    for _ in 0..INITIAL_WORKER_COUNT {
+        workers.push(tokio::spawn(run_download_worker(master_tx.clone())));
+    }
     let (missing_blocks, first_missing_number) = some_or_return!(get_block_hashes_to_download());
     info!("got missing blocks"; "first" => first_missing_number, "count" => missing_blocks.len());
-    let mut last_request_times = vec![0u64; missing_blocks.len()]; // worst case theres ~1m blocks thats like 8mb
 
-    let mut next_to_apply: usize = 0;
-    let mut next_never_asked_for: usize = 0;
+    let last_request_times = vec![0u64; missing_blocks.len()];
+    let mut state = MasterState {
+        missing_blocks,
+        first_missing_number,
+        last_request_times: last_request_times,
+        next_to_apply: 0,
+        next_never_asked_for: 0,
+        // backlog will store blocks we will need later but dont need RIGHT NOW.
+        // we need to apply blocks in order, so if we're waiting on #2, but get #3, we store it in the backlog.
+        // then when we finally get #2, we can apply #3 right after without waiting.
+        // youngest-first, for example (we're waiting on #2): 9, 5, 4, 3
+        backlog: Vec::with_capacity(256),
+        // Tracks how much time in total we've spent writing the blocks to `flush`
+        flush_time_tracker: TimeTracker::new(),
+        // Tracks how many blocks we have downloaded since the last update
+        received_since_last_update: 0,
+        // EWMA of the last blocks
+        block_avg_size: 1.,
+        // Constant value used for EWMA
+        alpha: 2. / (100. + 1.),
+    };
 
-    // backlog will store blocks we will need later but dont need RIGHT NOW.
-    // we need to apply blocks in order, so if we're waiting on #2, but get #3, we store it in the backlog.
-    // then when we finally get #2, we can apply #3 right after without waiting.
-    // youngest-first, for example (we're waiting on #2): 9, 5, 4, 3
-    let mut backlog: Vec<BlockWithNumber> = Vec::with_capacity(64);
-
+    let mut ticker = tokio::time::interval(Duration::from_secs(10));
+    // Tracks how many bytes we have downloaded since the last update
+    let mut last_in = TOTAL_IN.load(Ordering::Relaxed);
+    // Tracks how much time since the last update total we've spent writing the blocks to `flush`
+    let mut last_time = Instant::now();
     loop {
-        let message = some_or_return!(master.recv().await);
-        match message {
-            DownloadWorkerMessage::PullFirstJob(sender) => {
-                match find_next_best_job(
-                    next_to_apply,
-                    &mut next_never_asked_for,
-                    &mut last_request_times,
-                    &missing_blocks,
-                    first_missing_number,
-                    true,
-                ) {
-                    Some(job) => {
-                        _ = sender.send(job);
-                    }
-                    None => {
-                        // No job for this runner, kill it
-                        drop(sender);
-                    }
+        if master_tx.strong_count() == 1 {
+            // All workers are dead.
+            break;
+        }
+        select! {
+            _ = ticker.tick() => {
+                // Update workers
+
+                // First we figure out how many bytes we downloaded, how many blocks, etc
+                let current_in = TOTAL_IN.load(Ordering::Relaxed);
+                let downloaded_bytes = current_in - last_in;
+
+                let elapsed_time_seconds = ((last_time.elapsed().as_micros() as u64) - state.flush_time_tracker.wait_time_micros()) as f64 / 1000. / 1000.;
+
+                let r = downloaded_bytes as f64 / (state.block_avg_size * workers.len() as f64) / elapsed_time_seconds;
+                if r >= 0.9 && workers.len() < MAX_WORKERS {
+                    workers.push(tokio::spawn(run_download_worker(master_tx.clone())));
+                    debug!("spawned a new block download worker"; "new_count" => workers.len());
+                } else if r <= 0.5 && workers.len() > 1 {
+                    let a = workers.pop().unwrap();
+                    a.abort();
+                    debug!("killed a block download worker"; "new_count" => workers.len());
+                }
+
+                // At the end update the variables to prepare for the next iteration
+                last_in = current_in;
+                state.received_since_last_update = 0;
+                state.flush_time_tracker.reset();
+                last_time = Instant::now();
+            }
+            message = master_rx.recv() => {
+                if message.is_none() {
+                    break
+                }
+                let message = message.unwrap();
+                handle_worker_message(message, &mut state, &flush).await;
+            }
+        }
+    }
+}
+
+async fn handle_worker_message(
+    message: DownloadWorkerMessage,
+    state: &mut MasterState,
+    flush: &Sender<BlockWithNumber>,
+) {
+    match message {
+        DownloadWorkerMessage::PullFirstJob(sender) => {
+            match find_next_best_job(
+                state.next_to_apply,
+                &mut state.next_never_asked_for,
+                &mut state.last_request_times,
+                &state.missing_blocks,
+                state.first_missing_number,
+                true,
+            ) {
+                Some(job) => {
+                    _ = sender.send(job);
+                }
+                None => {
+                    // No job for this runner, kill it
+                    drop(sender);
                 }
             }
-            DownloadWorkerMessage::PushResultAndGetNewJob((payload, number), sender) => {
-                // first either process the payload directly or insert it into backlog
-                if number > first_missing_number + next_to_apply as u64 {
-                    // This block is ahead of what we're currently waiting for, insert it into the backlog
-                    if let Err(i) = backlog.binary_search_by(|f| number.cmp(&f.1)) {
-                        backlog.insert(i, (payload, number));
-                    }
-                    // Mark this block as fetched so we never ask for it again
-                    last_request_times[(number - first_missing_number) as usize] = 0
-                } else if number < first_missing_number + next_to_apply as u64 {
-                    // We waited for this block for a while and then asked some other peer for it, got it from that peer, and now the first peer is responding. Discard it
-                } else {
-                    // Just the block we need!
-                    next_to_apply += 1;
-                    ok_or_return!(flush.send((payload, number)).await);
-                    // Apply the backlog so can_advance is correct
-                    apply_from_backlog(
-                        &mut backlog,
-                        first_missing_number,
-                        &mut next_to_apply,
-                        &flush,
-                    )
-                    .await;
+        }
+        DownloadWorkerMessage::PushResultAndGetNewJob((payload, number), sender) => {
+            state.received_since_last_update += 1;
+            state.block_avg_size = (1. - state.alpha) * state.block_avg_size
+                + state.alpha * payload.borrow_allocator_with_buffer().borrow_buffer().len() as f64;
+            // first either process the payload directly or insert it into backlog
+            if number > state.first_missing_number + state.next_to_apply as u64 {
+                // This block is ahead of what we're currently waiting for, insert it into the backlog
+                if let Err(i) = state.backlog.binary_search_by(|f| number.cmp(&f.1)) {
+                    state.backlog.insert(i, (payload, number));
                 }
+                // Mark this block as fetched so we never ask for it again
+                state.last_request_times[(number - state.first_missing_number) as usize] = 0
+            } else if number < state.first_missing_number + state.next_to_apply as u64 {
+                // We waited for this block for a while and then asked some other peer for it, got it from that peer, and now the first peer is responding. Discard it
+            } else {
+                // Just the block we need!
+                state.next_to_apply += 1;
+                state.flush_time_tracker.start();
+                ok_or_return!(flush.send((payload, number)).await);
+                // Apply the backlog so can_advance is correct
+                apply_from_backlog(
+                    &mut state.backlog,
+                    state.first_missing_number,
+                    &mut state.next_to_apply,
+                    &flush,
+                )
+                .await;
+                state.flush_time_tracker.stop();
+            }
 
-                // then respond with the next job
-                let can_advance = backlog.len() <= 512;
-                match find_next_best_job(
-                    next_to_apply,
-                    &mut next_never_asked_for,
-                    &mut last_request_times,
-                    &missing_blocks,
-                    first_missing_number,
-                    can_advance,
-                ) {
-                    Some(job) => {
-                        _ = sender.send(job);
-                    }
-                    None => {
-                        // No job for this runner, kill it
-                        drop(sender);
-                    }
+            // then respond with the next job
+            let can_advance = state.backlog.len() <= 512;
+            match find_next_best_job(
+                state.next_to_apply,
+                &mut state.next_never_asked_for,
+                &mut state.last_request_times,
+                &state.missing_blocks,
+                state.first_missing_number,
+                can_advance,
+            ) {
+                Some(job) => {
+                    _ = sender.send(job);
+                }
+                None => {
+                    // No job for this runner, kill it
+                    drop(sender);
                 }
             }
         }
