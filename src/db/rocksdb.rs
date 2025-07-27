@@ -5,6 +5,9 @@ use crate::tx::AnalyzedTx;
 use crate::tx::deserialize_analyzed_tx;
 use anyhow::Result;
 use anyhow::bail;
+use rocksdb::BlockBasedOptions;
+use rocksdb::Cache;
+use rocksdb::WriteBufferManager;
 use rocksdb::{DB, IngestExternalFileOptions, Options};
 use std::sync::LazyLock;
 use tokio::sync::Semaphore;
@@ -17,6 +20,23 @@ static OPEN_OPTIONS: LazyLock<Options> = LazyLock::new(|| {
     open_options.increase_parallelism(num_cpus::get() as i32);
     open_options.set_max_background_jobs(num_cpus::get() as i32);
     open_options.set_max_subcompactions(num_cpus::get() as u32);
+    open_options.set_optimize_filters_for_hits(true);
+    open_options.set_max_open_files(16 * 1024);
+
+    let cache = Cache::new_lru_cache(1 * 1024 * 1024 * 1024); // 1gb
+    open_options.set_write_buffer_manager(
+        &WriteBufferManager::new_write_buffer_manager_with_cache(
+            1 * 1024 * 1024 * 1024,
+            true,
+            cache.clone(),
+        ),
+    );
+
+    let mut block_based_options = BlockBasedOptions::default();
+    block_based_options.set_block_size(32 * 1024);
+    block_based_options.set_block_cache(&cache);
+    open_options.set_block_based_table_factory(&block_based_options);
+
     open_options
 });
 
@@ -26,15 +46,15 @@ static INGEST_OPTIONS: LazyLock<IngestExternalFileOptions> = LazyLock::new(|| {
     ingest_options
 });
 
-static TXS_DB: LazyLock<DB> = LazyLock::new(|| {
+pub static TXS_DB: LazyLock<DB> = LazyLock::new(|| {
     rocksdb::DB::open(&OPEN_OPTIONS, "bitlens-txs").expect("to have opened bitlens-txs db")
 });
 
-static TXOUTS_DB: LazyLock<DB> = LazyLock::new(|| {
+pub static TXOUTS_DB: LazyLock<DB> = LazyLock::new(|| {
     rocksdb::DB::open(&OPEN_OPTIONS, "bitlens-txouts").expect("to have opened bitlens-txouts db")
 });
 
-static BLOCKTXS_DB: LazyLock<DB> = LazyLock::new(|| {
+pub static BLOCKTXS_DB: LazyLock<DB> = LazyLock::new(|| {
     rocksdb::DB::open(&OPEN_OPTIONS, "bitlens-blocktxs")
         .expect("to have opened bitlens-blocktxs db")
 });
