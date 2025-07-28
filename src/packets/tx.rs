@@ -111,7 +111,9 @@ impl Serializable for TxOwned {
         serialize_array(&self.txouts, stream);
 
         if let Some(witnesses) = &self.witness_data {
-            serialize_array(witnesses, stream);
+            for witness in witnesses.iter() {
+                stream.put_slice(&witness);
+            }
         }
 
         stream.put_u32_le(self.locktime);
@@ -265,25 +267,13 @@ impl TxRef<'_> {
                 Either::Left(witnesses) => {
                     for i in 0..witnesses.len() {
                         let witness = &witnesses[i];
-                        total += length_varint(witness.len() as VarInt); // component count len
                         total += witness.len();
-                        /*for j in 0..witness.len() {
-                            let component = &witness[j];
-                            total += length_varint(component.len() as VarInt); // component size len
-                            total += component.len(); // component len
-                        }*/
                     }
                 }
                 Either::Right(witnesses) => {
                     for i in 0..witnesses.len() {
                         let witness = witnesses[i];
-                        total += length_varint(witness.len() as VarInt); // component count len
                         total += witness.len();
-                        /*for j in 0..witness.len() {
-                            let component = witness[j];
-                            total += length_varint(component.len() as VarInt); // component size len
-                            total += component.len(); // component len
-                        }*/
                     }
                 }
             }
@@ -309,20 +299,12 @@ impl TxRef<'_> {
             match witnesses {
                 Either::Left(witnesses) => {
                     for witness in witnesses.iter() {
-                        /*serialize_varint(witness.len() as VarInt, stream);
-                        for witness_component in witness.iter() {
-                            serialize_varstr(witness_component, stream);
-                        }*/
-                        serialize_varstr(&witness, stream);
+                        stream.put_slice(&witness);
                     }
                 }
                 Either::Right(witnesses) => {
                     for witness in witnesses.iter() {
-                        /*serialize_varint(witness.len() as VarInt, stream);
-                        for witness_component in witness.iter() {
-                            serialize_varstr(witness_component, stream);
-                        }*/
-                        serialize_varstr(witness, stream);
+                        stream.put_slice(&witness);
                     }
                 }
             }
