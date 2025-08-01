@@ -16,6 +16,7 @@ impl Default for FrontPageDataWithSerialized {
 }
 
 #[derive(Default, Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct FrontPageData {
     pub stats: Stats,
     pub latest_blocks: Vec<ShortBlock>,
@@ -23,6 +24,7 @@ pub struct FrontPageData {
 }
 
 #[derive(Default, Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ShortBlock {
     pub number: u64,
     pub hash: String,
@@ -33,6 +35,7 @@ pub struct ShortBlock {
 }
 
 #[derive(Default, Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ShortTx {
     pub hash: String,
     pub value: f64,
