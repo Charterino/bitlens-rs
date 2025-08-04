@@ -1,8 +1,12 @@
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Error, Result, bail};
+use rand::RngCore;
 use slog_scope::{debug, info};
-use tokio::time::{self, Instant, sleep};
+use tokio::{
+    select,
+    time::{self, Instant, interval, sleep},
+};
 
 use crate::{
     addrman::{self, peers_seen},
@@ -11,12 +15,14 @@ use crate::{
         getaddr::GetAddr,
         network_id::NetworkId,
         packetpayload::{InvalidChecksum, PayloadToSend, ReceivedPayload},
+        ping::Ping,
     },
     types::addressportnetwork::AddressPortNetwork,
 };
 
 const NO_PEERS_SLEEP_DURATION: Duration = Duration::from_secs(1);
 const SLEEP_BETWEEN_CRAWLS_DURATION: Duration = Duration::from_millis(20);
+const PING_EVERY: Duration = Duration::from_secs(60);
 
 pub async fn crawl_forever() {
     loop {
@@ -87,7 +93,7 @@ fn evaluate_crawl_result(
             .downcast_ref::<InvalidChecksum>()
         {
             Some(_) => {
-                // Instantly bad peers that do not follow the checksum requirements
+                // Instantly ban peers that do not follow the checksum protocol
                 *failed_times += 14;
             }
             None => {
@@ -162,17 +168,24 @@ async fn crawl(peer: &AddressPortNetwork, res: &mut CrawlResult) -> Result<()> {
         .inner
         .write_packet(&PayloadToSend::GetAddr(GetAddr {}))
         .await?;
+    let mut ping_interval = interval(PING_EVERY);
     loop {
-        {
-            let packet = connection.inner.read_packet().await?;
-            packet.payload.with_payload(|payload| {
-                if let Some(payload) = payload {
-                    handle_payload(payload);
-                }
-                res.packets_received_total += 1;
-            });
+        select! {
+            _ = ping_interval.tick() => {
+                let nonce = rand::rng().next_u64();
+                connection.inner.write_packet(&PayloadToSend::Ping(Ping {nonce})).await?;
+            }
+            packet = connection.inner.read_packet() => {
+                let packet = packet?;
+                packet.payload.with_payload(|payload| {
+                    if let Some(payload) = payload {
+                        handle_payload(payload);
+                    }
+                    res.packets_received_total += 1;
+                });
+                addrman::update_peer_online(peer.clone(), connection.remote_version.services).await;
+            }
         }
-        addrman::update_peer_online(peer.clone(), connection.remote_version.services).await;
     }
 }
 
