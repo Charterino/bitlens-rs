@@ -84,7 +84,7 @@ pub fn deserialize_array_of_varsrs_iter(buffer: &[u8]) -> Result<VarStrIter> {
     let (count, consumed) = deserialize_varint(buffer)?;
     Ok(VarStrIter {
         offset: consumed,
-        buffer: buffer,
+        buffer,
         remaining: count,
     })
 }

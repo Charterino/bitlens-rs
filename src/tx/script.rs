@@ -157,7 +157,7 @@ pub fn get_transaction_sigop_cost(tx: TxRef, dependencies: &[TxOutRef], flags: S
             match wd {
                 either::Either::Left(wd) => {
                     let a = &wd[txin_idx];
-                    sigops += count_witness_sigops(txin.sig_script(), txout.script(), &a, flags);
+                    sigops += count_witness_sigops(txin.sig_script(), txout.script(), a, flags);
                 }
                 either::Either::Right(wd) => {
                     let a = wd[txin_idx];

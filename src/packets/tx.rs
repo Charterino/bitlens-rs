@@ -11,6 +11,7 @@ use super::{
 };
 use anyhow::{Result, anyhow, bail};
 use either::Either;
+use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -89,13 +90,16 @@ impl<'a> DeserializableBorrowed<'a> for TxBorrowed<'a> {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TxOwned {
     pub version: u32,
     pub locktime: u32,
     pub txins: Vec<TxInOwned>,
     pub txouts: Vec<TxOutOwned>,
+    #[serde(serialize_with = "crate::util::serialize_witnesses::serialize_witnesses")]
     pub witness_data: Option<Vec<Vec<u8>>>,
+    #[serde(serialize_with = "crate::util::serialize_as_hex::serialize_hash_as_hex_reversed")]
     pub hash: [u8; 32], // calculated during deserialization
 }
 
@@ -112,7 +116,7 @@ impl Serializable for TxOwned {
 
         if let Some(witnesses) = &self.witness_data {
             for witness in witnesses.iter() {
-                stream.put_slice(&witness);
+                stream.put_slice(witness);
             }
         }
 
@@ -299,12 +303,12 @@ impl TxRef<'_> {
             match witnesses {
                 Either::Left(witnesses) => {
                     for witness in witnesses.iter() {
-                        stream.put_slice(&witness);
+                        stream.put_slice(witness);
                     }
                 }
                 Either::Right(witnesses) => {
                     for witness in witnesses.iter() {
-                        stream.put_slice(&witness);
+                        stream.put_slice(witness);
                     }
                 }
             }
@@ -353,11 +357,14 @@ impl Serializable for TxInBorrowed<'_> {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TxInOwned {
+    #[serde(serialize_with = "crate::util::serialize_as_hex::serialize_hash_as_hex_reversed")]
     pub prevout_hash: [u8; 32],
     pub prevout_index: u32,
     pub sequence: u32,
+    #[serde(serialize_with = "crate::util::serialize_as_hex::serialize_as_hex")]
     pub sig_script: Vec<u8>,
 }
 
@@ -471,9 +478,11 @@ impl<'a> DeserializableBorrowed<'a> for TxOutBorrowed<'a> {
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TxOutOwned {
     pub value: u64,
+    #[serde(serialize_with = "crate::util::serialize_as_hex::serialize_as_hex")]
     pub script: Vec<u8>,
 }
 

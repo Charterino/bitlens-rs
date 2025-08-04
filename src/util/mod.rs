@@ -6,6 +6,8 @@ pub mod hash;
 pub mod merkle;
 pub mod online_list;
 pub mod pow;
+pub mod serialize_as_hex;
+pub mod serialize_witnesses;
 pub mod shortcircuit;
 pub mod speedtracker;
 pub mod timeout;

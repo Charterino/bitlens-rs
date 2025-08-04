@@ -23,10 +23,10 @@ static OPEN_OPTIONS: LazyLock<Options> = LazyLock::new(|| {
     open_options.set_optimize_filters_for_hits(true);
     open_options.set_max_open_files(16 * 1024);
 
-    let cache = Cache::new_lru_cache(1 * 1024 * 1024 * 1024); // 1gb
+    let cache = Cache::new_lru_cache(1024 * 1024 * 1024); // 1gb
     open_options.set_write_buffer_manager(
         &WriteBufferManager::new_write_buffer_manager_with_cache(
-            1 * 1024 * 1024 * 1024,
+            1024 * 1024 * 1024,
             true,
             cache.clone(),
         ),

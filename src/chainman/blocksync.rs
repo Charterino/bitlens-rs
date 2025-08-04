@@ -93,7 +93,7 @@ async fn run_master(
     let mut state = MasterState {
         missing_blocks,
         first_missing_number,
-        last_request_times: last_request_times,
+        last_request_times,
         next_to_apply: 0,
         next_never_asked_for: 0,
         // backlog will store blocks we will need later but dont need RIGHT NOW.
@@ -206,7 +206,7 @@ async fn handle_worker_message(
                     &mut state.backlog,
                     state.first_missing_number,
                     &mut state.next_to_apply,
-                    &flush,
+                    flush,
                 )
                 .await;
                 state.flush_time_tracker.stop();

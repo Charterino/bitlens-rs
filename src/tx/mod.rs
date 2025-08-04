@@ -10,6 +10,7 @@ use crate::{
 use fee::calculate_fee;
 use flags::{SCRIPT_VERIFY_P2SH, SCRIPT_VERIFY_WITNESS};
 use script::get_transaction_sigop_cost;
+use serde::Serialize;
 use size::calculate_tx_size_wus;
 
 mod fee;
@@ -23,6 +24,8 @@ mod script_test;
 #[cfg(test)]
 mod size_test;
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AnalyzedTx {
     pub fee: u64,
     pub txouts_sum: u64,
