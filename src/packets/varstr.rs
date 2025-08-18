@@ -6,6 +6,7 @@ use super::{
 use anyhow::{Result, bail};
 use bytes::BufMut;
 
+#[allow(dead_code)]
 const fn length_varstr(v: &[u8]) -> usize {
     length_varint(v.len() as u64) + v.len()
 }
