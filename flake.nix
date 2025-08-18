@@ -85,6 +85,7 @@
             hardeningDisable = [ "fortify" ];
             shellHook = ''
               export LIBCLANG_PATH=${pkgs.libclang.lib}/lib
+              export RUST_SRC_PATH=${pkgs.rust.packages.stable.rustPlatform.rustLibSrc}
             '';
           };
         }
