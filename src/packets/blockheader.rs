@@ -7,6 +7,7 @@ use super::{
 use crate::util::{arena::Arena, compact::u256_from_compact};
 use anyhow::bail;
 use primitive_types::U256;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 #[derive(Clone, Debug, Copy)]
@@ -59,16 +60,19 @@ impl<'a> DeserializableBorrowed<'a> for BlockHeaderBorrowed<'a> {
     }
 }
 
-#[derive(Clone, Debug, Copy, Default)]
+#[derive(Clone, Debug, Copy, Default, Serialize, Deserialize)]
 pub struct BlockHeaderOwned {
     pub version: u32,
+    #[serde(serialize_with = "crate::util::serialize_as_hex::serialize_hash_as_hex_reversed")]
     pub parent: [u8; 32],
+    #[serde(serialize_with = "crate::util::serialize_as_hex::serialize_hash_as_hex_reversed")]
     pub merkle_root: [u8; 32],
     pub timestamp: u32,
     pub bits: u32,
     pub nonce: u32,
     pub txs_count: VarInt, // Always present
 
+    #[serde(serialize_with = "crate::util::serialize_as_hex::serialize_hash_as_hex_reversed")]
     pub hash: [u8; 32], // calculated during deserialization
 }
 
@@ -105,7 +109,7 @@ impl BlockHeaderOwned {
             hash: [0u8; 32],
         };
         let mut b = Vec::with_capacity(88);
-        s.serialize(&mut b);
+        Serializable::serialize(&s, &mut b);
         let hash = Sha256::digest(b.get(0..80).unwrap());
         let hash = Sha256::digest(hash).into();
         s.hash = hash;

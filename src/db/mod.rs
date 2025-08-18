@@ -1,10 +1,10 @@
-use rocksdb::{SerializedTx, setup_rocksdb, write_block_txs, write_txouts, write_txs};
-use sqlite::{mark_blocks_as_downloaded, setup_sqlite};
-
 use crate::{
+    db::rocksdb::BlockTxEntry,
     packets::varint::{VarInt, length_varint, serialize_varint},
     types::blockmetrics::BlockMetrics,
 };
+use rocksdb::{SerializedTx, setup_rocksdb, write_block_txs, write_txouts, write_txs};
+use sqlite::{mark_blocks_as_downloaded, setup_sqlite};
 
 mod batch;
 mod batched;
@@ -29,15 +29,28 @@ pub async fn write_analyzed_txs(
 
     let serialized_txhashes: Vec<Vec<u8>> = txs
         .iter()
-        .map(|block| block.iter().map(|tx| tx.hash).collect::<Vec<[u8; 32]>>())
-        .map(|hashes| {
-            let length = length_varint(hashes.len() as VarInt);
-            let mut serialized = Vec::with_capacity(length + (hashes.len() * 32));
-            serialize_varint(hashes.len() as VarInt, &mut serialized);
+        .map(|block_txs| {
+            let length = length_varint(block_txs.len() as VarInt);
+            let mut serialized =
+                Vec::with_capacity(length + (block_txs.len() * size_of::<BlockTxEntry>()));
+            let initial_cap = serialized.capacity();
+            serialize_varint(block_txs.len() as VarInt, &mut serialized);
 
-            for tx in hashes {
-                serialized.extend_from_slice(&tx);
+            for tx in block_txs.iter() {
+                bincode::encode_into_std_write(
+                    BlockTxEntry {
+                        hash: tx.hash,
+                        value: tx.txouts_sum as f64 / 100_000_000.,
+                        fee_sats: tx.fee,
+                        size_wus: tx.size_wus,
+                    },
+                    &mut serialized,
+                    bincode::config::standard(),
+                )
+                .expect("to serialize blocktxentry");
             }
+
+            assert_eq!(initial_cap, serialized.capacity());
 
             serialized
         })

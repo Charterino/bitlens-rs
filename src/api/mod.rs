@@ -5,15 +5,21 @@ use axum::{
     response::IntoResponse,
     routing::get,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tower_http::cors::CorsLayer;
 
-use crate::{chainman::FRONTPAGE_STATS, db, tx::AnalyzedTx};
+use crate::{
+    chainman::{self, FRONTPAGE_STATS},
+    db::{self, rocksdb::BlockTxEntry},
+    tx::AnalyzedTx,
+    types::blockheaderwithnumber::BlockHeaderWithNumber,
+};
 
 pub async fn start() {
     let app = Router::new()
         .route("/api/frontpagedata", get(frontpagedata))
         .route("/api/tx", get(txdata))
+        .route("/api/block", get(blockdata))
         .layer(
             CorsLayer::new()
                 .allow_origin("*".parse::<HeaderValue>().unwrap())
@@ -34,11 +40,11 @@ async fn frontpagedata() -> impl IntoResponse {
 }
 
 #[derive(Debug, Deserialize)]
-struct TxByHashParams {
+struct HashParam {
     hash: String,
 }
 
-async fn txdata(Query(params): Query<TxByHashParams>) -> Result<Json<AnalyzedTx>, StatusCode> {
+async fn txdata(Query(params): Query<HashParam>) -> Result<Json<AnalyzedTx>, StatusCode> {
     let mut unhexxed = match hex::decode(params.hash) {
         Err(_) => return Err(StatusCode::BAD_REQUEST),
         Ok(v) => v,
@@ -61,4 +67,32 @@ async fn txdata(Query(params): Query<TxByHashParams>) -> Result<Json<AnalyzedTx>
     tx.tx.txouts = txouts;
 
     Ok(Json(tx))
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct BlockDataResponse {
+    pub header: BlockHeaderWithNumber,
+    pub txs: Vec<BlockTxEntry>,
+}
+
+async fn blockdata(Query(params): Query<HashParam>) -> Result<Json<BlockDataResponse>, StatusCode> {
+    let mut unhexxed = match hex::decode(params.hash) {
+        Err(_) => return Err(StatusCode::BAD_REQUEST),
+        Ok(v) => v,
+    };
+    if unhexxed.len() != 32 {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    unhexxed.reverse();
+    let unhexxed: [u8; 32] = unhexxed.try_into().unwrap();
+    let header = match chainman::get_header_by_hash(unhexxed) {
+        None => return Err(StatusCode::NOT_FOUND),
+        Some(v) => v,
+    };
+
+    let txs = db::rocksdb::get_block_tx_entires(unhexxed)
+        .await
+        .unwrap_or_default();
+
+    Ok(Json(BlockDataResponse { header, txs }))
 }

@@ -99,6 +99,11 @@ pub fn get_top_header_hash() -> [u8; 32] {
     c.top_header.header.hash
 }
 
+pub fn get_header_by_hash(hash: [u8; 32]) -> Option<BlockHeaderWithNumber> {
+    let r = CHAIN.read().unwrap();
+    r.known_headers.get(&hash).cloned()
+}
+
 // generates the frontpage data from nothing but the top block hash, pulling all data from the store
 async fn generate_frontpage_data(top_block_hash: [u8; 32]) {
     let stats = calculate_stats(top_block_hash, None).await;
@@ -117,7 +122,7 @@ async fn generate_frontpage_data(top_block_hash: [u8; 32]) {
         }
 
         // pull the tx hashes that are in this block from rocksdb
-        let block_tx_hashes = db::rocksdb::get_block_tx_hashes(current_header.header.hash)
+        let block_tx_hashes = db::rocksdb::get_block_tx_entires(current_header.header.hash)
             .await
             .expect("to fetch block txs from rocksdb");
 
@@ -134,11 +139,11 @@ async fn generate_frontpage_data(top_block_hash: [u8; 32]) {
             FRONTPAGE_TXS_COUNT - latest_txs.len(),
             block_tx_hashes.len(),
         );
-        for tx_hash in block_tx_hashes.iter().take(missing_txs) {
-            let tx = db::rocksdb::get_analyzed_tx(*tx_hash)
+        for tx_entry in block_tx_hashes.iter().take(missing_txs) {
+            let tx = db::rocksdb::get_analyzed_tx(tx_entry.hash)
                 .await
                 .expect("to get analyzed tx from rocksdb");
-            let mut human_hash = *tx_hash;
+            let mut human_hash = tx_entry.hash;
             human_hash.reverse();
             let human_hash = hex::encode(human_hash);
             latest_txs.push(ShortTx {

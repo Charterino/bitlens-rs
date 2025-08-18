@@ -1,8 +1,9 @@
 use primitive_types::U256;
+use serde::{Deserialize, Serialize};
 
 use crate::packets::blockheader::BlockHeaderOwned;
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct BlockHeaderWithNumber {
     pub header: BlockHeaderOwned,
     pub number: u64,

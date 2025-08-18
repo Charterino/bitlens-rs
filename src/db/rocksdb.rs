@@ -9,6 +9,8 @@ use rocksdb::BlockBasedOptions;
 use rocksdb::Cache;
 use rocksdb::WriteBufferManager;
 use rocksdb::{DB, IngestExternalFileOptions, Options};
+use serde::Deserialize;
+use serde::Serialize;
 use std::sync::LazyLock;
 use tokio::sync::Semaphore;
 
@@ -76,6 +78,15 @@ pub struct SerializedTx<'a> {
     // but are stored for easy access after writing this transaction to update the front page response.
     pub fee: u64,
     pub txouts_sum: u64,
+    pub size_wus: u32,
+}
+
+#[derive(bincode::Decode, bincode::Encode, Serialize, Deserialize)]
+pub struct BlockTxEntry {
+    #[serde(serialize_with = "crate::util::serialize_as_hex::serialize_hash_as_hex_reversed")]
+    pub hash: [u8; 32],
+    pub value: f64,
+    pub fee_sats: u64,
     pub size_wus: u32,
 }
 
@@ -171,7 +182,7 @@ pub async fn write_block_txs(blocks_with_txs_pairs: Vec<(&[u8; 32], Vec<u8>)>) {
     BLOCKTXS_DB.flush().expect("to flush blocktxs");
 }
 
-pub async fn get_block_tx_hashes(hash: [u8; 32]) -> Result<Vec<[u8; 32]>> {
+pub async fn get_block_tx_entires(hash: [u8; 32]) -> Result<Vec<BlockTxEntry>> {
     let _g = READ_SEMAPHORE
         .acquire()
         .await
@@ -187,10 +198,11 @@ pub async fn get_block_tx_hashes(hash: [u8; 32]) -> Result<Vec<[u8; 32]>> {
             let (count, mut continue_at) = deserialize_varint(&data)?;
             let mut result = Vec::with_capacity(count as usize);
             for _ in 0..count {
-                let mut tx_hash: [u8; 32] = [0u8; 32];
-                tx_hash.copy_from_slice(&data[continue_at..continue_at + 32]);
-                continue_at += 32;
-                result.push(tx_hash);
+                let bytes = &data[continue_at..];
+                let (value, consumed) =
+                    bincode::decode_from_slice(bytes, bincode::config::standard()).unwrap();
+                result.push(value);
+                continue_at += consumed;
             }
             Ok(result)
         }
