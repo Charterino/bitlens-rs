@@ -42,8 +42,8 @@ pub fn deserialize_array<'a, T: DeserializableBorrowed<'a> + Default + Copy>(
 ) -> Result<(&'a [T], usize)> {
     let (count, mut offset) = deserialize_varint(buffer)?;
     let array = allocator.try_alloc_array_fill_copy(count as usize, T::default())?;
-    for i in 0..count as usize {
-        offset += array[i].deserialize_borrowed(allocator, buffer.with_offset(offset)?)?;
+    for item in array.iter_mut() {
+        offset += item.deserialize_borrowed(allocator, buffer.with_offset(offset)?)?;
     }
 
     Ok((array, offset))

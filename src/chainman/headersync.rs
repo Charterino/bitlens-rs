@@ -5,6 +5,7 @@ use crate::{
     chainman::{CHAIN, validate_and_apply_headers},
     ok_or_break,
     packets::{
+        blockheader::BlockHeaderRef,
         getheaders::GetHeadersOwned,
         packetpayload::{PayloadToSend, ReceivedPayload},
     },
@@ -17,8 +18,15 @@ use super::{SYNCING_HEADERS, build_get_headers, need_ihd};
 
 const HEADERS_TIMEOUT: Duration = Duration::from_millis(500);
 
-pub async fn sync_headers() {
+pub fn start_syncing_headers() {
     SYNCING_HEADERS.store(true, Ordering::Relaxed);
+}
+
+pub fn stop_syncing_headers() {
+    SYNCING_HEADERS.store(false, Ordering::Relaxed);
+}
+
+pub async fn sync_headers() {
     while need_ihd() {
         let mut connection = addrman::connect_to_good_peer(None).await;
         let get_headers = build_get_headers();
@@ -48,7 +56,6 @@ pub async fn sync_headers() {
             }
         }
     }
-    SYNCING_HEADERS.store(false, Ordering::Relaxed);
 }
 
 fn handle_packet_during_headersync(
@@ -66,7 +73,7 @@ fn handle_packet_during_headersync(
             return None;
         }
         let r = CHAIN.read().unwrap();
-        info!("chainman: header sync progress"; "top hash" => r.top_header.header.human_hash(), "top number" => r.top_header.number);
+        info!("chainman: header sync progress"; "top hash" => BlockHeaderRef::Owned(&r.top_header.header).human_hash(), "top number" => r.top_header.number);
         *deadline = Instant::now().checked_add(HEADERS_TIMEOUT).unwrap();
         if need_ihd() {
             return Some(vec![PayloadToSend::GetHeaders(GetHeadersOwned {

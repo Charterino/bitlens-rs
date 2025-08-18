@@ -1,15 +1,14 @@
+use rusqlite::Connection;
 use std::{
     collections::HashMap,
     sync::{LazyLock, Mutex},
     time::SystemTime,
 };
-
-use rusqlite::Connection;
 use tokio::{sync::mpsc::Sender, time::Instant};
 
 use crate::{
     metrics::METRIC_SQLITE_REQUESTS_TIME,
-    packets::blockheader::BlockHeaderOwned,
+    packets::blockheader::{BlockHeaderOwned, BlockHeaderRef},
     types::{
         addressportnetwork::AddressPortNetwork, blockheaderwithnumber::BlockHeaderWithNumber,
         blockmetrics::BlockMetrics,
@@ -154,7 +153,10 @@ pub async fn get_all_headers() -> Vec<BlockHeaderWithNumber> {
     let start = Instant::now();
     let mut stmt = conn.prepare_cached("SELECT version, previous_block, merkle_root, timestamp, bits, nonce, block_number, block_hash, fetched_full FROM headers ORDER BY block_number ASC;").unwrap();
     let mut work_totals = HashMap::new();
-    work_totals.insert(GENESIS_HEADER.hash, GENESIS_HEADER.get_work());
+    work_totals.insert(
+        GENESIS_HEADER.hash,
+        BlockHeaderRef::Owned(&GENESIS_HEADER).get_work(),
+    );
     let iter = stmt
         .query_map([], |row| {
             let header = BlockHeaderOwned {
@@ -171,7 +173,7 @@ pub async fn get_all_headers() -> Vec<BlockHeaderWithNumber> {
                 Some(w) => w,
                 None => return Err(rusqlite::Error::ExecuteReturnedResults),
             };
-            let our_work = *parent_work + header.get_work();
+            let our_work = *parent_work + BlockHeaderRef::Owned(&header).get_work();
             work_totals.insert(header.hash, our_work);
             Ok(BlockHeaderWithNumber {
                 header,
@@ -188,7 +190,7 @@ pub async fn get_all_headers() -> Vec<BlockHeaderWithNumber> {
     result
 }
 
-pub async fn insert_header(header: &BlockHeaderWithNumber) {
+pub async fn insert_header(header: BlockHeaderWithNumber) {
     INSERT_HEADER_QUEUE
         .send(InsertHeaderRequest {
             parent: header.header.parent,
@@ -220,7 +222,7 @@ pub fn mark_blocks_as_downloaded(hashes: &[[u8; 32]], metrics: &[BlockMetrics]) 
         }
 
         let mut stmt = tx
-            .prepare_cached("INSERT INTO block_stats VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+            .prepare_cached("INSERT OR REPLACE INTO block_stats VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
             .expect("to prepare statement");
 
         let zipped = hashes.iter().zip(metrics);

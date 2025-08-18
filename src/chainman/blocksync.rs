@@ -1,18 +1,4 @@
-use core::panic;
-use std::{
-    collections::HashMap,
-    num::NonZeroUsize,
-    sync::{Arc, Mutex, RwLock, atomic::Ordering},
-    time::{Duration, SystemTime, UNIX_EPOCH},
-};
-
-use slog_scope::{debug, info};
-use tokio::{
-    join, select,
-    sync::mpsc::{Receiver, Sender, channel},
-    time::Instant,
-};
-
+use super::{SYNCING_BODIES, mark_as_downloaded, update_frontpage_data};
 use crate::{
     addrman,
     db::{self, rocksdb::SerializedTx, write_analyzed_txs},
@@ -31,8 +17,19 @@ use crate::{
     with_deadline,
 };
 use anyhow::Result;
-
-use super::{get_block_hashes_to_download, mark_as_downloaded, update_frontpage_response};
+use core::panic;
+use slog_scope::{debug, info};
+use std::{
+    collections::HashMap,
+    num::NonZeroUsize,
+    sync::{Arc, Mutex, RwLock, atomic::Ordering},
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
+use tokio::{
+    join, select,
+    sync::mpsc::{Receiver, Sender, channel},
+    time::Instant,
+};
 
 const BLOCK_TIMEOUT: Duration = Duration::from_millis(5000);
 const INITIAL_WORKER_COUNT: usize = 20;
@@ -49,18 +46,32 @@ pub enum DownloadWorkerMessage {
 type BlockHashWithNumber = ([u8; 32], u64);
 type BlockWithNumber = (PayloadWithAllocator, u64);
 
-pub async fn sync_blocks() {
+pub fn start_syncing_blocks() {
+    SYNCING_BODIES.store(true, Ordering::Relaxed);
     // Increase the max number of deserialize arenas while we're syncing blocks
     packet::CURRENT_POOL_LIMIT.store(
         packet::MAX_DESERIALIZE_ARENA_COUNT_DURING_BLOCKSYNC,
         Ordering::Relaxed,
     );
+}
+
+pub fn stop_syncing_blocks() {
+    packet::CURRENT_POOL_LIMIT.store(packet::INITIAL_DESERIALIZE_ARENA_COUNT, Ordering::Relaxed);
+    SYNCING_BODIES.store(false, Ordering::Relaxed);
+}
+
+pub async fn sync_blocks(missing_blocks: Vec<[u8; 32]>, first_missing_number: u64) {
     let (flush_tx, flush_rx) = channel(1);
     let (master_tx, master_rx) = channel(1);
-    let master = tokio::spawn(run_master(master_tx, master_rx, flush_tx));
+    let master = tokio::spawn(run_master(
+        master_tx,
+        master_rx,
+        flush_tx,
+        missing_blocks,
+        first_missing_number,
+    ));
     let block_writer = tokio::spawn(receive_and_process_blocks(flush_rx));
     let _ = join!(master, block_writer);
-    packet::CURRENT_POOL_LIMIT.store(packet::INITIAL_DESERIALIZE_ARENA_COUNT, Ordering::Relaxed);
 }
 
 struct MasterState {
@@ -80,13 +91,14 @@ async fn run_master(
     master_tx: Sender<DownloadWorkerMessage>,
     mut master_rx: Receiver<DownloadWorkerMessage>,
     flush: Sender<BlockWithNumber>,
+    missing_blocks: Vec<[u8; 32]>,
+    first_missing_number: u64,
 ) {
     let mut workers = Vec::with_capacity(INITIAL_WORKER_COUNT);
     // Spawn initial workers
     for _ in 0..INITIAL_WORKER_COUNT {
         workers.push(tokio::spawn(run_download_worker(master_tx.clone())));
     }
-    let (missing_blocks, first_missing_number) = some_or_return!(get_block_hashes_to_download());
     info!("got missing blocks"; "first" => first_missing_number, "count" => missing_blocks.len());
 
     let last_request_times = vec![0u64; missing_blocks.len()];
@@ -485,13 +497,7 @@ async fn receive_and_process_blocks(mut recv: Receiver<(PayloadWithAllocator, u6
                 // update fetched_full in chainman's live state
                 let top = next_batch[next_batch.len() - 1];
                 mark_as_downloaded(next_batch);
-                update_frontpage_response(
-                    top,
-                    Some(&current_metrics),
-                    Some(&current_analyzed),
-                    false,
-                )
-                .await;
+                update_frontpage_data(top, &current_metrics, &current_analyzed).await;
                 *pm_clone.lock().unwrap() = Some(current_metrics);
                 *pa_clone.lock().unwrap() = Some(current_analyzed);
             });
@@ -513,9 +519,9 @@ async fn receive_and_process_blocks(mut recv: Receiver<(PayloadWithAllocator, u6
     }
 }
 
-async fn get_next_batch_to_flush<'current, 'previous>(
+async fn get_next_batch_to_flush<'current>(
     recv: &mut Receiver<(PayloadWithAllocator, u64)>,
-    current_state: Arc<RwLock<ChainSyncState<'current, 'previous>>>,
+    current_state: Arc<RwLock<ChainSyncState<'current, '_>>>,
     current_arena: &'current Arena,
 ) -> Vec<[u8; 32]> {
     assert_eq!(current_arena.used(), 0);

@@ -23,6 +23,8 @@ static OPEN_OPTIONS: LazyLock<Options> = LazyLock::new(|| {
     open_options.set_optimize_filters_for_hits(true);
     open_options.set_max_open_files(16 * 1024);
 
+    open_options.set_use_direct_io_for_flush_and_compaction(true);
+
     let cache = Cache::new_lru_cache(1024 * 1024 * 1024); // 1gb
     open_options.set_write_buffer_manager(
         &WriteBufferManager::new_write_buffer_manager_with_cache(
@@ -43,6 +45,7 @@ static OPEN_OPTIONS: LazyLock<Options> = LazyLock::new(|| {
 static INGEST_OPTIONS: LazyLock<IngestExternalFileOptions> = LazyLock::new(|| {
     let mut ingest_options = IngestExternalFileOptions::default();
     ingest_options.set_move_files(true);
+    ingest_options.set_snapshot_consistency(false);
     ingest_options
 });
 

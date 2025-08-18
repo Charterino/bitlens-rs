@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use crate::{
+    packets::blockheader::BlockHeaderRef,
     types::blockheaderwithnumber::BlockHeaderWithNumber,
     util::{
         genesis::GENESIS_HEADER,
@@ -20,7 +21,7 @@ impl Default for Chain {
             header: *GENESIS_HEADER,
             number: 0,
             fetched_full: false,
-            total_work: GENESIS_HEADER.get_work(),
+            total_work: BlockHeaderRef::Owned(&GENESIS_HEADER).get_work(),
         };
         known.insert(GENESIS_HEADER.hash, genesis.clone());
         Self {

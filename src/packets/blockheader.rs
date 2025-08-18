@@ -52,36 +52,10 @@ impl<'a> DeserializableBorrowed<'a> for BlockHeaderBorrowed<'a> {
         let hash = Sha256::digest(buffer.get(0..80).unwrap());
         self.hash = Sha256::digest(hash).into();
 
-        if !self.is_valid() {
+        if !(BlockHeaderRef::Borrowed(self)).is_valid() {
             bail!("invalid header")
         }
         Ok(80 + offset)
-    }
-}
-
-impl BlockHeaderBorrowed<'_> {
-    pub fn human_hash(&self) -> String {
-        let mut h = self.hash;
-        h.reverse();
-        hex::encode(h)
-    }
-
-    pub fn get_work(&self) -> U256 {
-        let uncompacted = u256_from_compact(self.bits);
-        let mut inverted = uncompacted;
-        inverted.0[0] = !inverted.0[0];
-        inverted.0[1] = !inverted.0[1];
-        inverted.0[2] = !inverted.0[2];
-        inverted.0[3] = !inverted.0[3];
-        let result = inverted / (uncompacted + 1);
-        result + 1
-    }
-
-    // Checks whether the hash has at least `bits` amount of work.
-    pub fn is_valid(&self) -> bool {
-        let target = u256_from_compact(self.bits);
-        let hash_number = U256::from_little_endian(&self.hash);
-        hash_number < target
     }
 }
 
@@ -137,30 +111,6 @@ impl BlockHeaderOwned {
         s.hash = hash;
         s
     }
-
-    pub fn human_hash(&self) -> String {
-        let mut h = self.hash;
-        h.reverse();
-        hex::encode(h)
-    }
-
-    pub fn get_work(&self) -> U256 {
-        let uncompacted = u256_from_compact(self.bits);
-        let mut inverted = uncompacted;
-        inverted.0[0] = !inverted.0[0];
-        inverted.0[1] = !inverted.0[1];
-        inverted.0[2] = !inverted.0[2];
-        inverted.0[3] = !inverted.0[3];
-        let result = inverted / (uncompacted + 1);
-        result + 1
-    }
-
-    // Checks whether the hash has at least `bits` amount of work.
-    pub fn is_valid(&self) -> bool {
-        let target = u256_from_compact(self.bits);
-        let hash_number = U256::from_little_endian(&self.hash);
-        hash_number < target
-    }
 }
 
 impl From<BlockHeaderBorrowed<'_>> for BlockHeaderOwned {
@@ -174,6 +124,66 @@ impl From<BlockHeaderBorrowed<'_>> for BlockHeaderOwned {
             nonce: value.nonce,
             txs_count: value.txs_count,
             hash: value.hash,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum BlockHeaderRef<'a> {
+    Borrowed(&'a BlockHeaderBorrowed<'a>),
+    Owned(&'a BlockHeaderOwned),
+}
+
+impl BlockHeaderRef<'_> {
+    pub fn hash(&self) -> [u8; 32] {
+        match self {
+            BlockHeaderRef::Borrowed(block_header_borrowed) => block_header_borrowed.hash,
+            BlockHeaderRef::Owned(block_header_owned) => block_header_owned.hash,
+        }
+    }
+
+    pub fn parent(&self) -> [u8; 32] {
+        match self {
+            BlockHeaderRef::Borrowed(block_header_borrowed) => *block_header_borrowed.parent,
+            BlockHeaderRef::Owned(block_header_owned) => block_header_owned.parent,
+        }
+    }
+
+    pub fn bits(&self) -> u32 {
+        match self {
+            BlockHeaderRef::Borrowed(block_header_borrowed) => block_header_borrowed.bits,
+            BlockHeaderRef::Owned(block_header_owned) => block_header_owned.bits,
+        }
+    }
+
+    pub fn human_hash(&self) -> String {
+        let mut h = self.hash();
+        h.reverse();
+        hex::encode(h)
+    }
+
+    pub fn get_work(&self) -> U256 {
+        let uncompacted = u256_from_compact(self.bits());
+        let mut inverted = uncompacted;
+        inverted.0[0] = !inverted.0[0];
+        inverted.0[1] = !inverted.0[1];
+        inverted.0[2] = !inverted.0[2];
+        inverted.0[3] = !inverted.0[3];
+        let result = inverted / (uncompacted + 1);
+        result + 1
+    }
+
+    // Checks whether the hash has at least `bits` amount of work.
+    pub fn is_valid(&self) -> bool {
+        let target = u256_from_compact(self.bits());
+        let hash_number = U256::from_little_endian(&self.hash());
+        hash_number < target
+    }
+
+    pub fn to_owned(&self) -> BlockHeaderOwned {
+        match self {
+            BlockHeaderRef::Borrowed(block_header_borrowed) => (**block_header_borrowed).into(),
+            BlockHeaderRef::Owned(block_header_owned) => *(*block_header_owned),
         }
     }
 }

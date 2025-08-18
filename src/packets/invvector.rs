@@ -9,7 +9,7 @@ use anyhow::bail;
 use num::{FromPrimitive, ToPrimitive};
 use num_derive::{FromPrimitive, ToPrimitive};
 
-#[derive(FromPrimitive, ToPrimitive, Clone, Default, Debug, Copy)]
+#[derive(FromPrimitive, ToPrimitive, Clone, Default, Debug, Copy, PartialEq, Eq)]
 pub enum InventoryVectorType {
     #[default]
     Error = 0,

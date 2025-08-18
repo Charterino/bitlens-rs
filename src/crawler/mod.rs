@@ -1,18 +1,30 @@
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::{
+    sync::atomic::Ordering,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 
 use anyhow::{Error, Result, bail};
 use rand::RngCore;
 use slog_scope::{debug, info};
 use tokio::{
     select,
+    sync::oneshot,
     time::{self, Instant, interval, sleep},
 };
 
 use crate::{
     addrman::{self, peers_seen},
+    chainman::{
+        self, SYNCING_BODIES, SYNCING_HEADERS, get_top_header_hash,
+        keepup::{NEW_HEADER_BROADCAST, WORKER_REGISTRATION_CHANNEL},
+    },
     connect::connect_and_handshake,
     packets::{
         getaddr::GetAddr,
+        getdata::GetDataOwned,
+        getheaders::GetHeadersOwned,
+        inv::InvOwned,
+        invvector::{InventoryVectorOwned, InventoryVectorType},
         network_id::NetworkId,
         packetpayload::{InvalidChecksum, PayloadToSend, ReceivedPayload},
         ping::Ping,
@@ -164,32 +176,76 @@ async fn crawl(peer: &AddressPortNetwork, res: &mut CrawlResult) -> Result<()> {
         connection.remote_version.user_agent,
     )
     .await;
+
+    // Right after connecting send a GetAddr packet to learn about new peers
+    // and send a GetHeaders packet so we can catch up to the main chain
     connection
         .inner
         .write_packet(&PayloadToSend::GetAddr(GetAddr {}))
         .await?;
+    connection
+        .inner
+        .write_packet(&PayloadToSend::GetHeaders(GetHeadersOwned {
+            version: 70016,
+            block_locator: vec![get_top_header_hash()],
+            hash_stop: [0u8; 32],
+        }))
+        .await?;
     let mut ping_interval = interval(PING_EVERY);
+    let mut new_header_chan = NEW_HEADER_BROADCAST.0.subscribe();
+    let (job_tx, mut job_rx) = oneshot::channel();
+    WORKER_REGISTRATION_CHANNEL
+        .get()
+        .unwrap()
+        .send(job_tx)
+        .await
+        .expect("to register peer as a worker");
     loop {
         select! {
+            // Share the new blocks we learn about with the peer
+            new_header = new_header_chan.recv() => {
+                let new_header = new_header?;
+                connection.inner.write_packet(&PayloadToSend::Inv(InvOwned { inner: vec![InventoryVectorOwned { inv_type: InventoryVectorType::Block, hash: new_header }] })).await?;
+            }
+            // Send a ping packet once every PING_EVERY interval
             _ = ping_interval.tick() => {
                 let nonce = rand::rng().next_u64();
                 connection.inner.write_packet(&PayloadToSend::Ping(Ping {nonce})).await?;
             }
+            // Handle the packets we receive from this peer
             packet = connection.inner.read_packet() => {
                 let packet = packet?;
-                packet.payload.with_payload(|payload| {
+                {
+                    let payload = packet.payload.borrow_payload();
                     if let Some(payload) = payload {
-                        handle_payload(payload);
+                        handle_payload(payload).await;
                     }
                     res.packets_received_total += 1;
-                });
+                }
                 addrman::update_peer_online(peer.clone(), connection.remote_version.services).await;
+            }
+            // Complete jobs assigned by the chainman
+            job = &mut job_rx => {
+                let job = job?;
+                connection.inner.write_packet(&PayloadToSend::GetData(GetDataOwned { inner: vec![InventoryVectorOwned { inv_type: InventoryVectorType::Block, hash: job }] })).await?;
+
+                // reregister
+                let (new_job_tx, new_job_rx) = oneshot::channel();
+                job_rx = new_job_rx;
+                WORKER_REGISTRATION_CHANNEL
+                    .get()
+                    .unwrap()
+                    .send(new_job_tx)
+                    .await
+                    .expect("to register peer as a worker");
             }
         }
     }
 }
 
-fn handle_payload(payload: &ReceivedPayload) {
+async fn handle_payload(payload: &ReceivedPayload<'_>) -> Option<Vec<PayloadToSend>> {
+    let should_process_headers = !SYNCING_HEADERS.load(Ordering::Relaxed);
+    let should_process_blocks = should_process_headers && !SYNCING_BODIES.load(Ordering::Relaxed);
     match payload {
         ReceivedPayload::Addr(addys) => {
             let time = SystemTime::now()
@@ -239,12 +295,36 @@ fn handle_payload(payload: &ReceivedPayload) {
             }
             tokio::spawn(peers_seen(apns, time));
         }
-        ReceivedPayload::Block(_block) => {
-            // TODO
+        ReceivedPayload::Block(block) => {
+            if should_process_blocks {
+                chainman::keepup::on_header_received(&block.header).await;
+            }
+            if !should_process_blocks {
+                return None;
+            }
+            chainman::keepup::on_block_received(block).await;
         }
-        ReceivedPayload::Inv(_inv) => {
-            // TODO
+        ReceivedPayload::Inv(inv) => {
+            if !should_process_headers {
+                return None;
+            }
+            let mut blocks: Vec<InventoryVectorOwned> = vec![];
+            for item in inv.inner {
+                if item.inv_type == InventoryVectorType::Block {
+                    blocks.push((*item).into());
+                }
+            }
+            return Some(vec![PayloadToSend::GetData(GetDataOwned { inner: blocks })]);
+        }
+        ReceivedPayload::Headers(headers) => {
+            if !should_process_headers {
+                return None;
+            }
+            for header in headers.inner {
+                chainman::keepup::on_header_received(header).await;
+            }
         }
         _ => {}
     }
+    None
 }
