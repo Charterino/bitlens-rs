@@ -170,21 +170,22 @@ pub async fn read_packet(stream: &mut BufReader<OwnedReadHalf>) -> Result<Packet
         .with_buffer_mut(|buffer: &mut &mut [u8]| read_payload(stream, buffer))
         .await?;
 
-    let payload_with_allocator = PayloadWithAllocatorTryBuilder {
+    let payload_with_allocator = PayloadWithAllocatorBuilder {
         allocator_with_buffer,
         payload_builder: |awb: &AllocatorWithBuffer| match deserialize_payload(
             awb,
             header.checksum,
             header.command,
         ) {
-            Ok(a) => Ok(a),
+            Ok(a) => a,
             Err(e) => {
                 debug!("failed to deserialize payload"; "e" => e.to_string());
-                Err(e)
+                // if we cant deserialize the payload, dont return an error but "ignore it".
+                None
             }
         },
     }
-    .try_build()?;
+    .build();
 
     Ok(Packet {
         header,
