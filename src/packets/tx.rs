@@ -121,6 +121,7 @@ pub struct TxOwned {
     pub witness_data: Option<Vec<Vec<u8>>>,
     #[serde(serialize_with = "crate::util::serialize_as_hex::serialize_hash_as_hex_reversed")]
     pub hash: [u8; 32], // calculated during deserialization
+    pub witness_hash: [u8; 32], // calculated during deserialization
 }
 
 impl Serializable for TxOwned {
@@ -155,6 +156,7 @@ impl From<TxBorrowed<'_>> for TxOwned {
                 .witness_data
                 .map(|value| value.iter().map(|v| v.to_vec()).collect()),
             hash: value.hash,
+            witness_hash: value.witness_hash,
         }
     }
 }
@@ -200,6 +202,7 @@ impl TxOwned {
             txouts: vec![],
             witness_data: witnesses,
             hash,
+            witness_hash: EMPTY_HASH,
         })
     }
 }

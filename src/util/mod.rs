@@ -12,3 +12,5 @@ pub mod shortcircuit;
 pub mod speedtracker;
 pub mod timeout;
 pub mod timetracker;
+
+pub const SEGWIT_HEIGHT: u64 = 481824;

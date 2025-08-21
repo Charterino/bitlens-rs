@@ -7,6 +7,7 @@ use super::{
     tx::{TxBorrowed, TxOwned},
 };
 use crate::util::{arena::Arena, merkle::MerkleTree};
+use anyhow::Result;
 use anyhow::bail;
 use sha2::{Digest, Sha256};
 
@@ -55,6 +56,12 @@ impl<'a> DeserializableBorrowed<'a> for BlockBorrowed<'a> {
             bail!("merkle root does not match")
         }
 
+        Ok(offset + 80)
+    }
+}
+
+impl BlockBorrowed<'_> {
+    pub fn verify_witness_commitment(&self) -> Result<()> {
         // verify that the witness data is present if the coinbase transaction indicates that this is a witness block
         let coinbase_tx = &self.txs[0];
         for txout in coinbase_tx.txouts.iter().rev() {
@@ -66,19 +73,19 @@ impl<'a> DeserializableBorrowed<'a> for BlockBorrowed<'a> {
                     bail!("missing witness data for coinbase tx in a witness block")
                 }
                 let coinbase_witness = coinbase_tx.witness_data.unwrap()[0];
-                if coinbase_witness.len() != 33 || coinbase_witness[0] != 32 {
+                if coinbase_witness.len() != 34 || coinbase_witness[0..2] != [0x01, 32] {
                     bail!("invalid coinbase witness in a witness block")
                 }
 
                 let witness_commitment = txout.script.get_hash(6).unwrap();
-                let witness_reserve_value = &coinbase_witness[1..33];
+                let witness_reserve_value = &coinbase_witness[2..34];
 
-                let mut witness_tree = MerkleTree::with_capacity(txs_count);
-                for i in 0..txs.len() {
+                let mut witness_tree = MerkleTree::with_capacity(self.txs.len());
+                for i in 0..self.txs.len() {
                     if i == 0 {
                         witness_tree.append_hash(&EMPTY_HASH);
                     } else {
-                        witness_tree.append_hash(&txs[i].witness_hash);
+                        witness_tree.append_hash(&self.txs[i].witness_hash);
                     }
                 }
                 let (witness_root, mutated) = witness_tree.into_root();
@@ -97,8 +104,7 @@ impl<'a> DeserializableBorrowed<'a> for BlockBorrowed<'a> {
                 }
             }
         }
-
-        Ok(offset + 80)
+        Ok(())
     }
 }
 

@@ -5,6 +5,7 @@ use crate::{
     ok_or_break, ok_or_continue, ok_or_return,
     packets::{
         block::BlockBorrowed,
+        blockheader::BlockHeaderRef,
         getdata::GetDataOwned,
         invvector::{InventoryVectorOwned, InventoryVectorType},
         packet::{self, MAX_PACKET_SIZE, PayloadWithAllocator},
@@ -13,7 +14,7 @@ use crate::{
     },
     some_or_return, tx,
     types::blockmetrics::BlockMetrics,
-    util::{arena::Arena, speedtracker::TOTAL_IN, timetracker::TimeTracker},
+    util::{SEGWIT_HEIGHT, arena::Arena, speedtracker::TOTAL_IN, timetracker::TimeTracker},
     with_deadline,
 };
 use anyhow::Result;
@@ -382,6 +383,12 @@ async fn run_download_worker(master: Sender<DownloadWorkerMessage>) {
             // We have a packet from the remote peer we're connected to!
             let should_send = packet.payload.with_payload(|payload| {
                 if let Some(ReceivedPayload::Block(b)) = payload {
+                    if job_number >= SEGWIT_HEIGHT {
+                        if let Err(e) = b.verify_witness_commitment() {
+                            debug!("invalid witness commitment"; "blockHeight" => job_number, "blockHash" => BlockHeaderRef::Borrowed(&b.header).human_hash(), "error" => e.to_string());
+                            return false;
+                        }
+                    }
                     return b.header.hash == job;
                 }
                 false

@@ -26,6 +26,7 @@ use crate::{
         inv::InvOwned,
         invvector::{InventoryVectorOwned, InventoryVectorType},
         network_id::NetworkId,
+        packet::PayloadWithAllocator,
         packetpayload::{InvalidChecksum, PayloadToSend, ReceivedPayload},
         ping::Ping,
     },
@@ -216,10 +217,8 @@ async fn crawl(peer: &AddressPortNetwork, res: &mut CrawlResult) -> Result<()> {
             packet = connection.inner.read_packet() => {
                 let packet = packet?;
                 {
-                    let payload = packet.payload.borrow_payload();
-                    if let Some(payload) = payload {
-                        handle_payload(payload).await;
-                    }
+                    let payload = packet.payload;
+                    handle_payload(payload).await;
                     res.packets_received_total += 1;
                 }
                 addrman::update_peer_online(peer.clone(), connection.remote_version.services).await;
@@ -243,91 +242,101 @@ async fn crawl(peer: &AddressPortNetwork, res: &mut CrawlResult) -> Result<()> {
     }
 }
 
-async fn handle_payload(payload: &ReceivedPayload<'_>) -> Option<Vec<PayloadToSend>> {
+async fn handle_payload(payload: PayloadWithAllocator) -> Option<Vec<PayloadToSend>> {
     let should_process_headers = !SYNCING_HEADERS.load(Ordering::Relaxed);
     let should_process_blocks = should_process_headers && !SYNCING_BODIES.load(Ordering::Relaxed);
-    match payload {
-        ReceivedPayload::Addr(addys) => {
-            let time = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs();
-            let mut apns = Vec::with_capacity(addys.inner.len());
-            for addy in addys.inner.iter() {
-                let (network_id, addy_bytes) = match *addy.addr {
-                    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, a, b, c, d] => {
-                        (NetworkId::IPv4, vec![a, b, c, d])
-                    }
-                    other => (NetworkId::IPv6, other.to_vec()),
-                };
-                apns.push(AddressPortNetwork {
-                    network_id,
-                    port: addy.port,
-                    address: addy_bytes,
-                });
-            }
-            tokio::spawn(peers_seen(apns, time));
-        }
-        ReceivedPayload::AddrV2(addys) => {
-            let time = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs();
-            let mut apns = Vec::with_capacity(addys.inner.len());
-            for addy in addys.inner.iter() {
-                let (network_id, addy_bytes) = match (addy.network_id, addy.address.len()) {
-                    (NetworkId::IPv4, 4) => (NetworkId::IPv4, addy.address.to_vec()),
-                    (NetworkId::IPv6, 16) => match addy.address.get(0..16).unwrap() {
+    if let Some(payload) = payload.borrow_payload() {
+        match payload {
+            ReceivedPayload::Addr(addys) => {
+                let time = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs();
+                let mut apns = Vec::with_capacity(addys.inner.len());
+                for addy in addys.inner.iter() {
+                    let (network_id, addy_bytes) = match *addy.addr {
                         [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, a, b, c, d] => {
-                            (NetworkId::IPv4, vec![*a, *b, *c, *d])
+                            (NetworkId::IPv4, vec![a, b, c, d])
                         }
                         other => (NetworkId::IPv6, other.to_vec()),
-                    },
-                    _ => {
-                        continue;
-                    }
-                };
-                apns.push(AddressPortNetwork {
-                    network_id,
-                    port: addy.port,
-                    address: addy_bytes,
-                });
-            }
-            tokio::spawn(peers_seen(apns, time));
-        }
-        ReceivedPayload::Block(block) => {
-            if should_process_blocks {
-                chainman::keepup::on_header_received(&block.header).await;
-            }
-            if !should_process_blocks {
-                return None;
-            }
-            chainman::keepup::on_block_received(block).await;
-        }
-        ReceivedPayload::Inv(inv) => {
-            if !should_process_headers {
-                return None;
-            }
-            let mut blocks: Vec<InventoryVectorOwned> = vec![];
-            for item in inv.inner {
-                if item.inv_type == InventoryVectorType::Block {
-                    blocks.push(InventoryVectorOwned {
-                        inv_type: InventoryVectorType::WitnessBlock,
-                        hash: *item.hash,
+                    };
+                    apns.push(AddressPortNetwork {
+                        network_id,
+                        port: addy.port,
+                        address: addy_bytes,
                     });
                 }
-            }
-            return Some(vec![PayloadToSend::GetData(GetDataOwned { inner: blocks })]);
-        }
-        ReceivedPayload::Headers(headers) => {
-            if !should_process_headers {
+                tokio::spawn(peers_seen(apns, time));
                 return None;
             }
-            for header in headers.inner {
-                chainman::keepup::on_header_received(header).await;
+            ReceivedPayload::AddrV2(addys) => {
+                let time = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs();
+                let mut apns = Vec::with_capacity(addys.inner.len());
+                for addy in addys.inner.iter() {
+                    let (network_id, addy_bytes) = match (addy.network_id, addy.address.len()) {
+                        (NetworkId::IPv4, 4) => (NetworkId::IPv4, addy.address.to_vec()),
+                        (NetworkId::IPv6, 16) => match addy.address.get(0..16).unwrap() {
+                            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, a, b, c, d] => {
+                                (NetworkId::IPv4, vec![*a, *b, *c, *d])
+                            }
+                            other => (NetworkId::IPv6, other.to_vec()),
+                        },
+                        _ => {
+                            continue;
+                        }
+                    };
+                    apns.push(AddressPortNetwork {
+                        network_id,
+                        port: addy.port,
+                        address: addy_bytes,
+                    });
+                }
+                tokio::spawn(peers_seen(apns, time));
+                return None;
+            }
+            ReceivedPayload::Block(block) => {
+                if should_process_blocks {
+                    chainman::keepup::on_header_received(&block.header).await;
+                }
+                if !should_process_blocks {
+                    return None;
+                }
+            }
+            ReceivedPayload::Inv(inv) => {
+                if !should_process_headers {
+                    return None;
+                }
+                let mut blocks: Vec<InventoryVectorOwned> = vec![];
+                for item in inv.inner {
+                    if item.inv_type == InventoryVectorType::Block {
+                        blocks.push(InventoryVectorOwned {
+                            inv_type: InventoryVectorType::WitnessBlock,
+                            hash: *item.hash,
+                        });
+                    }
+                }
+                return Some(vec![PayloadToSend::GetData(GetDataOwned { inner: blocks })]);
+            }
+            ReceivedPayload::Headers(headers) => {
+                if !should_process_headers {
+                    return None;
+                }
+                for header in headers.inner {
+                    chainman::keepup::on_header_received(header).await;
+                }
+                return None;
+            }
+            _ => {
+                return None;
             }
         }
-        _ => {}
-    }
+    } else {
+        return None;
+    };
+    // if we got here, that means its a Block and we must send it to chainman
+    chainman::keepup::on_block_received(payload).await;
     None
 }

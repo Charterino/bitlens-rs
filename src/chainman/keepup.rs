@@ -31,7 +31,7 @@
 use anyhow::{Result, bail};
 use either::Either;
 use rand::Rng;
-use slog_scope::info;
+use slog_scope::{debug, info};
 use std::{
     collections::{HashMap, VecDeque},
     sync::{LazyLock, OnceLock},
@@ -46,13 +46,14 @@ use tokio::{
 use crate::{
     db::{self, write_analyzed_txs},
     packets::{
-        block::{BlockBorrowed, BlockOwned},
+        block::BlockOwned,
         blockheader::{BlockHeaderBorrowed, BlockHeaderOwned, BlockHeaderRef},
-        packet::MAX_PACKET_SIZE,
+        packet::{MAX_PACKET_SIZE, PayloadWithAllocator},
+        packetpayload::ReceivedPayload,
         tx::{TxOutRef, TxRef},
     },
     types::blockmetrics::BlockMetrics,
-    util::arena::Arena,
+    util::{SEGWIT_HEIGHT, arena::Arena},
 };
 
 use super::{
@@ -69,8 +70,9 @@ pub static WORKER_REGISTRATION_CHANNEL: OnceLock<mpsc::Sender<oneshot::Sender<[u
     OnceLock::new();
 
 static RECEIVED_HEADER_CHANNEL: OnceLock<mpsc::Sender<BlockHeaderOwned>> = OnceLock::new();
-static RECEIVED_BLOCK_CHANNEL: OnceLock<mpsc::Sender<BlockOwned>> = OnceLock::new();
+static RECEIVED_BLOCK_CHANNEL: OnceLock<mpsc::Sender<PayloadWithAllocator>> = OnceLock::new();
 
+#[derive(Clone, Copy)]
 enum FrontPageDataUpdateStrategy {
     RegenerateFromScratch,
     Append,
@@ -100,9 +102,9 @@ pub async fn on_header_received(header: &BlockHeaderBorrowed<'_>) {
     }
 }
 
-pub async fn on_block_received(block: &BlockBorrowed<'_>) {
+pub async fn on_block_received(block: PayloadWithAllocator) {
     if let Some(c) = RECEIVED_BLOCK_CHANNEL.get() {
-        let _ = c.send((*block).into()).await;
+        let _ = c.send(block).await;
     }
 }
 
@@ -142,7 +144,7 @@ pub async fn worker_manager(
 async fn chain_watcher(
     job_tx: mpsc::Sender<[u8; 32]>,
     mut new_header_rx: mpsc::Receiver<BlockHeaderOwned>,
-    mut new_block_rx: mpsc::Receiver<BlockOwned>,
+    mut new_block_rx: mpsc::Receiver<PayloadWithAllocator>,
 ) -> Result<()> {
     let mut queue: VecDeque<(u64, [u8; 32], FrontPageDataUpdateStrategy)> = VecDeque::new();
     let mut ticker = interval(Duration::from_millis(100));
@@ -230,20 +232,32 @@ async fn handle_new_header(
 }
 
 async fn handle_new_block(
-    block: BlockOwned,
+    payload: PayloadWithAllocator,
     queue: &mut VecDeque<(u64, [u8; 32], FrontPageDataUpdateStrategy)>,
 ) {
-    if queue.is_empty() {
-        return;
-    }
-    if block.header.hash != queue[0].1 {
-        return;
-    }
+    if let ReceivedPayload::Block(block) = payload.borrow_payload().unwrap() {
+        if queue.is_empty() {
+            return;
+        }
 
-    let (number, _, strat) = queue.pop_front().unwrap();
-    let hh = BlockHeaderRef::Owned(&block.header).human_hash();
-    apply_block(number, block, strat).await;
-    info!("block applied"; "hash" => hh, "number" => number);
+        let (number, hash, strat) = queue[0];
+        if block.header.hash != hash {
+            return;
+        }
+
+        let hh = BlockHeaderRef::Borrowed(&block.header).human_hash();
+        if number >= SEGWIT_HEIGHT {
+            if let Err(e) = block.verify_witness_commitment() {
+                debug!("invalid witness commitment"; "blockHeight" => number, "blockHash" => hh, "error" => e.to_string());
+                return;
+            }
+        }
+        queue.pop_front();
+        apply_block(number, (*block).into(), strat).await;
+        info!("block applied"; "hash" => hh, "number" => number);
+    } else {
+        panic!("keepup got a payload that is not a block")
+    }
 }
 
 async fn apply_block(number: u64, block: BlockOwned, frontpage_strat: FrontPageDataUpdateStrategy) {
