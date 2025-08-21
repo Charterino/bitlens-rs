@@ -45,10 +45,18 @@ impl<'a> DeserializableBorrowed<'a> for TxBorrowed<'a> {
 
         let mut offset = if has_witness_data { 6 } else { 4 };
 
-        let (txins, offset_delta) = deserialize_array(allocator, buffer.with_offset(offset)?)?;
+        let (txins, offset_delta) =
+            deserialize_array::<'a, TxInBorrowed>(allocator, buffer.with_offset(offset)?)?;
         offset += offset_delta;
         if txins.is_empty() {
             bail!("0 txins")
+        }
+        if !has_witness_data {
+            for tx in txins.iter() {
+                if tx.sig_script.len() == 0 {
+                    bail!("txin has no sigscript and no witness")
+                }
+            }
         }
         self.txins = txins;
 

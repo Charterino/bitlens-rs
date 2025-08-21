@@ -227,7 +227,7 @@ async fn crawl(peer: &AddressPortNetwork, res: &mut CrawlResult) -> Result<()> {
             // Complete jobs assigned by the chainman
             job = &mut job_rx => {
                 let job = job?;
-                connection.inner.write_packet(&PayloadToSend::GetData(GetDataOwned { inner: vec![InventoryVectorOwned { inv_type: InventoryVectorType::Block, hash: job }] })).await?;
+                connection.inner.write_packet(&PayloadToSend::GetData(GetDataOwned { inner: vec![InventoryVectorOwned { inv_type: InventoryVectorType::WitnessBlock, hash: job }] })).await?;
 
                 // reregister
                 let (new_job_tx, new_job_rx) = oneshot::channel();
@@ -311,7 +311,10 @@ async fn handle_payload(payload: &ReceivedPayload<'_>) -> Option<Vec<PayloadToSe
             let mut blocks: Vec<InventoryVectorOwned> = vec![];
             for item in inv.inner {
                 if item.inv_type == InventoryVectorType::Block {
-                    blocks.push((*item).into());
+                    blocks.push(InventoryVectorOwned {
+                        inv_type: InventoryVectorType::WitnessBlock,
+                        hash: *item.hash,
+                    });
                 }
             }
             return Some(vec![PayloadToSend::GetData(GetDataOwned { inner: blocks })]);
