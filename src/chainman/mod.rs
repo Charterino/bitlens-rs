@@ -365,7 +365,7 @@ fn need_ihd() -> bool {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_secs();
-    current_time - top_header_time > 24 * 3600
+    current_time > top_header_time && current_time - top_header_time > 24 * 3600
 }
 
 // Constructs a `getheaders` packet with `BlockLocator` that allows the remote peer to detect that we are on the wrong branch
