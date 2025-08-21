@@ -7,6 +7,7 @@ use super::{
 };
 use crate::util::{arena::Arena, merkle::MerkleTree};
 use anyhow::bail;
+use sha2::{Digest, Sha256};
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct BlockBorrowed<'a> {
@@ -51,6 +52,37 @@ impl<'a> DeserializableBorrowed<'a> for BlockBorrowed<'a> {
         }
         if merkle_root != *self.header.merkle_root {
             bail!("merkle root does not match")
+        }
+
+        // verify that the witness data is present if the coinbase transaction indicates that this is a witness block
+        let coinbase_tx = &self.txs[0];
+        for txout in coinbase_tx.txouts.iter().rev() {
+            if txout.script.len() >= 38
+                && txout.script[0..6] == [0x6a, 0x24, 0xaa, 0x21, 0xa9, 0xed]
+            {
+                // This block has witness data
+                let witness_commitment = txout.script.get_hash(6).unwrap();
+                let witness_reserve_value = coinbase_tx.txins[0].sig_script;
+
+                let mut witness_tree = MerkleTree::with_capacity(txs_count);
+                for tx in txs.iter() {
+                    witness_tree.append_hash(&tx.witness_hash);
+                }
+                let (witness_root, mutated) = witness_tree.into_root();
+                if mutated {
+                    bail!("witness root mutated")
+                }
+
+                let mut combined_root_and_reserve_value = [0u8; 64];
+                combined_root_and_reserve_value[0..32].copy_from_slice(&witness_root);
+                combined_root_and_reserve_value[32..64].copy_from_slice(witness_reserve_value);
+                let first_pass: [u8; 32] = Sha256::digest(combined_root_and_reserve_value).into();
+                let second_pass: [u8; 32] = Sha256::digest(first_pass).into();
+
+                if *witness_commitment != second_pass {
+                    bail!("witness commitment is invalid")
+                }
+            }
         }
 
         Ok(offset + 80)

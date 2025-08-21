@@ -21,7 +21,8 @@ pub struct TxBorrowed<'a> {
     pub txins: &'a [TxInBorrowed<'a>],
     pub txouts: &'a [TxOutBorrowed<'a>],
     pub witness_data: Option<&'a [&'a [u8]]>,
-    pub hash: [u8; 32], // calculated during deserialization
+    pub hash: [u8; 32],         // calculated during deserialization
+    pub witness_hash: [u8; 32], // calculated during deserialization
 }
 
 impl TxBorrowed<'_> {}
@@ -50,13 +51,6 @@ impl<'a> DeserializableBorrowed<'a> for TxBorrowed<'a> {
         offset += offset_delta;
         if txins.is_empty() {
             bail!("0 txins")
-        }
-        if !has_witness_data {
-            for tx in txins.iter() {
-                if tx.sig_script.len() == 0 {
-                    bail!("txin has no sigscript and no witness")
-                }
-            }
         }
         self.txins = txins;
 
@@ -93,6 +87,24 @@ impl<'a> DeserializableBorrowed<'a> for TxBorrowed<'a> {
             Sha256::digest(buffer.get(0..offset + 4).unwrap())
         };
         self.hash = Sha256::digest(first_pass).into();
+
+        if has_witness_data {
+            let all_txins_empty = self
+                .witness_data
+                .unwrap()
+                .iter()
+                .map(|txin| txin.len() == 1) // if its a single byte then its an empty witness
+                .reduce(|accumulator, element| accumulator && element)
+                .unwrap();
+            if all_txins_empty {
+                self.witness_hash = self.hash;
+            } else {
+                let first_pass = Sha256::digest(buffer.get(0..offset + 4).unwrap());
+                self.witness_hash = Sha256::digest(first_pass).into();
+            }
+        } else {
+            self.witness_hash = self.hash;
+        }
 
         Ok(offset + 4)
     }
