@@ -1,4 +1,5 @@
 use super::{
+    EMPTY_HASH,
     blockheader::{BlockHeaderBorrowed, BlockHeaderOwned},
     buffer::Buffer,
     deserialize_array,
@@ -61,12 +62,24 @@ impl<'a> DeserializableBorrowed<'a> for BlockBorrowed<'a> {
                 && txout.script[0..6] == [0x6a, 0x24, 0xaa, 0x21, 0xa9, 0xed]
             {
                 // This block has witness data
+                if coinbase_tx.witness_data.is_none() {
+                    bail!("missing witness data for coinbase tx in a witness block")
+                }
+                let coinbase_witness = coinbase_tx.witness_data.unwrap()[0];
+                if coinbase_witness.len() != 33 || coinbase_witness[0] != 32 {
+                    bail!("invalid coinbase witness in a witness block")
+                }
+
                 let witness_commitment = txout.script.get_hash(6).unwrap();
-                let witness_reserve_value = coinbase_tx.txins[0].sig_script;
+                let witness_reserve_value = &coinbase_witness[1..33];
 
                 let mut witness_tree = MerkleTree::with_capacity(txs_count);
-                for tx in txs.iter() {
-                    witness_tree.append_hash(&tx.witness_hash);
+                for i in 0..txs.len() {
+                    if i == 0 {
+                        witness_tree.append_hash(&EMPTY_HASH);
+                    } else {
+                        witness_tree.append_hash(&txs[i].witness_hash);
+                    }
                 }
                 let (witness_root, mutated) = witness_tree.into_root();
                 if mutated {
