@@ -121,6 +121,7 @@ pub struct TxOwned {
     pub witness_data: Option<Vec<Vec<u8>>>,
     #[serde(serialize_with = "crate::util::serialize_as_hex::serialize_hash_as_hex_reversed")]
     pub hash: [u8; 32], // calculated during deserialization
+    #[serde(serialize_with = "crate::util::serialize_as_hex::serialize_hash_as_hex_reversed")]
     pub witness_hash: [u8; 32], // calculated during deserialization
 }
 
