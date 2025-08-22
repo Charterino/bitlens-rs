@@ -100,8 +100,14 @@ impl BlockBorrowed<'_> {
                 let second_pass: [u8; 32] = Sha256::digest(first_pass).into();
 
                 if *witness_commitment != second_pass {
-                    bail!("witness commitment is invalid")
+                    bail!(
+                        "witness commitment is invalid, computed: {}, from txout: {}",
+                        hex::encode(second_pass),
+                        hex::encode(witness_commitment)
+                    )
                 }
+
+                break;
             }
         }
         Ok(())
