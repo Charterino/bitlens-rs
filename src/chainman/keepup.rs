@@ -253,14 +253,14 @@ async fn handle_new_block(
             }
         }
         queue.pop_front();
-        apply_block(number, (*block).into(), strat).await;
+        apply_block((*block).into(), strat).await;
         info!("block applied"; "hash" => hh, "number" => number);
     } else {
         panic!("keepup got a payload that is not a block")
     }
 }
 
-async fn apply_block(number: u64, block: BlockOwned, frontpage_strat: FrontPageDataUpdateStrategy) {
+async fn apply_block(block: BlockOwned, frontpage_strat: FrontPageDataUpdateStrategy) {
     info!("applying block"; "hash" => BlockHeaderRef::Owned(&block.header).human_hash());
     // first fetch all dependencies
     let mut self_txs = HashMap::with_capacity(block.txs.len());
@@ -326,7 +326,6 @@ async fn apply_block(number: u64, block: BlockOwned, frontpage_strat: FrontPageD
             tx.txins.len()
         };
         let analyzed = crate::tx::analyze_tx(
-            number,
             block.header.hash,
             txref,
             &deps[consumed..consumed + txin_count],

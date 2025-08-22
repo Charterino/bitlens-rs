@@ -560,7 +560,6 @@ async fn get_next_batch_to_flush<'current>(
             };
 
             scope.spawn(process_block(
-                b.1,
                 b.0,
                 current_state.clone(),
                 current_arena,
@@ -598,7 +597,6 @@ fn insert_transactions_from_block<'arena>(
 }
 
 async fn process_block<'arena>(
-    block_number: u64,
     payload: PayloadWithAllocator,
     current_state: Arc<RwLock<ChainSyncState<'arena, '_>>>,
     analyzed_arena: &'arena Arena,
@@ -654,7 +652,6 @@ async fn process_block<'arena>(
                 }
                 // Analyze this tx
                 let analyzed = tx::analyze_tx(
-                    block_number,
                     block.header.hash,
                     TxRef::Borrowed(tx),
                     &deps,
