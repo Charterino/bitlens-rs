@@ -46,7 +46,6 @@ struct HashParam {
 
 #[derive(Serialize, Deserialize)]
 pub struct TxDataResponse {
-    #[serde(flatten)]
     pub header: BlockHeaderWithNumber,
     #[serde(flatten)]
     pub tx: AnalyzedTx,
