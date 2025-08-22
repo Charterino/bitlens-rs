@@ -65,6 +65,7 @@ async fn txdata(Query(params): Query<HashParam>) -> Result<Json<AnalyzedTx>, Sta
     };
 
     tx.tx.txouts = txouts;
+    tx.tx.compute_witness_hash();
 
     Ok(Json(tx))
 }

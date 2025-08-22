@@ -206,6 +206,29 @@ impl TxOwned {
             witness_hash: EMPTY_HASH,
         })
     }
+
+    pub fn compute_witness_hash(&mut self) {
+        if self.witness_data.is_some() {
+            let all_txins_empty = self
+                .witness_data
+                .as_ref()
+                .unwrap()
+                .iter()
+                .map(|txin| txin.len() == 1) // if its a single byte then its an empty witness
+                .reduce(|accumulator, element| accumulator && element)
+                .unwrap();
+            if all_txins_empty {
+                self.witness_hash = self.hash;
+            } else {
+                let mut serialized = Vec::new();
+                Serializable::serialize(self, &mut serialized);
+                let first_pass = Sha256::digest(&serialized);
+                self.witness_hash = Sha256::digest(first_pass).into();
+            }
+        } else {
+            self.witness_hash = self.hash;
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
