@@ -10,7 +10,7 @@ use crate::{
 use fee::calculate_fee;
 use flags::{SCRIPT_VERIFY_P2SH, SCRIPT_VERIFY_WITNESS};
 use script::get_transaction_sigop_cost;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use size::calculate_tx_size_wus;
 
 mod fee;
@@ -24,7 +24,7 @@ mod script_test;
 #[cfg(test)]
 mod size_test;
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AnalyzedTx {
     pub fee: u64,
@@ -33,6 +33,7 @@ pub struct AnalyzedTx {
     pub sigops: u32,
     #[serde(serialize_with = "crate::util::serialize_as_hex::serialize_hash_as_hex_reversed")]
     pub block_hash: [u8; 32],
+    #[serde(flatten)]
     pub tx: TxOwned,
 }
 

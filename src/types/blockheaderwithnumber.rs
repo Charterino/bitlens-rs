@@ -5,6 +5,7 @@ use crate::packets::blockheader::BlockHeaderOwned;
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct BlockHeaderWithNumber {
+    #[serde(flatten)]
     pub header: BlockHeaderOwned,
     pub number: u64,
     pub fetched_full: bool,

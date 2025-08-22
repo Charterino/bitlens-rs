@@ -5,6 +5,7 @@ use axum::{
     response::IntoResponse,
     routing::get,
 };
+use deadpool::Status;
 use serde::{Deserialize, Serialize};
 use tower_http::cors::CorsLayer;
 
@@ -44,7 +45,15 @@ struct HashParam {
     hash: String,
 }
 
-async fn txdata(Query(params): Query<HashParam>) -> Result<Json<AnalyzedTx>, StatusCode> {
+#[derive(Serialize, Deserialize)]
+pub struct TxDataResponse {
+    #[serde(flatten)]
+    pub header: BlockHeaderWithNumber,
+    #[serde(flatten)]
+    pub tx: AnalyzedTx,
+}
+
+async fn txdata(Query(params): Query<HashParam>) -> Result<Json<TxDataResponse>, StatusCode> {
     let mut unhexxed = match hex::decode(params.hash) {
         Err(_) => return Err(StatusCode::BAD_REQUEST),
         Ok(v) => v,
@@ -67,11 +76,20 @@ async fn txdata(Query(params): Query<HashParam>) -> Result<Json<AnalyzedTx>, Sta
     tx.tx.txouts = txouts;
     tx.tx.compute_witness_hash();
 
-    Ok(Json(tx))
+    let header = match chainman::get_header_by_hash(tx.block_hash) {
+        Some(h) => h,
+        None => return Err(StatusCode::NOT_FOUND),
+    };
+
+    Ok(Json(TxDataResponse {
+        header: header,
+        tx: tx,
+    }))
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct BlockDataResponse {
+    #[serde(flatten)]
     pub header: BlockHeaderWithNumber,
     pub txs: Vec<BlockTxEntry>,
 }
