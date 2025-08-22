@@ -99,7 +99,7 @@ pub fn analyze_tx<'arena, 'data>(
     analyzed_tx[16..20].copy_from_slice(&size_wus.to_le_bytes());
     analyzed_tx[20..24].copy_from_slice(&sigops.to_le_bytes());
     analyzed_tx[24..56].copy_from_slice(&block_hash);
-    let mut for_tx = &mut analyzed_tx[64..];
+    let mut for_tx = &mut analyzed_tx[56..];
     tx.serialize_without_txouts(&mut for_tx);
 
     let tx_outs = serialize_txouts(tx, arena);

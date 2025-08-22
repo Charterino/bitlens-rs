@@ -5,7 +5,6 @@ use axum::{
     response::IntoResponse,
     routing::get,
 };
-use deadpool::Status;
 use serde::{Deserialize, Serialize};
 use tower_http::cors::CorsLayer;
 
