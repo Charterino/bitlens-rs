@@ -7,6 +7,8 @@ use anyhow::Result;
 use anyhow::bail;
 use rocksdb::BlockBasedOptions;
 use rocksdb::Cache;
+use rocksdb::DBRawIteratorWithThreadMode;
+use rocksdb::SliceTransform;
 use rocksdb::WriteBufferManager;
 use rocksdb::{DB, IngestExternalFileOptions, Options};
 use serde::Deserialize;
@@ -27,13 +29,18 @@ static OPEN_OPTIONS: LazyLock<Options> = LazyLock::new(|| {
 
     open_options.set_use_direct_io_for_flush_and_compaction(true);
 
-    let cache = Cache::new_lru_cache(1024 * 1024 * 1024); // 1gb
+    let buffer_size = {
+        let mut raw_value =
+            std::env::var("ROCKSDB_BUFFER_SIZE").expect("read ROCKSDB_BUFFER_SIZE env variable");
+        raw_value.retain(|v| v.is_numeric());
+        raw_value
+            .parse::<usize>()
+            .expect("to parse ROCKSDB_BUFFER_SIZE into integer")
+    };
+
+    let cache = Cache::new_lru_cache(buffer_size);
     open_options.set_write_buffer_manager(
-        &WriteBufferManager::new_write_buffer_manager_with_cache(
-            1024 * 1024 * 1024,
-            true,
-            cache.clone(),
-        ),
+        &WriteBufferManager::new_write_buffer_manager_with_cache(0, true, cache.clone()),
     );
 
     let mut block_based_options = BlockBasedOptions::default();
@@ -42,6 +49,12 @@ static OPEN_OPTIONS: LazyLock<Options> = LazyLock::new(|| {
     open_options.set_block_based_table_factory(&block_based_options);
 
     open_options
+});
+
+static TXSPENDS_OPEN_OPTIONS: LazyLock<Options> = LazyLock::new(|| {
+    let mut cloned = OPEN_OPTIONS.clone();
+    cloned.set_prefix_extractor(SliceTransform::create_fixed_prefix(32));
+    cloned
 });
 
 static INGEST_OPTIONS: LazyLock<IngestExternalFileOptions> = LazyLock::new(|| {
@@ -64,6 +77,11 @@ pub static BLOCKTXS_DB: LazyLock<DB> = LazyLock::new(|| {
         .expect("to have opened bitlens-blocktxs db")
 });
 
+pub static TXSPENDS_DB: LazyLock<DB> = LazyLock::new(|| {
+    rocksdb::DB::open(&TXSPENDS_OPEN_OPTIONS, "bitlens-txspends")
+        .expect("to have opened bitlens-txspends db")
+});
+
 static READ_SEMAPHORE: Semaphore = Semaphore::const_new(1024 * 8);
 
 pub async fn setup_rocksdb() {}
@@ -73,6 +91,7 @@ pub struct SerializedTx<'a> {
     pub hash: [u8; 32],
     pub analyzed_tx: Option<&'a [u8]>,
     pub tx_outs: Option<&'a [u8]>,
+    pub spent_txos: Option<&'a [&'a [u8; 36]]>,
 
     // The following fields arent written to disk (because they're already present in `analyzed_tx`),
     // but are stored for easy access after writing this transaction to update the front page response.
@@ -182,7 +201,28 @@ pub async fn write_block_txs(blocks_with_txs_pairs: Vec<(&[u8; 32], Vec<u8>)>) {
     BLOCKTXS_DB.flush().expect("to flush blocktxs");
 }
 
-pub async fn get_block_tx_entires(hash: [u8; 32]) -> Result<Vec<BlockTxEntry>> {
+pub async fn write_txspends(spends: Vec<(&[u8; 36], [u8; 64])>) {
+    let mut writer = rocksdb::SstFileWriter::create(&OPEN_OPTIONS);
+    writer
+        .open("bitlens-txspends-temp.sst")
+        .expect("to open bitlens-txspends-temp.sst");
+
+    for pair in spends {
+        writer
+            .put(pair.0, pair.1)
+            .expect("to add tx hashes into sst file");
+    }
+
+    writer.finish().expect("to close bitlens-txspends-temp.sst");
+    drop(writer);
+    TXSPENDS_DB
+        .ingest_external_file_opts(&INGEST_OPTIONS, vec!["bitlens-txspends-temp.sst"])
+        .expect("to ingest bitlens-txspends-temp.sst");
+    TXSPENDS_DB.flush_wal(true).expect("to flush txspends wal");
+    TXSPENDS_DB.flush().expect("to flush txspends");
+}
+
+pub async fn get_block_tx_entries(hash: [u8; 32]) -> Result<Vec<BlockTxEntry>> {
     let _g = READ_SEMAPHORE
         .acquire()
         .await
@@ -227,4 +267,41 @@ pub async fn get_analyzed_tx(hash: [u8; 32]) -> Result<AnalyzedTx> {
         }
     })
     .await?
+}
+
+pub async fn get_tx_spends(txhash: [u8; 32]) -> Result<Vec<(u32, [u8; 32], [u8; 32])>> {
+    let _g = READ_SEMAPHORE
+        .acquire()
+        .await
+        .expect("to have acquire a read permit from the semaphore");
+
+    Ok(tokio::task::spawn_blocking(move || {
+        let mut prefixiter: DBRawIteratorWithThreadMode<_> =
+            TXSPENDS_DB.prefix_iterator(&txhash).into();
+        let mut results = Vec::new();
+        while let Some((key, value)) = prefixiter.item() {
+            assert_eq!(36, key.len());
+            assert_eq!(64, value.len());
+            let txo_index = {
+                let mut i = [0u8; 4];
+                i.copy_from_slice(&key[32..36]);
+                u32::from_le_bytes(i)
+            };
+            let tx = {
+                let mut t = [0u8; 32];
+                t.copy_from_slice(&value[0..32]);
+                t
+            };
+            let block = {
+                let mut b = [0u8; 32];
+                b.copy_from_slice(&value[32..64]);
+                b
+            };
+            results.push((txo_index, tx, block));
+            prefixiter.next();
+        }
+
+        results
+    })
+    .await?)
 }

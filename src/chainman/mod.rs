@@ -25,6 +25,7 @@ use headersync::sync_headers;
 use slog_scope::{debug, info};
 use std::{
     cmp::min,
+    collections::HashSet,
     sync::{
         LazyLock, RwLock,
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -55,27 +56,25 @@ pub async fn start() {
     tokio::spawn(async {
         // get blocks to download without unlocking CHAIN
         let (top_downloaded_block_hash, block_hashes_to_download) = {
-            let r = if need_ihd() {
+            let w = if need_ihd() {
                 info!("last known header is >24 hours old, synching headers..");
                 start_syncing_headers();
                 sync_headers().await;
-                let r = CHAIN.read().unwrap();
-                info!("synced headers"; "top number" => r.top_header.number);
-                let new_count = calculate_downloaded_blocks(&r);
+                let mut w = CHAIN.write().unwrap();
+                info!("synced headers"; "top number" => w.top_header.number);
+                let new_count = calculate_downloaded_blocks(&w);
                 DOWNLOADED_BLOCKS.store(new_count, Ordering::Relaxed);
                 METRIC_FULL_BLOCKS_DOWNLOADED.set(new_count as i64);
-                r
+                generate_top_work_chain_hashset(&mut w);
+                w
             } else {
-                CHAIN.read().unwrap()
+                CHAIN.write().unwrap()
             };
             // if we're not syncing from 0, we already have some blocks downloaded
             // which means we can update the frontpage response
-            let top_downloaded_block_hash = {
-                let r = CHAIN.read().unwrap();
-                get_top_downloaded_block_hash(&r)
-            };
+            let top_downloaded_block_hash = { get_top_downloaded_block_hash(&w) };
             // get blocks to download for the blocksync without releasing the lock
-            let block_hashes_to_download = get_block_hashes_to_download(&r);
+            let block_hashes_to_download = get_block_hashes_to_download(&w);
             (top_downloaded_block_hash, block_hashes_to_download)
         };
         if let Some(top_block_hash) = top_downloaded_block_hash {
@@ -104,6 +103,19 @@ pub fn get_header_by_hash(hash: [u8; 32]) -> Option<BlockHeaderWithNumber> {
     r.known_headers.get(&hash).cloned()
 }
 
+pub fn filter_tx_spends(spends: Vec<(u32, [u8; 32], [u8; 32])>) -> Vec<(u32, [u8; 32])> {
+    if spends.is_empty() {
+        return vec![];
+    }
+
+    let r = CHAIN.read().unwrap();
+    spends
+        .into_iter()
+        .filter(|item| r.most_work_chain.contains(&item.2))
+        .map(|item| (item.0, item.1))
+        .collect()
+}
+
 // generates the frontpage data from nothing but the top block hash, pulling all data from the store
 async fn generate_frontpage_data(top_block_hash: [u8; 32]) {
     let stats = calculate_stats(top_block_hash, None).await;
@@ -122,7 +134,7 @@ async fn generate_frontpage_data(top_block_hash: [u8; 32]) {
         }
 
         // pull the tx hashes that are in this block from rocksdb
-        let block_tx_hashes = db::rocksdb::get_block_tx_entires(current_header.header.hash)
+        let block_tx_hashes = db::rocksdb::get_block_tx_entries(current_header.header.hash)
             .await
             .expect("to fetch block txs from rocksdb");
 
@@ -351,6 +363,7 @@ async fn load_headers_from_sqlite() {
             .insert(new_header.header.hash, new_header.clone());
     }
 
+    generate_top_work_chain_hashset(&mut w);
     // After loading all headers from sqlite, figure out how many blocks we have downloaded
     let new_downloaded_blocks = calculate_downloaded_blocks(&w);
     DOWNLOADED_BLOCKS.store(new_downloaded_blocks, Ordering::Relaxed);
@@ -416,16 +429,21 @@ fn build_get_headers() -> PayloadToSend {
     })
 }
 
+struct HeaderApplicationResult {
+    removed_blocks: Vec<[u8; 32]>,
+    // oldest to newest
+    added_blocks: Vec<[u8; 32]>,
+}
 // if the returned value is Err, the header could not be applied
 // if the returned value is Ok(None), the header was inserted but no bodies need to be downloaded & applied
-// if the returned value is Ok(Some(vec)), we must download blocks from `vec` and apply them in that order.
+// if the returned value is Ok(Some(har)), we must download blocks from `har.added_blocks` and apply them in that order.
 //
 // if `is_headersync` is true, Ok(Some()) cannot be returned
 fn validate_and_apply_header_inner(
     header: BlockHeaderRef,
     w: &mut Chain,
     is_headersync: bool,
-) -> Result<Option<Vec<[u8; 32]>>> {
+) -> Result<Option<HeaderApplicationResult>> {
     // ignore headers we already have
     if w.known_headers.contains_key(&header.hash()) {
         return Ok(None);
@@ -482,14 +500,18 @@ fn validate_and_apply_header_inner(
     if new_header.header.parent == w.top_header.header.hash {
         w.top_header = new_header;
         // queue this block to be downloaded and applied
-        return Ok(Some(vec![w.top_header.header.hash]));
+        return Ok(Some(HeaderApplicationResult {
+            added_blocks: vec![w.top_header.header.hash],
+            removed_blocks: vec![],
+        }));
     }
 
     // this is a fork, so we return all blocks since the split
     // and update DOWNLOADED_BLOCKS
-    let mut path_to_the_last_common_block = {
+    let (mut visited_new, visited_old) = {
         let mut from_new = new_header.header.parent;
-        let mut visited = vec![new_header.header.hash];
+        let mut visited_new = vec![new_header.header.hash];
+        let mut visited_old = vec![w.top_header.header.hash];
         // first find the block that's on the main chain with the same block number as the parent
         let mut from_old = {
             let mut last = w.top_header.header.hash;
@@ -498,6 +520,7 @@ fn validate_and_apply_header_inner(
                 if header.number == parent_number {
                     break;
                 }
+                visited_old.push(header.header.hash);
                 last = header.header.parent;
             }
             last
@@ -507,22 +530,26 @@ fn validate_and_apply_header_inner(
             if from_new == from_old {
                 break;
             }
-            visited.push(from_old);
+            visited_new.push(from_new);
+            visited_old.push(from_old);
             from_old = w.known_headers.get(&from_old).unwrap().header.parent;
             from_new = w.known_headers.get(&from_new).unwrap().header.parent;
         }
-        visited
+        (visited_new, visited_old)
     };
 
     w.top_header = new_header;
 
-    path_to_the_last_common_block.reverse();
+    visited_new.reverse();
 
     let new_count = calculate_downloaded_blocks(w);
     DOWNLOADED_BLOCKS.store(new_count, Ordering::Relaxed);
     METRIC_FULL_BLOCKS_DOWNLOADED.set(new_count as i64);
 
-    Ok(Some(path_to_the_last_common_block))
+    Ok(Some(HeaderApplicationResult {
+        removed_blocks: visited_old,
+        added_blocks: visited_new,
+    }))
 }
 
 fn validate_and_apply_headers(headers: &[BlockHeaderBorrowed]) -> Result<()> {
@@ -545,6 +572,19 @@ fn calculate_downloaded_blocks(r: &Chain) -> u64 {
         }
         last = r.known_headers.get(last.header.parent.as_slice()).unwrap();
     }
+}
+
+fn generate_top_work_chain_hashset(w: &mut Chain) {
+    let mut new_hashset = HashSet::new();
+    let mut last = &w.top_header;
+    loop {
+        new_hashset.insert(last.header.hash);
+        if last.number == 0 {
+            break;
+        }
+        last = w.known_headers.get(last.header.parent.as_slice()).unwrap();
+    }
+    w.most_work_chain = new_hashset;
 }
 
 fn get_top_downloaded_block_hash(r: &Chain) -> Option<[u8; 32]> {

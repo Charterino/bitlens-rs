@@ -1,6 +1,7 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::{
+    chainman::HeaderApplicationResult,
     packets::blockheader::BlockHeaderRef,
     types::blockheaderwithnumber::BlockHeaderWithNumber,
     util::{
@@ -12,11 +13,13 @@ use crate::{
 pub struct Chain {
     pub top_header: BlockHeaderWithNumber,
     pub known_headers: HashMap<[u8; 32], BlockHeaderWithNumber>,
+    pub most_work_chain: HashSet<[u8; 32]>,
 }
 
 impl Default for Chain {
     fn default() -> Self {
         let mut known = HashMap::new();
+        let mut most_work_chain = HashSet::new();
         let genesis = BlockHeaderWithNumber {
             header: *GENESIS_HEADER,
             number: 0,
@@ -24,9 +27,11 @@ impl Default for Chain {
             total_work: BlockHeaderRef::Owned(&GENESIS_HEADER).get_work(),
         };
         known.insert(GENESIS_HEADER.hash, genesis.clone());
+        most_work_chain.insert(GENESIS_HEADER.hash);
         Self {
             known_headers: known,
             top_header: genesis,
+            most_work_chain,
         }
     }
 }
@@ -69,5 +74,14 @@ impl Chain {
             first_header.header.timestamp,
             header.header.bits,
         )
+    }
+
+    pub fn update_most_work_chain(&mut self, result: &HeaderApplicationResult) {
+        for hash in &result.removed_blocks {
+            self.most_work_chain.remove(hash);
+        }
+        for hash in &result.added_blocks {
+            self.most_work_chain.insert(*hash);
+        }
     }
 }

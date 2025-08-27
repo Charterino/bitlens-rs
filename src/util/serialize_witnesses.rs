@@ -1,7 +1,6 @@
+use crate::packets::varstr::deserialize_array_of_varsrs_iter;
 use hex::ToHex;
 use serde::{Serializer, ser::SerializeSeq};
-
-use crate::packets::varstr::deserialize_array_of_varsrs_iter;
 
 pub fn serialize_witnesses<S>(
     witnesses: &Option<Vec<Vec<u8>>>,

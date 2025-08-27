@@ -49,6 +49,8 @@ pub struct TxDataResponse {
     pub header: BlockHeaderWithNumber,
     #[serde(flatten)]
     pub tx: AnalyzedTx,
+    #[serde(serialize_with = "crate::util::serialize_spends::serialize_spends")]
+    pub spends: Vec<(u32, [u8; 32])>,
 }
 
 async fn txdata(Query(params): Query<HashParam>) -> Result<Json<TxDataResponse>, StatusCode> {
@@ -79,9 +81,17 @@ async fn txdata(Query(params): Query<HashParam>) -> Result<Json<TxDataResponse>,
         None => return Err(StatusCode::NOT_FOUND),
     };
 
+    let spends = match db::rocksdb::get_tx_spends(unhexxed).await {
+        Ok(v) => v,
+        Err(_) => return Err(StatusCode::NOT_FOUND),
+    };
+
+    let filtered_spends = chainman::filter_tx_spends(spends);
+
     Ok(Json(TxDataResponse {
         header: header,
         tx: tx,
+        spends: filtered_spends,
     }))
 }
 
@@ -107,7 +117,7 @@ async fn blockdata(Query(params): Query<HashParam>) -> Result<Json<BlockDataResp
         Some(v) => v,
     };
 
-    let txs = db::rocksdb::get_block_tx_entires(unhexxed)
+    let txs = db::rocksdb::get_block_tx_entries(unhexxed)
         .await
         .unwrap_or_default();
 

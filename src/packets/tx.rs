@@ -163,7 +163,7 @@ impl From<TxBorrowed<'_>> for TxOwned {
 }
 
 impl TxOwned {
-    pub fn deserialize_without_txouts(buffer: &[u8], hash: [u8; 32]) -> Result<TxOwned> {
+    pub fn deserialize_without_txouts(buffer: &[u8], hash: [u8; 32]) -> Result<(TxOwned, usize)> {
         let version = buffer.get_u32_le(0)?;
 
         let has_witness_data = match buffer.get(4..6) {
@@ -196,15 +196,18 @@ impl TxOwned {
 
         let locktime = buffer.get_u32_le(offset)?;
 
-        Ok(TxOwned {
-            version,
-            locktime,
-            txins,
-            txouts: vec![],
-            witness_data: witnesses,
-            hash,
-            witness_hash: EMPTY_HASH,
-        })
+        Ok((
+            TxOwned {
+                version,
+                locktime,
+                txins,
+                txouts: vec![],
+                witness_data: witnesses,
+                hash,
+                witness_hash: EMPTY_HASH,
+            },
+            offset + 4,
+        ))
     }
 
     pub fn compute_witness_hash(&mut self) {

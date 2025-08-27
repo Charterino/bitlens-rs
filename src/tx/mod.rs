@@ -2,6 +2,7 @@ use crate::{
     db::{self, rocksdb::SerializedTx},
     packets::{
         buffer::Buffer,
+        deserialize_array_owned,
         tx::{TxOutRef, TxOwned, TxRef},
         varint::{VarInt, length_varint, serialize_varint_into_slice},
     },
@@ -35,6 +36,7 @@ pub struct AnalyzedTx {
     pub block_hash: [u8; 32],
     #[serde(flatten)]
     pub tx: TxOwned,
+    pub txin_values: Vec<u64>,
 }
 
 pub fn deserialize_analyzed_tx(data: &[u8], hash: [u8; 32]) -> AnalyzedTx {
@@ -44,12 +46,18 @@ pub fn deserialize_analyzed_tx(data: &[u8], hash: [u8; 32]) -> AnalyzedTx {
     let sigops = data.get_u32_le(20).expect("to deserialize sigops");
     let block_hash = *data.get_hash(24).expect("to deserialize block hash");
 
-    let tx = TxOwned::deserialize_without_txouts(
+    let (tx, consumed) = TxOwned::deserialize_without_txouts(
         data.with_offset(56)
             .expect("to offset before deserializing tx"),
         hash,
     )
     .expect("to deserialize tx without txouts");
+
+    let (txin_values, _) = deserialize_array_owned(
+        data.with_offset(56 + consumed)
+            .expect("to offset before deserializing txin_values"),
+    )
+    .expect("to deserialize txin_values");
 
     AnalyzedTx {
         fee,
@@ -58,6 +66,7 @@ pub fn deserialize_analyzed_tx(data: &[u8], hash: [u8; 32]) -> AnalyzedTx {
         sigops,
         block_hash,
         tx,
+        txin_values,
     }
 }
 
@@ -86,10 +95,13 @@ pub fn analyze_tx<'arena, 'data>(
 
     let sigops = get_transaction_sigop_cost(tx, dependencies, flags);
 
+    let txin_values_size = length_varint(dependencies.len() as u64) + dependencies.len() * 8;
+    let serialized_tx_size = tx.serialized_without_txouts_size();
+
     let analyzed_tx = arena
-        // serialized tx size + fee (8 bytes) + txouts_sum (8 bytes) + size_wus(4 bytes) + sigops (4 bytes) + block_number (8 bytes) + block_hash (32 bytes)
+        // serialized tx size + fee (8 bytes) + txouts_sum (8 bytes) + size_wus(4 bytes) + sigops (4 bytes) + block_number (8 bytes) + block_hash (32 bytes) + txin_values size
         .try_alloc_array_fill_copy(
-            tx.serialized_without_txouts_size() + 8 + 8 + 4 + 4 + 8 + 32,
+            serialized_tx_size + 8 + 8 + 4 + 4 + 8 + 32 + txin_values_size,
             0u8,
         )
         .expect("to allocate space for analyzed tx");
@@ -102,11 +114,25 @@ pub fn analyze_tx<'arena, 'data>(
     let mut for_tx = &mut analyzed_tx[56..];
     tx.serialize_without_txouts(&mut for_tx);
 
+    let size_offset = serialize_varint_into_slice(
+        dependencies.len() as u64,
+        &mut analyzed_tx[56 + serialized_tx_size..],
+    );
+    for (index, dep) in dependencies.iter().enumerate() {
+        let pos = 56 + serialized_tx_size + (8 * index) + size_offset;
+        analyzed_tx[pos..pos + 8].copy_from_slice(&dep.value().to_le_bytes());
+    }
+
     let tx_outs = serialize_txouts(tx, arena);
     SerializedTx {
         hash: tx.hash(),
         analyzed_tx: Some(analyzed_tx),
         tx_outs: Some(tx_outs),
+        spent_txos: if tx.is_coinbase() {
+            None
+        } else {
+            Some(serialize_spends(tx, arena))
+        },
         fee,
         txouts_sum,
         size_wus,
@@ -131,4 +157,21 @@ fn serialize_txouts<'arena>(tx: TxRef, arena: &'arena Arena) -> &'arena [u8] {
     debug_assert_eq!(size, offset);
 
     result
+}
+
+fn serialize_spends<'arena>(tx: TxRef, arena: &'arena Arena) -> &'arena [&'arena [u8; 36]] {
+    let mut result = arena
+        .try_alloc_arenaarray(tx.txins().count())
+        .expect("to allocate space for txspends");
+
+    for txin in tx.txins() {
+        let key = arena
+            .try_alloc([0u8; 36])
+            .expect("to allocate space for txspends");
+        key[0..32].copy_from_slice(&txin.prevout_hash());
+        key[32..36].copy_from_slice(&txin.prevout_index().to_le_bytes());
+        result.push(&*key);
+    }
+
+    result.into_arena_array()
 }

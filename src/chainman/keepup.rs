@@ -192,9 +192,11 @@ async fn handle_new_header(
     drop(c);
     let mut w = CHAIN.write().unwrap();
 
-    if let Ok(Some(blocks_to_apply)) =
+    if let Ok(Some(header_application_result)) =
         validate_and_apply_header_inner(BlockHeaderRef::Owned(&header), &mut w, false)
     {
+        w.update_most_work_chain(&header_application_result);
+        let blocks_to_apply = header_application_result.added_blocks;
         let new_top_number = w.top_header.number;
         if blocks_to_apply.len() == 1 {
             // Simple chain extension

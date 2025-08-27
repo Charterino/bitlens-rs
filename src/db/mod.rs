@@ -1,5 +1,5 @@
 use crate::{
-    db::rocksdb::BlockTxEntry,
+    db::rocksdb::{BlockTxEntry, write_txspends},
     packets::varint::{VarInt, length_varint, serialize_varint},
     types::blockmetrics::BlockMetrics,
 };
@@ -64,10 +64,34 @@ pub async fn write_analyzed_txs(
     // sort by hash before ingestion
     collapsed.sort_by(|a, b| a.hash.cmp(&b.hash));
 
+    let mut spends = {
+        let mut result = Vec::with_capacity(collapsed.len());
+        for i in 0..blocks.len() {
+            let block_hash = blocks[i];
+            for tx in txs[i] {
+                if tx.spent_txos.is_none() {
+                    continue;
+                }
+                let mut value = [0u8; 64];
+                value[0..32].copy_from_slice(&tx.hash);
+                value[32..64].copy_from_slice(&block_hash);
+                for txin in tx.spent_txos.unwrap() {
+                    result.push((*txin, value));
+                }
+            }
+        }
+        result
+    };
+    // sort by hash before ingestion
+    spends.sort_by(|a, b| a.0.cmp(b.0));
+
     async_scoped::TokioScope::scope_and_block(|s| {
         s.spawn(write_txouts(&collapsed));
         s.spawn(write_txs(&collapsed));
         s.spawn(write_block_txs(blocks_with_txs_pairs));
+        if !spends.is_empty() {
+            s.spawn(write_txspends(spends));
+        }
     });
 
     // after we're done with txs, update fetched_full in sqlite

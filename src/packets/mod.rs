@@ -66,3 +66,9 @@ pub fn serialize_array<T: Serializable>(array: &[T], into: &mut impl BufMut) {
         item.serialize(into);
     }
 }
+
+impl DeserializableOwned for u64 {
+    fn deserialize_owned(buffer: &[u8]) -> Result<(Self, usize)> {
+        Ok((buffer.get_u64_le(0)?, 8))
+    }
+}
