@@ -35,5 +35,6 @@ logs/
 bitlens-txs
 bitlens-txouts
 bitlens-blocktxs
+bitlens-txspends
 result
 *.sst
