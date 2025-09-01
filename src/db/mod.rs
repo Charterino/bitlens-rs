@@ -1,5 +1,5 @@
 use crate::{
-    db::rocksdb::{BlockTxEntry, write_txspends},
+    db::rocksdb::{BlockTxEntry, write_address_amends, write_txspends},
     packets::varint::{VarInt, length_varint, serialize_varint},
     types::blockmetrics::BlockMetrics,
 };
@@ -64,33 +64,96 @@ pub async fn write_analyzed_txs(
     // sort by hash before ingestion
     collapsed.sort_by(|a, b| a.hash.cmp(&b.hash));
 
-    let mut spends = {
-        let mut result = Vec::with_capacity(collapsed.len());
-        for i in 0..blocks.len() {
-            let block_hash = blocks[i];
-            for tx in txs[i] {
-                if tx.spent_txos.is_none() {
-                    continue;
-                }
-                let mut value = [0u8; 64];
-                value[0..32].copy_from_slice(&tx.hash);
-                value[32..64].copy_from_slice(&block_hash);
-                for txin in tx.spent_txos.unwrap() {
-                    result.push((*txin, value));
+    let spends = {
+        if let Some(spends_count) = collapsed
+            .iter()
+            .map(|v| match v.spent_txos {
+                Some(spends) => spends.len(),
+                None => 0,
+            })
+            .reduce(|current, acc| acc + current)
+        {
+            let mut result = Vec::with_capacity(spends_count);
+            for i in 0..blocks.len() {
+                let block_hash = blocks[i];
+                for tx in txs[i] {
+                    if tx.spent_txos.is_none() {
+                        continue;
+                    }
+                    let mut value = [0u8; 64];
+                    value[0..32].copy_from_slice(&tx.hash);
+                    value[32..64].copy_from_slice(&block_hash);
+                    for txin in tx.spent_txos.unwrap() {
+                        result.push((*txin, value));
+                    }
                 }
             }
+            // sort by hash before ingestion
+            result.sort_by(|a, b| a.0.cmp(b.0));
+            Some(result)
+        } else {
+            None
         }
-        result
     };
-    // sort by hash before ingestion
-    spends.sort_by(|a, b| a.0.cmp(b.0));
+
+    let address_amends = {
+        if let Some(address_amends_count) = collapsed
+            .iter()
+            .map(|v| match v.address_amends {
+                Some(amends) => amends.len(),
+                None => 0,
+            })
+            .reduce(|current, acc| acc + current)
+        {
+            let mut result = Vec::with_capacity(address_amends_count);
+            for i in 0..blocks.len() {
+                let block_hash = blocks[i];
+                for tx in txs[i] {
+                    if let Some(amends) = tx.address_amends {
+                        let mut last_key = None;
+                        for txin in amends {
+                            let mut value = [0u8; 40];
+                            value[0..32].copy_from_slice(&block_hash);
+
+                            value[32..40].copy_from_slice(&if last_key.is_some()
+                                && last_key.unwrap() == txin.0
+                            {
+                                let (_, prev_key): (_, [u8; 40]) = result.pop().unwrap();
+                                let prev_value =
+                                    i64::from_le_bytes(prev_key[32..40].try_into().unwrap());
+                                (prev_value + txin.1).to_le_bytes()
+                            } else {
+                                txin.1.to_le_bytes()
+                            });
+
+                            result.push((txin.0, value));
+                            last_key = Some(txin.0);
+                        }
+                    }
+                }
+            }
+
+            // sort by hash before ingestion
+            result.sort_by(|a, b| a.0.cmp(b.0));
+            Some(result)
+        } else {
+            None
+        }
+    };
 
     async_scoped::TokioScope::scope_and_block(|s| {
         s.spawn(write_txouts(&collapsed));
         s.spawn(write_txs(&collapsed));
         s.spawn(write_block_txs(blocks_with_txs_pairs));
-        if !spends.is_empty() {
-            s.spawn(write_txspends(spends));
+        if let Some(amends) = address_amends {
+            if amends.len() != 0 {
+                s.spawn(write_address_amends(amends));
+            }
+        }
+        if let Some(spends) = spends {
+            if spends.len() != 0 {
+                s.spawn(write_txspends(spends));
+            }
         }
     });
 

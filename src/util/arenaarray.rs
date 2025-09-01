@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, ptr};
+use std::{cmp::Ordering, marker::PhantomData, ptr};
 
 #[derive(Debug, Clone, Copy)]
 pub struct ArenaArray<'arena, T> {
@@ -49,5 +49,17 @@ impl<'arena, T: Copy> ArenaArray<'arena, T> {
     #[inline(always)]
     pub fn into_arena_array(self) -> &'arena [T] {
         unsafe { core::slice::from_raw_parts_mut(self.ptr, self.len) }
+    }
+}
+
+impl<T: Copy + Ord> ArenaArray<'_, T> {
+    pub fn sort_unstable_by<F>(&mut self, compare: F)
+    where
+        F: FnMut(&T, &T) -> Ordering,
+    {
+        unsafe {
+            let mut_array = core::slice::from_raw_parts_mut(self.ptr, self.len);
+            mut_array.sort_unstable_by(compare);
+        }
     }
 }

@@ -51,7 +51,7 @@ static OPEN_OPTIONS: LazyLock<Options> = LazyLock::new(|| {
     open_options
 });
 
-static TXSPENDS_OPEN_OPTIONS: LazyLock<Options> = LazyLock::new(|| {
+static PREFIX_DB_OPEN_OPTIONS: LazyLock<Options> = LazyLock::new(|| {
     let mut cloned = OPEN_OPTIONS.clone();
     cloned.set_prefix_extractor(SliceTransform::create_fixed_prefix(32));
     cloned
@@ -77,8 +77,13 @@ pub static BLOCKTXS_DB: LazyLock<DB> = LazyLock::new(|| {
         .expect("to have opened bitlens-blocktxs db")
 });
 
+pub static ADDRESSES_DB: LazyLock<DB> = LazyLock::new(|| {
+    rocksdb::DB::open(&PREFIX_DB_OPEN_OPTIONS, "bitlens-addresses")
+        .expect("to have opened bitlens-addresses db")
+});
+
 pub static TXSPENDS_DB: LazyLock<DB> = LazyLock::new(|| {
-    rocksdb::DB::open(&TXSPENDS_OPEN_OPTIONS, "bitlens-txspends")
+    rocksdb::DB::open(&PREFIX_DB_OPEN_OPTIONS, "bitlens-txspends")
         .expect("to have opened bitlens-txspends db")
 });
 
@@ -92,6 +97,8 @@ pub struct SerializedTx<'a> {
     pub analyzed_tx: Option<&'a [u8]>,
     pub tx_outs: Option<&'a [u8]>,
     pub spent_txos: Option<&'a [&'a [u8; 36]]>,
+    // tuples (address bytes + tx hash, delta)
+    pub address_amends: Option<&'a [(&'a [u8], i64)]>,
 
     // The following fields arent written to disk (because they're already present in `analyzed_tx`),
     // but are stored for easy access after writing this transaction to update the front page response.
@@ -222,6 +229,31 @@ pub async fn write_txspends(spends: Vec<(&[u8; 36], [u8; 64])>) {
     TXSPENDS_DB.flush().expect("to flush txspends");
 }
 
+pub async fn write_address_amends(address_amends: Vec<(&[u8], [u8; 40])>) {
+    let mut writer = rocksdb::SstFileWriter::create(&OPEN_OPTIONS);
+    writer
+        .open("bitlens-address-amends-temp.sst")
+        .expect("to open bitlens-address-amends-temp.sst");
+
+    for pair in address_amends {
+        writer
+            .put(pair.0, pair.1)
+            .expect("to add tx hashes into sst file");
+    }
+
+    writer
+        .finish()
+        .expect("to close bitlens-address-amends-temp.sst");
+    drop(writer);
+    ADDRESSES_DB
+        .ingest_external_file_opts(&INGEST_OPTIONS, vec!["bitlens-address-amends-temp.sst"])
+        .expect("to ingest bitlens-address-amends-temp.sst");
+    ADDRESSES_DB
+        .flush_wal(true)
+        .expect("to flush address-amends wal");
+    ADDRESSES_DB.flush().expect("to flush address-amends");
+}
+
 pub async fn get_block_tx_entries(hash: [u8; 32]) -> Result<Vec<BlockTxEntry>> {
     let _g = READ_SEMAPHORE
         .acquire()
@@ -277,7 +309,7 @@ pub async fn get_tx_spends(txhash: [u8; 32]) -> Result<Vec<(u32, [u8; 32], [u8; 
 
     Ok(tokio::task::spawn_blocking(move || {
         let mut prefixiter: DBRawIteratorWithThreadMode<_> =
-            TXSPENDS_DB.prefix_iterator(&txhash).into();
+            TXSPENDS_DB.prefix_iterator(txhash).into();
         let mut results = Vec::new();
         while let Some((key, value)) = prefixiter.item() {
             assert_eq!(36, key.len());
@@ -298,6 +330,39 @@ pub async fn get_tx_spends(txhash: [u8; 32]) -> Result<Vec<(u32, [u8; 32], [u8; 
                 b
             };
             results.push((txo_index, tx, block));
+            prefixiter.next();
+        }
+
+        results
+    })
+    .await?)
+}
+
+pub async fn get_address_entires(address: Vec<u8>) -> Result<Vec<([u8; 32], [u8; 32], i64)>> {
+    let _g = READ_SEMAPHORE
+        .acquire()
+        .await
+        .expect("to have acquire a read permit from the semaphore");
+
+    Ok(tokio::task::spawn_blocking(move || {
+        let mut prefixiter: DBRawIteratorWithThreadMode<_> =
+            ADDRESSES_DB.prefix_iterator(&address).into();
+        let mut results = Vec::new();
+        while let Some((key, value)) = prefixiter.item() {
+            assert_eq!(address.len() + 32, key.len());
+            assert_eq!(40, value.len());
+            let tx_hash = {
+                let mut i = [0u8; 32];
+                i.copy_from_slice(&key[address.len()..]);
+                i
+            };
+            let block_hash = {
+                let mut t = [0u8; 32];
+                t.copy_from_slice(&value[0..32]);
+                t
+            };
+            let delta = { i64::from_le_bytes(value[32..40].try_into().unwrap()) };
+            results.push((tx_hash, block_hash, delta));
             prefixiter.next();
         }
 

@@ -1,3 +1,9 @@
+use crate::{
+    chainman::{self, FRONTPAGE_STATS},
+    db::{self, rocksdb::BlockTxEntry},
+    tx::AnalyzedTx,
+    types::{addresstransaction::AddressTransaction, blockheaderwithnumber::BlockHeaderWithNumber},
+};
 use axum::{
     Json, Router,
     extract::Query,
@@ -5,21 +11,16 @@ use axum::{
     response::IntoResponse,
     routing::get,
 };
+use bech32::{Fe32, hrp};
 use serde::{Deserialize, Serialize};
 use tower_http::cors::CorsLayer;
-
-use crate::{
-    chainman::{self, FRONTPAGE_STATS},
-    db::{self, rocksdb::BlockTxEntry},
-    tx::AnalyzedTx,
-    types::blockheaderwithnumber::BlockHeaderWithNumber,
-};
 
 pub async fn start() {
     let app = Router::new()
         .route("/api/frontpagedata", get(frontpagedata))
         .route("/api/tx", get(txdata))
         .route("/api/block", get(blockdata))
+        .route("/api/address", get(address_data))
         .layer(
             CorsLayer::new()
                 .allow_origin("*".parse::<HeaderValue>().unwrap())
@@ -89,8 +90,8 @@ async fn txdata(Query(params): Query<HashParam>) -> Result<Json<TxDataResponse>,
     let filtered_spends = chainman::filter_tx_spends(spends);
 
     Ok(Json(TxDataResponse {
-        header: header,
-        tx: tx,
+        header,
+        tx,
         spends: filtered_spends,
     }))
 }
@@ -122,4 +123,58 @@ async fn blockdata(Query(params): Query<HashParam>) -> Result<Json<BlockDataResp
         .unwrap_or_default();
 
     Ok(Json(BlockDataResponse { header, txs }))
+}
+
+#[derive(Debug, Deserialize)]
+struct AddressParam {
+    address: String,
+}
+
+async fn address_data(
+    Query(params): Query<AddressParam>,
+) -> Result<Json<Vec<AddressTransaction>>, StatusCode> {
+    let address_bytes = match parse_address(&params.address) {
+        None => return Err(StatusCode::BAD_REQUEST),
+        Some(b) => b,
+    };
+
+    let amends = db::rocksdb::get_address_entires(address_bytes)
+        .await
+        .unwrap_or_default();
+
+    let transactions = chainman::filter_and_populate_address_txs(amends);
+
+    Ok(Json(transactions))
+}
+
+fn parse_address(address: &str) -> Option<Vec<u8>> {
+    if let Ok(b) = hex::decode(address) {
+        if b.len() == 65 {
+            // p2pk
+            return Some(b);
+        }
+        return None;
+    }
+    if let Ok(b) = bs58::decode(address).with_check(Some(0x00)).into_vec() {
+        if b.len() == 21 && b[0] == 0x00 {
+            // p2sh
+            return Some(b);
+        }
+        return None;
+    }
+    if let Ok((hrp, fe, b)) = bech32::segwit::decode(address) {
+        if hrp != hrp::BC {
+            return None;
+        }
+        if fe == Fe32::Q && (b.len() == 22 || b.len() == 32) {
+            // p2wsh or p2wph
+            return Some(b);
+        }
+        if fe == Fe32::P && b.len() == 32 {
+            // taproot
+            return Some(b);
+        }
+    }
+
+    None
 }

@@ -12,6 +12,7 @@ use crate::{
     },
     some_or_break,
     types::{
+        addresstransaction::AddressTransaction,
         blockheaderwithnumber::BlockHeaderWithNumber,
         blockmetrics::BlockMetrics,
         frontpagedata::{FrontPageData, FrontPageDataWithSerialized, ShortBlock, ShortTx},
@@ -113,6 +114,30 @@ pub fn filter_tx_spends(spends: Vec<(u32, [u8; 32], [u8; 32])>) -> Vec<(u32, [u8
         .into_iter()
         .filter(|item| r.most_work_chain.contains(&item.2))
         .map(|item| (item.0, item.1))
+        .collect()
+}
+
+pub fn filter_and_populate_address_txs(
+    address_txs: Vec<([u8; 32], [u8; 32], i64)>,
+) -> Vec<AddressTransaction> {
+    if address_txs.is_empty() {
+        return vec![];
+    }
+
+    let r = CHAIN.read().unwrap();
+    address_txs
+        .into_iter()
+        .filter(|item| r.most_work_chain.contains(&item.1))
+        .map(|item| {
+            let block = r.known_headers.get(&item.1).unwrap();
+            AddressTransaction {
+                transaction_hash: item.0,
+                block_hash: item.1,
+                block_number: block.number,
+                timestamp: block.header.timestamp,
+                value: item.2,
+            }
+        })
         .collect()
 }
 

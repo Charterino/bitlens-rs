@@ -36,5 +36,6 @@ bitlens-txs
 bitlens-txouts
 bitlens-blocktxs
 bitlens-txspends
+bitlens-addresses
 result
 *.sst
