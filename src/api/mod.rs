@@ -155,9 +155,10 @@ fn parse_address(address: &str) -> Option<Vec<u8>> {
         }
         return None;
     }
-    if let Ok(b) = bs58::decode(address).with_check(Some(0x00)).into_vec() {
+    if let Ok(mut b) = bs58::decode(address).with_check(Some(0x00)).into_vec() {
         if b.len() == 21 && b[0] == 0x00 {
-            // p2sh
+            // p2pkh
+            b.remove(0);
             return Some(b);
         }
         return None;
