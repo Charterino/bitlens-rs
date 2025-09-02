@@ -1,7 +1,8 @@
 use crate::{
-    db::rocksdb::{BlockTxEntry, write_address_amends, write_txspends},
-    packets::varint::{VarInt, length_varint, serialize_varint},
+    db::rocksdb::{write_address_amends, write_txspends},
+    packets::varint::{VarInt, length_varint, serialize_varint_into_slice},
     types::blockmetrics::BlockMetrics,
+    util::{arena::Arena, arenaarray::ArenaArray},
 };
 use rocksdb::{SerializedTx, setup_rocksdb, write_block_txs, write_txouts, write_txs};
 use sqlite::{mark_blocks_as_downloaded, setup_sqlite};
@@ -24,101 +25,134 @@ pub async fn write_analyzed_txs(
     blocks: &[[u8; 32]],
     txs: &[&[SerializedTx<'_>]],
     block_metrics: &[BlockMetrics],
+    arena: &Arena,
 ) {
     debug_assert_eq!(blocks.len(), txs.len());
 
-    let serialized_txhashes: Vec<Vec<u8>> = txs
-        .iter()
-        .map(|block_txs| {
-            let length = length_varint(block_txs.len() as VarInt);
-            let mut serialized =
-                Vec::with_capacity(length + (block_txs.len() * size_of::<BlockTxEntry>()));
-            let initial_cap = serialized.capacity();
-            serialize_varint(block_txs.len() as VarInt, &mut serialized);
+    let serialized_txhashes = {
+        let mut blocks_arena_array: ArenaArray<([u8; 32], &[u8])> = arena
+            .try_alloc_arenaarray(blocks.len())
+            .expect("to allocate serialized_txhashes");
 
-            for tx in block_txs.iter() {
-                bincode::encode_into_std_write(
-                    BlockTxEntry {
-                        hash: tx.hash,
-                        value: tx.txouts_sum as f64 / 100_000_000.,
-                        fee_sats: tx.fee,
-                        size_wus: tx.size_wus,
-                    },
-                    &mut serialized,
-                    bincode::config::standard(),
-                )
-                .expect("to serialize blocktxentry");
+        for (transactions, block_hash) in txs.iter().zip(blocks) {
+            let mut offset = length_varint(transactions.len() as VarInt);
+            let serialized = arena
+                .try_alloc_array_fill_copy(offset + (52 * transactions.len()), 0u8)
+                .expect("to allocate serialized_txhashes for block");
+            serialize_varint_into_slice(transactions.len() as u64, serialized);
+
+            for transaction in transactions.iter() {
+                serialized[offset..offset + 32].copy_from_slice(&transaction.hash);
+                serialized[offset + 32..offset + 40].copy_from_slice(
+                    &((transaction.txouts_sum as f64 / 100_000_000.).to_le_bytes()),
+                );
+                serialized[offset + 40..offset + 48]
+                    .copy_from_slice(&(transaction.fee.to_le_bytes()));
+                serialized[offset + 48..offset + 52]
+                    .copy_from_slice(&(transaction.size_wus.to_le_bytes()));
+                offset += 52;
             }
 
-            assert_eq!(initial_cap, serialized.capacity());
+            blocks_arena_array.push((*block_hash, serialized));
+        }
 
-            serialized
-        })
-        .collect();
-    let mut blocks_with_txs_pairs: Vec<(&[u8; 32], Vec<u8>)> =
-        blocks.iter().zip(serialized_txhashes.into_iter()).collect();
-    // sort by hash before ingestion
-    blocks_with_txs_pairs.sort_by(|a, b| a.0.cmp(b.0));
+        // sort by hash before ingestion
+        blocks_arena_array.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        blocks_arena_array.into_arena_array()
+    };
 
-    let mut collapsed: Vec<&SerializedTx> = txs.iter().flat_map(|x| x.iter()).collect();
-    // sort by hash before ingestion
-    collapsed.sort_by(|a, b| a.hash.cmp(&b.hash));
+    let collapsed: &[&SerializedTx] = {
+        let txs_count = {
+            let mut count = 0;
+            for transactions in txs {
+                count += transactions.len();
+            }
+            count
+        };
+        let mut result: ArenaArray<'_, &SerializedTx<'_>> = arena
+            .try_alloc_arenaarray(txs_count)
+            .expect("to allocate collapsed");
+
+        for transactions in txs {
+            for transaction in transactions.iter() {
+                result.push(transaction);
+            }
+        }
+
+        // sort by hash before ingestion
+        result.sort_unstable_by(|a, b| a.hash.cmp(&b.hash));
+        result.into_arena_array()
+    };
 
     let spends = {
-        if let Some(spends_count) = collapsed
-            .iter()
-            .map(|v| match v.spent_txos {
-                Some(spends) => spends.len(),
-                None => 0,
-            })
-            .reduce(|current, acc| acc + current)
-        {
-            let mut result = Vec::with_capacity(spends_count);
-            for i in 0..blocks.len() {
-                let block_hash = blocks[i];
-                for tx in txs[i] {
-                    if tx.spent_txos.is_none() {
-                        continue;
-                    }
-                    let mut value = [0u8; 64];
-                    value[0..32].copy_from_slice(&tx.hash);
-                    value[32..64].copy_from_slice(&block_hash);
-                    for txin in tx.spent_txos.unwrap() {
-                        result.push((*txin, value));
+        let spends_count = {
+            let mut count = 0;
+            for transactions in txs {
+                for transaction in transactions.iter() {
+                    if let Some(i) = transaction.spent_txos {
+                        count += i.len();
                     }
                 }
             }
-            // sort by hash before ingestion
-            result.sort_by(|a, b| a.0.cmp(b.0));
-            Some(result)
-        } else {
+            count
+        };
+        if spends_count == 0 {
             None
+        } else {
+            let mut result: ArenaArray<'_, ([u8; 36], [u8; 64])> = arena
+                .try_alloc_arenaarray(spends_count)
+                .expect("to allocate spends");
+
+            for (transactions, block_hash) in txs.iter().zip(blocks) {
+                for transaction in transactions.iter() {
+                    if let Some(spends) = transaction.spent_txos {
+                        let mut value = [0u8; 64];
+                        value[0..32].copy_from_slice(&transaction.hash);
+                        value[32..64].copy_from_slice(block_hash);
+                        for txin in spends {
+                            result.push((**txin, value));
+                        }
+                    }
+                }
+            }
+
+            // sort by hash before ingestion
+            result.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+            Some(result.into_arena_array())
         }
     };
 
     let address_amends = {
-        if let Some(address_amends_count) = collapsed
-            .iter()
-            .map(|v| match v.address_amends {
-                Some(amends) => amends.len(),
-                None => 0,
-            })
-            .reduce(|current, acc| acc + current)
-        {
-            let mut result = Vec::with_capacity(address_amends_count);
-            for i in 0..blocks.len() {
-                let block_hash = blocks[i];
-                for tx in txs[i] {
-                    if let Some(amends) = tx.address_amends {
+        let amends_count = {
+            let mut count = 0;
+            for transactions in txs {
+                for transaction in transactions.iter() {
+                    if let Some(i) = transaction.address_amends {
+                        count += i.len();
+                    }
+                }
+            }
+            count
+        };
+        if amends_count == 0 {
+            None
+        } else {
+            let mut result: ArenaArray<'_, (&[u8], [u8; 40])> = arena
+                .try_alloc_arenaarray(amends_count)
+                .expect("to allocate address_amends");
+
+            for (transactions, block_hash) in txs.iter().zip(blocks) {
+                for transaction in transactions.iter() {
+                    if let Some(amends) = transaction.address_amends {
                         let mut last_key = None;
                         for txin in amends {
                             let mut value = [0u8; 40];
-                            value[0..32].copy_from_slice(&block_hash);
+                            value[0..32].copy_from_slice(block_hash);
 
                             value[32..40].copy_from_slice(&if last_key.is_some()
                                 && last_key.unwrap() == txin.0
                             {
-                                let (_, prev_key): (_, [u8; 40]) = result.pop().unwrap();
+                                let (_, prev_key): (_, [u8; 40]) = result.pop();
                                 let prev_value =
                                     i64::from_le_bytes(prev_key[32..40].try_into().unwrap());
                                 (prev_value + txin.1).to_le_bytes()
@@ -134,26 +168,20 @@ pub async fn write_analyzed_txs(
             }
 
             // sort by hash before ingestion
-            result.sort_by(|a, b| a.0.cmp(b.0));
-            Some(result)
-        } else {
-            None
+            result.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+            Some(result.into_arena_array())
         }
     };
 
     async_scoped::TokioScope::scope_and_block(|s| {
-        s.spawn(write_txouts(&collapsed));
-        s.spawn(write_txs(&collapsed));
-        s.spawn(write_block_txs(blocks_with_txs_pairs));
+        s.spawn(write_txouts(collapsed));
+        s.spawn(write_txs(collapsed));
+        s.spawn(write_block_txs(serialized_txhashes));
         if let Some(amends) = address_amends {
-            if amends.len() != 0 {
-                s.spawn(write_address_amends(amends));
-            }
+            s.spawn(write_address_amends(amends));
         }
         if let Some(spends) = spends {
-            if spends.len() != 0 {
-                s.spawn(write_txspends(spends));
-            }
+            s.spawn(write_txspends(spends));
         }
     });
 

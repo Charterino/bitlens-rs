@@ -431,8 +431,8 @@ fn job_to_getdata(hash: [u8; 32]) -> PayloadToSend {
     })
 }
 
-const MAX_BLOCKS_PER_FLUSH: usize = 1024;
-const ANALYZED_OVERHEAD_PER_BLOCK: usize = 4096 * 512;
+const MAX_BLOCKS_PER_FLUSH: usize = 512;
+pub const ANALYZED_OVERHEAD_PER_BLOCK: usize = 4096 * 512;
 type AnalyzedBlock<'a> = &'a [SerializedTx<'a>];
 struct ChainSyncState<'current, 'previous> {
     current_txouts: HashMap<[u8; 32], Vec<&'current TxOutBorrowed<'current>>>,
@@ -473,7 +473,6 @@ async fn receive_and_process_blocks(mut recv: Receiver<(PayloadWithAllocator, u6
 
             // So everything is flushed now
 
-            // TODO: can prolly optimize a lil here by reusing metrics/analyzed arrays and hashmaps
             let ChainSyncState {
                 current_txouts,
                 mut previous_txouts,
@@ -491,15 +490,22 @@ async fn receive_and_process_blocks(mut recv: Receiver<(PayloadWithAllocator, u6
             // First we reset everything previous_ to prepare it for becoming the new current_
             previous_txouts.clear();
             let mut pm = previous_metrics.lock().unwrap().take().unwrap();
-            pm.clear();
             let mut pa = previous_analyzed.lock().unwrap().take().unwrap();
+            info!("sizes"; "previous_txouts" => previous_txouts.len(), "current_txouts" => current_txouts.len(), "current_metrics" => current_metrics.len(), "previous_metrics" => pm.len(), "current_analyzed" => current_analyzed.len(), "previous_analyzed" => pa.len());
+            pm.clear();
             pa.clear();
             previous_arena.reset();
 
             let pm_clone = previous_metrics.clone();
             let pa_clone = previous_analyzed.clone();
             scope.spawn(async move {
-                write_analyzed_txs(&next_batch, &current_analyzed, &current_metrics).await;
+                write_analyzed_txs(
+                    &next_batch,
+                    &current_analyzed,
+                    &current_metrics,
+                    current_arena,
+                )
+                .await;
                 // after we've written blocks and updated fetched_full in sqlite to true,
                 // update fetched_full in chainman's live state
                 let top = next_batch[next_batch.len() - 1];

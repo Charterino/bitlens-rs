@@ -44,6 +44,7 @@ use tokio::{
 };
 
 use crate::{
+    chainman::blocksync::ANALYZED_OVERHEAD_PER_BLOCK,
     db::{self, write_analyzed_txs},
     packets::{
         block::BlockOwned,
@@ -314,7 +315,7 @@ async fn apply_block(block: BlockOwned, frontpage_strat: FrontPageDataUpdateStra
     }
 
     // now that we have all of the dependencies `deps`, analyze all txs
-    let analyzed_arena = Arena::new(MAX_PACKET_SIZE);
+    let analyzed_arena = Arena::new(MAX_PACKET_SIZE + ANALYZED_OVERHEAD_PER_BLOCK);
     let mut analyzed_txs = Vec::with_capacity(block.txs.len());
     let mut consumed = 0;
     let mut fees_total = 0;
@@ -369,7 +370,13 @@ async fn apply_block(block: BlockOwned, frontpage_strat: FrontPageDataUpdateStra
     };
 
     let bms = [block_metrics];
-    write_analyzed_txs(&[block.header.hash], &[&analyzed_txs], &bms).await;
+    write_analyzed_txs(
+        &[block.header.hash],
+        &[&analyzed_txs],
+        &bms,
+        &analyzed_arena,
+    )
+    .await;
     mark_as_downloaded(vec![block.header.hash]);
     match frontpage_strat {
         FrontPageDataUpdateStrategy::RegenerateFromScratch => {

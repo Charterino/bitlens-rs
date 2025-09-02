@@ -107,7 +107,7 @@ pub struct SerializedTx<'a> {
     pub size_wus: u32,
 }
 
-#[derive(bincode::Decode, bincode::Encode, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct BlockTxEntry {
     #[serde(serialize_with = "crate::util::serialize_as_hex::serialize_hash_as_hex_reversed")]
     pub hash: [u8; 32],
@@ -137,7 +137,7 @@ pub async fn get_transaction_outputs(hash: [u8; 32]) -> Result<Vec<TxOutOwned>> 
     .await?
 }
 
-pub async fn write_txouts(txs: &Vec<&SerializedTx<'_>>) {
+pub async fn write_txouts(txs: &[&SerializedTx<'_>]) {
     let mut writer = rocksdb::SstFileWriter::create(&OPEN_OPTIONS);
     writer
         .open("bitlens-txouts-temp.sst")
@@ -162,7 +162,7 @@ pub async fn write_txouts(txs: &Vec<&SerializedTx<'_>>) {
     TXOUTS_DB.flush().expect("to flush txouts");
 }
 
-pub async fn write_txs(txs: &Vec<&SerializedTx<'_>>) {
+pub async fn write_txs(txs: &[&SerializedTx<'_>]) {
     let mut writer = rocksdb::SstFileWriter::create(&OPEN_OPTIONS);
     writer
         .open("bitlens-txs-temp.sst")
@@ -187,7 +187,7 @@ pub async fn write_txs(txs: &Vec<&SerializedTx<'_>>) {
     TXS_DB.flush().expect("to flush txs");
 }
 
-pub async fn write_block_txs(blocks_with_txs_pairs: Vec<(&[u8; 32], Vec<u8>)>) {
+pub async fn write_block_txs(blocks_with_txs_pairs: &[([u8; 32], &[u8])]) {
     let mut writer = rocksdb::SstFileWriter::create(&OPEN_OPTIONS);
     writer
         .open("bitlens-blocktxs-temp.sst")
@@ -208,7 +208,7 @@ pub async fn write_block_txs(blocks_with_txs_pairs: Vec<(&[u8; 32], Vec<u8>)>) {
     BLOCKTXS_DB.flush().expect("to flush blocktxs");
 }
 
-pub async fn write_txspends(spends: Vec<(&[u8; 36], [u8; 64])>) {
+pub async fn write_txspends(spends: &[([u8; 36], [u8; 64])]) {
     let mut writer = rocksdb::SstFileWriter::create(&OPEN_OPTIONS);
     writer
         .open("bitlens-txspends-temp.sst")
@@ -229,7 +229,7 @@ pub async fn write_txspends(spends: Vec<(&[u8; 36], [u8; 64])>) {
     TXSPENDS_DB.flush().expect("to flush txspends");
 }
 
-pub async fn write_address_amends(address_amends: Vec<(&[u8], [u8; 40])>) {
+pub async fn write_address_amends(address_amends: &[(&[u8], [u8; 40])]) {
     let mut writer = rocksdb::SstFileWriter::create(&OPEN_OPTIONS);
     writer
         .open("bitlens-address-amends-temp.sst")
@@ -276,10 +276,13 @@ pub async fn get_block_tx_entries(hash: [u8; 32]) -> Result<Vec<BlockTxEntry>> {
             let mut result = Vec::with_capacity(count as usize);
             for _ in 0..count {
                 let bytes = &data[continue_at..];
-                let (value, consumed) =
-                    bincode::decode_from_slice(bytes, bincode::config::standard()).unwrap();
-                result.push(value);
-                continue_at += consumed;
+                result.push(BlockTxEntry {
+                    hash: bytes[0..32].try_into().unwrap(),
+                    value: f64::from_le_bytes(bytes[32..40].try_into().unwrap()),
+                    fee_sats: u64::from_le_bytes(bytes[40..48].try_into().unwrap()),
+                    size_wus: u32::from_le_bytes(bytes[48..52].try_into().unwrap()),
+                });
+                continue_at += 52;
             }
             Ok(result)
         }

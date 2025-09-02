@@ -7,7 +7,7 @@ use std::{
     sync::atomic::{AtomicUsize, Ordering},
 };
 
-use crate::util::arenaarray::ArenaArray;
+use crate::{metrics, util::arenaarray::ArenaArray};
 
 #[derive(Debug)]
 pub struct Arena {
@@ -21,6 +21,7 @@ unsafe impl Sync for Arena {}
 
 impl<'a> Arena {
     pub fn new(capacity: usize) -> Self {
+        metrics::METRIC_ARENA_SPACE_ALLOCATED.add(capacity as i64);
         let alloced = unsafe {
             let v = alloc(Layout::from_size_align_unchecked(capacity, 1));
             // For now this fills the entire buffer with 0s so I can easily track memory. Soon to be changed.
@@ -227,6 +228,7 @@ impl<'a> Arena {
 
 impl Drop for Arena {
     fn drop(&mut self) {
+        metrics::METRIC_ARENA_SPACE_ALLOCATED.sub(self.capacity as i64);
         unsafe {
             dealloc(
                 self.data,

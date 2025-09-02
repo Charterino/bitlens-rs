@@ -54,6 +54,14 @@ pub static METRIC_SQLITE_REQUESTS_TIME: LazyLock<Histogram> = LazyLock::new(|| {
     .unwrap()
 });
 
+pub static METRIC_ARENA_SPACE_ALLOCATED: LazyLock<IntGauge> = LazyLock::new(|| {
+    register_int_gauge!(
+        "bitlens_arena_space_allocated",
+        "currently allocated for all arenas"
+    )
+    .unwrap()
+});
+
 // todo: add more metrics
 
 static METRICS_TOKEN: LazyLock<Vec<u8>> = LazyLock::new(|| {
@@ -62,7 +70,6 @@ static METRICS_TOKEN: LazyLock<Vec<u8>> = LazyLock::new(|| {
 });
 
 static METRICS_LISTEN_ADDRESS: LazyLock<String> = LazyLock::new(|| {
-    
     env::var("METRICS_LISTEN_ADDRESS").expect("METRICS_LISTEN_ADDRESS is not set")
 });
 

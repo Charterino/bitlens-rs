@@ -46,13 +46,22 @@ impl<'arena, T: Copy> ArenaArray<'arena, T> {
         self.len += 1
     }
 
+    pub fn pop(&mut self) -> T {
+        if self.len == 0 {
+            panic!("arena array is empty")
+        }
+        let value = unsafe { ptr::read(self.ptr.add(self.len - 1)) };
+        self.len -= 1;
+        value
+    }
+
     #[inline(always)]
     pub fn into_arena_array(self) -> &'arena [T] {
         unsafe { core::slice::from_raw_parts_mut(self.ptr, self.len) }
     }
 }
 
-impl<T: Copy + Ord> ArenaArray<'_, T> {
+impl<T: Copy> ArenaArray<'_, T> {
     pub fn sort_unstable_by<F>(&mut self, compare: F)
     where
         F: FnMut(&T, &T) -> Ordering,
