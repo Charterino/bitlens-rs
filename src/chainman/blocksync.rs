@@ -432,7 +432,7 @@ fn job_to_getdata(hash: [u8; 32]) -> PayloadToSend {
 }
 
 const MAX_BLOCKS_PER_FLUSH: usize = 1024;
-const ANALYZED_OVERHEAD_PER_BLOCK: usize = 4096 * 24;
+const ANALYZED_OVERHEAD_PER_BLOCK: usize = 4096 * 512;
 type AnalyzedBlock<'a> = &'a [SerializedTx<'a>];
 struct ChainSyncState<'current, 'previous> {
     current_txouts: HashMap<[u8; 32], Vec<&'current TxOutBorrowed<'current>>>,
