@@ -235,10 +235,15 @@ pub async fn write_address_amends(address_amends: Vec<(&[u8], [u8; 40])>) {
         .open("bitlens-address-amends-temp.sst")
         .expect("to open bitlens-address-amends-temp.sst");
 
+    let mut last = None;
     for pair in address_amends {
+        if last.is_some() && last.unwrap() == pair.0 {
+            continue;
+        }
         writer
             .put(pair.0, pair.1)
             .expect("to add tx hashes into sst file");
+        last = Some(pair.0);
     }
 
     writer
