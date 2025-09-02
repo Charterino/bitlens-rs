@@ -51,12 +51,6 @@ static OPEN_OPTIONS: LazyLock<Options> = LazyLock::new(|| {
     open_options
 });
 
-static PREFIX_DB_OPEN_OPTIONS: LazyLock<Options> = LazyLock::new(|| {
-    let mut cloned = OPEN_OPTIONS.clone();
-    cloned.set_prefix_extractor(SliceTransform::create_fixed_prefix(32));
-    cloned
-});
-
 static INGEST_OPTIONS: LazyLock<IngestExternalFileOptions> = LazyLock::new(|| {
     let mut ingest_options = IngestExternalFileOptions::default();
     ingest_options.set_move_files(true);
@@ -78,12 +72,12 @@ pub static BLOCKTXS_DB: LazyLock<DB> = LazyLock::new(|| {
 });
 
 pub static ADDRESSES_DB: LazyLock<DB> = LazyLock::new(|| {
-    rocksdb::DB::open(&PREFIX_DB_OPEN_OPTIONS, "bitlens-addresses")
+    rocksdb::DB::open(&OPEN_OPTIONS, "bitlens-addresses")
         .expect("to have opened bitlens-addresses db")
 });
 
 pub static TXSPENDS_DB: LazyLock<DB> = LazyLock::new(|| {
-    rocksdb::DB::open(&PREFIX_DB_OPEN_OPTIONS, "bitlens-txspends")
+    rocksdb::DB::open(&OPEN_OPTIONS, "bitlens-txspends")
         .expect("to have opened bitlens-txspends db")
 });
 
