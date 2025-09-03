@@ -9,6 +9,7 @@ use crate::{
     tx::opcodes::OP_EQUAL,
     util::arena::Arena,
 };
+use bech32::hrp;
 use fee::calculate_fee;
 use flags::{SCRIPT_VERIFY_P2SH, SCRIPT_VERIFY_WITNESS};
 use opcodes::{OP_0, OP_1, OP_CHECKSIG, OP_DUP, OP_EQUALVERIFY, OP_HASH160};
@@ -330,6 +331,85 @@ fn get_bech32_address(script: &[u8]) -> Option<&[u8]> {
     if script.len() == 34 && script[0] == OP_1 && script[1] == 0x20 {
         // v1 taproot
         return Some(&script[2..]);
+    }
+
+    None
+}
+
+pub fn get_human_address_from_script(script: &[u8]) -> Option<String> {
+    if let Some(p2pk) = get_p2pk_address_human(script) {
+        return Some(p2pk);
+    }
+    if let Some(p2sh) = get_p2sh_address_human(script) {
+        return Some(p2sh);
+    }
+    if let Some(p2pkh) = get_p2pkh_address_human(script) {
+        return Some(p2pkh);
+    }
+    if let Some(bech32) = get_bech32_address_human(script) {
+        return Some(bech32);
+    }
+
+    None
+}
+
+fn get_p2pk_address_human(script: &[u8]) -> Option<String> {
+    // full public key
+    if script.len() == 67 && script[0] == 0x41 && script[66] == OP_CHECKSIG {
+        return Some(hex::encode(&script[1..66]));
+    }
+
+    // compressed public key
+    if script.len() == 35 && script[0] == 0x21 && script[34] == OP_CHECKSIG {
+        return Some(hex::encode(&script[1..34]));
+    }
+
+    None
+}
+
+fn get_p2sh_address_human(script: &[u8]) -> Option<String> {
+    if script.len() == 23 && script[0] == OP_HASH160 && script[1] == 0x14 && script[22] == OP_EQUAL
+    {
+        return Some(
+            bs58::encode(&script[2..22])
+                .with_check_version(0x05)
+                .into_string(),
+        );
+    }
+    None
+}
+
+fn get_p2pkh_address_human(script: &[u8]) -> Option<String> {
+    if script.len() == 25
+        && script[0] == OP_DUP
+        && script[1] == OP_HASH160
+        && script[2] == 0x14
+        && script[23] == OP_EQUALVERIFY
+        && script[24] == OP_CHECKSIG
+    {
+        return Some(
+            bs58::encode(&script[3..23])
+                .with_check_version(0x00)
+                .into_string(),
+        );
+    }
+
+    None
+}
+
+fn get_bech32_address_human(script: &[u8]) -> Option<String> {
+    if script.len() == 22 && script[0] == OP_0 && script[1] == 0x14 {
+        // v0 pay to witness script hash
+        //return Some(&script[2..]);
+        return Some(bech32::segwit::encode_v0(hrp::BC, &script[2..]).unwrap());
+    }
+    if script.len() == 34 && script[0] == OP_0 && script[1] == 0x20 {
+        // v0 pay to witness pubkey hash
+        return Some(bech32::segwit::encode_v0(hrp::BC, &script[2..]).unwrap());
+    }
+    if script.len() == 34 && script[0] == OP_1 && script[1] == 0x20 {
+        // v1 taproot
+        return Some(bech32::segwit::encode_v1(hrp::BC, &script[2..]).unwrap());
     }
 
     None

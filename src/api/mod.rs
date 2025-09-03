@@ -1,7 +1,8 @@
 use crate::{
     chainman::{self, FRONTPAGE_STATS},
     db::{self, rocksdb::BlockTxEntry},
-    tx::AnalyzedTx,
+    packets::tx::TxOutOwned,
+    tx::{AnalyzedTx, get_human_address_from_script},
     types::{addresstransaction::AddressTransaction, blockheaderwithnumber::BlockHeaderWithNumber},
 };
 use axum::{
@@ -52,6 +53,8 @@ pub struct TxDataResponse {
     pub tx: AnalyzedTx,
     #[serde(serialize_with = "crate::util::serialize_spends::serialize_spends")]
     pub spends: Vec<(u32, [u8; 32])>,
+    //pub txin_addresses: Vec<String>,
+    pub txout_addresses: Vec<String>,
 }
 
 async fn txdata(Query(params): Query<HashParam>) -> Result<Json<TxDataResponse>, StatusCode> {
@@ -89,11 +92,21 @@ async fn txdata(Query(params): Query<HashParam>) -> Result<Json<TxDataResponse>,
 
     let filtered_spends = chainman::filter_tx_spends(spends);
 
+    let txout_addresses = txouts_to_addresses(&tx.tx.txouts);
+
     Ok(Json(TxDataResponse {
         header,
         tx,
         spends: filtered_spends,
+        txout_addresses,
     }))
+}
+
+fn txouts_to_addresses(txouts: &[TxOutOwned]) -> Vec<String> {
+    txouts
+        .iter()
+        .map(|txout| get_human_address_from_script(&txout.script).unwrap_or_default())
+        .collect()
 }
 
 #[derive(Serialize, Deserialize)]
