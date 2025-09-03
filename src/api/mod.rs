@@ -149,7 +149,7 @@ async fn address_data(
 
 fn parse_address(address: &str) -> Option<Vec<u8>> {
     if let Ok(b) = hex::decode(address) {
-        if b.len() == 65 {
+        if b.len() == 65 || b.len() == 33 {
             // p2pk
             return Some(b);
         }
@@ -158,6 +158,14 @@ fn parse_address(address: &str) -> Option<Vec<u8>> {
     if let Ok(mut b) = bs58::decode(address).with_check(Some(0x00)).into_vec() {
         if b.len() == 21 && b[0] == 0x00 {
             // p2pkh
+            b.remove(0);
+            return Some(b);
+        }
+        return None;
+    }
+    if let Ok(mut b) = bs58::decode(address).with_check(Some(0x05)).into_vec() {
+        if b.len() == 21 && b[0] == 0x05 {
+            // p2sh
             b.remove(0);
             return Some(b);
         }

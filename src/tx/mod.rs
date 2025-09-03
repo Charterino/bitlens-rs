@@ -6,6 +6,7 @@ use crate::{
         tx::{TxOutRef, TxOwned, TxRef},
         varint::{VarInt, length_varint, serialize_varint_into_slice},
     },
+    tx::opcodes::OP_EQUAL,
     util::arena::Arena,
 };
 use fee::calculate_fee;
@@ -227,6 +228,9 @@ fn script_has_address(script: &[u8]) -> bool {
     if get_p2pk_address(script).is_some() {
         return true;
     }
+    if get_p2sh_address(script).is_some() {
+        return true;
+    }
     if get_p2pkh_address(script).is_some() {
         return true;
     }
@@ -250,6 +254,14 @@ fn get_address_from_script_copy_into_arena_with_txhash<'data, 'arena: 'data>(
         key[p2pk.len()..].copy_from_slice(&txhash);
         return Some(&*key);
     }
+    if let Some(p2sh) = get_p2sh_address(script) {
+        let key = arena
+            .try_alloc_array_fill_copy(p2sh.len() + 32, 0u8)
+            .expect("to allocate space for address bytes");
+        key[0..p2sh.len()].copy_from_slice(p2sh);
+        key[p2sh.len()..].copy_from_slice(&txhash);
+        return Some(&*key);
+    }
     if let Some(p2pkh) = get_p2pkh_address(script) {
         let key = arena
             .try_alloc_array_fill_copy(p2pkh.len() + 32, 0u8)
@@ -271,12 +283,25 @@ fn get_address_from_script_copy_into_arena_with_txhash<'data, 'arena: 'data>(
 }
 
 fn get_p2pk_address(script: &[u8]) -> Option<&[u8]> {
-    if !(script.len() == 67 && script[0] == 0x41 && script[66] == OP_CHECKSIG) {
-        return None;
+    // full public key
+    if script.len() == 67 && script[0] == 0x41 && script[66] == OP_CHECKSIG {
+        return Some(&script[1..66]);
     }
 
-    //return Some(hex::encode(&script[1..66]));
-    Some(&script[1..66])
+    // compressed public key
+    if script.len() == 35 && script[0] == 0x21 && script[34] == OP_CHECKSIG {
+        return Some(&script[1..34]);
+    }
+
+    None
+}
+
+fn get_p2sh_address(script: &[u8]) -> Option<&[u8]> {
+    if script.len() == 23 && script[0] == OP_HASH160 && script[1] == 0x14 && script[22] == OP_EQUAL
+    {
+        return Some(&script[2..22]);
+    }
+    None
 }
 
 fn get_p2pkh_address(script: &[u8]) -> Option<&[u8]> {
@@ -290,26 +315,20 @@ fn get_p2pkh_address(script: &[u8]) -> Option<&[u8]> {
         return None;
     }
 
-    Some(
-        // bs58::encode(&script[3..23]).with_check_version(0x00).into_string(),
-        &script[3..23],
-    )
+    Some(&script[3..23])
 }
 
 fn get_bech32_address(script: &[u8]) -> Option<&[u8]> {
     if script.len() == 22 && script[0] == OP_0 && script[1] == 0x14 {
         // v0 pay to witness script hash
-        //return Some(bech32::segwit::encode(hrp::BC, Fe32::Q, &script[2..]).unwrap());
         return Some(&script[2..]);
     }
     if script.len() == 34 && script[0] == OP_0 && script[1] == 0x20 {
         // v0 pay to witness pubkey hash
-        //return Some(bech32::segwit::encode(hrp::BC, Fe32::Q, &script[2..]).unwrap());
         return Some(&script[2..]);
     }
     if script.len() == 34 && script[0] == OP_1 && script[1] == 0x20 {
         // v1 taproot
-        //return Some(bech32::segwit::encode(hrp::BC, Fe32::P, &script[2..]).unwrap());
         return Some(&script[2..]);
     }
 
