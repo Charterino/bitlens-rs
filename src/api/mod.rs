@@ -155,7 +155,8 @@ async fn address_data(
         .await
         .unwrap_or_default();
 
-    let transactions = chainman::filter_and_populate_address_txs(amends);
+    let mut transactions = chainman::filter_and_populate_address_txs(amends);
+    transactions.sort_unstable_by(|a, b| b.timestamp.cmp(&a.timestamp));
 
     Ok(Json(transactions))
 }
@@ -188,7 +189,7 @@ fn parse_address(address: &str) -> Option<Vec<u8>> {
         if hrp != hrp::BC {
             return None;
         }
-        if fe == Fe32::Q && (b.len() == 22 || b.len() == 32) {
+        if fe == Fe32::Q && (b.len() == 20 || b.len() == 32) {
             // p2wsh or p2wph
             return Some(b);
         }
