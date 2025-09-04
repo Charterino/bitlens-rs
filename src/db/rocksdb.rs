@@ -51,6 +51,36 @@ static OPEN_OPTIONS: LazyLock<Options> = LazyLock::new(|| {
     open_options
 });
 
+static TXSPENDS_DB_OPEN_OPTIONS: LazyLock<Options> = LazyLock::new(|| {
+    let mut cloned = OPEN_OPTIONS.clone();
+    cloned.set_prefix_extractor(SliceTransform::create_fixed_prefix(32));
+    cloned
+});
+
+static ADDRESSES_DB_OPEN_OPTIONS: LazyLock<Options> = LazyLock::new(|| {
+    let mut cloned = OPEN_OPTIONS.clone();
+    cloned.set_prefix_extractor(SliceTransform::create(
+        "b",
+        |a| match a.len() {
+            // full p2pk
+            65 => a,
+            // full p2pk + txhash
+            97 => &a[0..65],
+            // p2sh or p2pkh or p2wsh
+            20 => a,
+            // p2sh or p2pkh or p2wsh + txhash
+            52 => &a[0..20],
+            // taproot or p2wpkh
+            32 => a,
+            // taproot or p2wpkh + txhash
+            64 => a,
+            _ => panic!("unknown address size: {}", a.len()),
+        },
+        None,
+    ));
+    cloned
+});
+
 static INGEST_OPTIONS: LazyLock<IngestExternalFileOptions> = LazyLock::new(|| {
     let mut ingest_options = IngestExternalFileOptions::default();
     ingest_options.set_move_files(true);
@@ -72,12 +102,12 @@ pub static BLOCKTXS_DB: LazyLock<DB> = LazyLock::new(|| {
 });
 
 pub static ADDRESSES_DB: LazyLock<DB> = LazyLock::new(|| {
-    rocksdb::DB::open(&OPEN_OPTIONS, "bitlens-addresses")
+    rocksdb::DB::open(&ADDRESSES_DB_OPEN_OPTIONS, "bitlens-addresses")
         .expect("to have opened bitlens-addresses db")
 });
 
 pub static TXSPENDS_DB: LazyLock<DB> = LazyLock::new(|| {
-    rocksdb::DB::open(&OPEN_OPTIONS, "bitlens-txspends")
+    rocksdb::DB::open(&TXSPENDS_DB_OPEN_OPTIONS, "bitlens-txspends")
         .expect("to have opened bitlens-txspends db")
 });
 
@@ -203,7 +233,7 @@ pub async fn write_block_txs(blocks_with_txs_pairs: &[([u8; 32], &[u8])]) {
 }
 
 pub async fn write_txspends(spends: &[([u8; 36], [u8; 64])]) {
-    let mut writer = rocksdb::SstFileWriter::create(&OPEN_OPTIONS);
+    let mut writer = rocksdb::SstFileWriter::create(&TXSPENDS_DB_OPEN_OPTIONS);
     writer
         .open("bitlens-txspends-temp.sst")
         .expect("to open bitlens-txspends-temp.sst");
@@ -224,7 +254,7 @@ pub async fn write_txspends(spends: &[([u8; 36], [u8; 64])]) {
 }
 
 pub async fn write_address_amends(address_amends: &[(&[u8], [u8; 40])]) {
-    let mut writer = rocksdb::SstFileWriter::create(&OPEN_OPTIONS);
+    let mut writer = rocksdb::SstFileWriter::create(&ADDRESSES_DB_OPEN_OPTIONS);
     writer
         .open("bitlens-address-amends-temp.sst")
         .expect("to open bitlens-address-amends-temp.sst");

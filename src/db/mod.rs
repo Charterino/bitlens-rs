@@ -168,7 +168,7 @@ pub async fn write_analyzed_txs(
             }
 
             // sort by hash before ingestion
-            result.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+            result.sort_unstable_by(|a, b| a.0.cmp(b.0));
             Some(result.into_arena_array())
         }
     };
