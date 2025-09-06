@@ -5,7 +5,7 @@ use std::{
 
 use anyhow::{Error, Result, bail};
 use rand::RngCore;
-use slog_scope::{debug, info};
+use slog_scope::info;
 use tokio::{
     select,
     sync::oneshot,
@@ -80,7 +80,7 @@ async fn crawl_with_backoff(peer: AddressPortNetwork) {
             fail_reasons.clear();
         }
     }
-    debug!("banning peer"; "peer" => peer.to_string(), "reasons" => fail_reasons.join(","));
+    info!("banning peer"; "peer" => peer.to_string(), "reasons" => fail_reasons.join(","));
     addrman::delete_and_ban_peer(peer).await;
 }
 

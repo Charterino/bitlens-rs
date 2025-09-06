@@ -6,7 +6,10 @@ use crate::{
         tx::{TxOutRef, TxOwned, TxRef},
         varint::{VarInt, length_varint, serialize_varint_into_slice},
     },
-    tx::opcodes::OP_EQUAL,
+    tx::{
+        address::Address,
+        opcodes::{OP_EQUAL, OP_RETURN},
+    },
     util::arena::Arena,
 };
 use bech32::hrp;
@@ -17,14 +20,14 @@ use script::get_transaction_sigop_cost;
 use serde::{Deserialize, Serialize};
 use size::calculate_tx_size_wus;
 
+pub mod address;
 mod fee;
 mod flags;
 mod opcodes;
 mod script;
-mod size;
-
 #[cfg(test)]
 mod script_test;
+mod size;
 #[cfg(test)]
 mod size_test;
 
@@ -336,50 +339,57 @@ fn get_bech32_address(script: &[u8]) -> Option<&[u8]> {
     None
 }
 
-pub fn get_human_address_from_script(script: &[u8]) -> Option<String> {
+pub fn get_human_address_from_script(script: &[u8]) -> Address {
     if let Some(p2pk) = get_p2pk_address_human(script) {
-        return Some(p2pk);
+        return p2pk;
     }
     if let Some(p2sh) = get_p2sh_address_human(script) {
-        return Some(p2sh);
+        return p2sh;
     }
     if let Some(p2pkh) = get_p2pkh_address_human(script) {
-        return Some(p2pkh);
+        return p2pkh;
     }
     if let Some(bech32) = get_bech32_address_human(script) {
-        return Some(bech32);
+        return bech32;
+    }
+    if script.len() > 0 && script[0] == OP_RETURN {
+        return Address::OpReturn;
     }
 
-    None
+    Address::Unknown
 }
 
-fn get_p2pk_address_human(script: &[u8]) -> Option<String> {
+fn get_p2pk_address_human(script: &[u8]) -> Option<Address> {
     // full public key
     if script.len() == 67 && script[0] == 0x41 && script[66] == OP_CHECKSIG {
-        return Some(hex::encode(&script[1..66]));
+        return Some(Address::P2PKFull {
+            value: hex::encode(&script[1..66]),
+        });
     }
 
     // compressed public key
     if script.len() == 35 && script[0] == 0x21 && script[34] == OP_CHECKSIG {
-        return Some(hex::encode(&script[1..34]));
+        return Some(Address::P2PKShort {
+            value: hex::encode(&script[1..34]),
+        });
     }
 
     None
 }
 
-fn get_p2sh_address_human(script: &[u8]) -> Option<String> {
+fn get_p2sh_address_human(script: &[u8]) -> Option<Address> {
     if script.len() == 23 && script[0] == OP_HASH160 && script[1] == 0x14 && script[22] == OP_EQUAL
     {
-        return Some(
-            bs58::encode(&script[2..22])
+        return Some(Address::P2SH {
+            value: bs58::encode(&script[2..22])
                 .with_check_version(0x05)
                 .into_string(),
-        );
+        });
     }
     None
 }
 
-fn get_p2pkh_address_human(script: &[u8]) -> Option<String> {
+fn get_p2pkh_address_human(script: &[u8]) -> Option<Address> {
     if script.len() == 25
         && script[0] == OP_DUP
         && script[1] == OP_HASH160
@@ -387,29 +397,34 @@ fn get_p2pkh_address_human(script: &[u8]) -> Option<String> {
         && script[23] == OP_EQUALVERIFY
         && script[24] == OP_CHECKSIG
     {
-        return Some(
-            bs58::encode(&script[3..23])
+        return Some(Address::P2PKH {
+            value: bs58::encode(&script[3..23])
                 .with_check_version(0x00)
                 .into_string(),
-        );
+        });
     }
 
     None
 }
 
-fn get_bech32_address_human(script: &[u8]) -> Option<String> {
+fn get_bech32_address_human(script: &[u8]) -> Option<Address> {
     if script.len() == 22 && script[0] == OP_0 && script[1] == 0x14 {
         // v0 pay to witness script hash
-        //return Some(&script[2..]);
-        return Some(bech32::segwit::encode_v0(hrp::BC, &script[2..]).unwrap());
+        return Some(Address::P2WSH {
+            value: bech32::segwit::encode_v0(hrp::BC, &script[2..]).unwrap(),
+        });
     }
     if script.len() == 34 && script[0] == OP_0 && script[1] == 0x20 {
         // v0 pay to witness pubkey hash
-        return Some(bech32::segwit::encode_v0(hrp::BC, &script[2..]).unwrap());
+        return Some(Address::P2WPKH {
+            value: bech32::segwit::encode_v0(hrp::BC, &script[2..]).unwrap(),
+        });
     }
     if script.len() == 34 && script[0] == OP_1 && script[1] == 0x20 {
         // v1 taproot
-        return Some(bech32::segwit::encode_v1(hrp::BC, &script[2..]).unwrap());
+        return Some(Address::Taproot {
+            value: bech32::segwit::encode_v1(hrp::BC, &script[2..]).unwrap(),
+        });
     }
 
     None

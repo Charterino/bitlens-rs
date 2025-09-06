@@ -1,8 +1,10 @@
+use std::ops::Add;
+
 use crate::{
     chainman::{self, FRONTPAGE_STATS},
     db::{self, rocksdb::BlockTxEntry},
-    packets::tx::TxOutOwned,
-    tx::{AnalyzedTx, get_human_address_from_script},
+    packets::tx::{TxInOwned, TxOutOwned, TxRef},
+    tx::{AnalyzedTx, address::Address, get_human_address_from_script},
     types::{addresstransaction::AddressTransaction, blockheaderwithnumber::BlockHeaderWithNumber},
 };
 use axum::{
@@ -53,8 +55,8 @@ pub struct TxDataResponse {
     pub tx: AnalyzedTx,
     #[serde(serialize_with = "crate::util::serialize_spends::serialize_spends")]
     pub spends: Vec<(u32, [u8; 32])>,
-    //pub txin_addresses: Vec<String>,
-    pub txout_addresses: Vec<String>,
+    pub txin_addresses: Vec<Address>,
+    pub txout_addresses: Vec<Address>,
 }
 
 async fn txdata(Query(params): Query<HashParam>) -> Result<Json<TxDataResponse>, StatusCode> {
@@ -94,18 +96,53 @@ async fn txdata(Query(params): Query<HashParam>) -> Result<Json<TxDataResponse>,
 
     let txout_addresses = txouts_to_addresses(&tx.tx.txouts);
 
+    let txouts_for_txins = if TxRef::Owned(&tx.tx).is_coinbase() {
+        vec![]
+    } else {
+        match get_txouts_for_txins(&tx.tx.txins).await {
+            Ok(v) => v,
+            Err(_) => return Err(StatusCode::NOT_FOUND),
+        }
+    };
+
     Ok(Json(TxDataResponse {
         header,
         tx,
         spends: filtered_spends,
         txout_addresses,
+        txin_addresses: txouts_to_addresses(&txouts_for_txins),
     }))
 }
 
-fn txouts_to_addresses(txouts: &[TxOutOwned]) -> Vec<String> {
+async fn get_txouts_for_txins(txins: &[TxInOwned]) -> anyhow::Result<Vec<TxOutOwned>> {
+    let mut handles = Vec::with_capacity(txins.len());
+    for txin in txins {
+        let hash = txin.prevout_hash;
+        let index = txin.prevout_index;
+        handles.push(tokio::spawn(async move {
+            let mut txouts = db::rocksdb::get_transaction_outputs(hash)
+                .await
+                .expect("to have found txouts in the db");
+
+            txouts.swap_remove(index as usize)
+        }));
+    }
+
+    let mut results = Vec::with_capacity(handles.len());
+    for handle in handles {
+        results.push(handle.await?);
+    }
+
+    Ok(results)
+}
+
+fn txouts_to_addresses(txouts: &[TxOutOwned]) -> Vec<Address> {
+    if txouts.len() == 0 {
+        return vec![Address::Coinbase];
+    }
     txouts
         .iter()
-        .map(|txout| get_human_address_from_script(&txout.script).unwrap_or_default())
+        .map(|txout| get_human_address_from_script(&txout.script))
         .collect()
 }
 
