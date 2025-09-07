@@ -73,7 +73,7 @@ static ADDRESSES_DB_OPEN_OPTIONS: LazyLock<Options> = LazyLock::new(|| {
             // taproot or p2wpkh
             32 => a,
             // taproot or p2wpkh + txhash
-            64 => a,
+            64 => &a[0..32],
             _ => panic!("unknown address size: {}", a.len()),
         },
         None,
