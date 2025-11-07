@@ -1,9 +1,8 @@
 use std::net::{Ipv4Addr, Ipv6Addr};
 
 use crate::{
-    addrman,
     chainman::{self, FRONTPAGE_STATS},
-    crawler::{self, crawl_forever},
+    crawler::{self},
     db::{self, rocksdb::BlockTxEntry, sqlite::PeerData},
     packets::{
         network_id::NetworkId,
@@ -147,7 +146,7 @@ async fn get_txouts_for_txins(txins: &[TxInOwned]) -> anyhow::Result<Vec<TxOutOw
 }
 
 fn txouts_to_addresses(txouts: &[TxOutOwned]) -> Vec<Address> {
-    if txouts.len() == 0 {
+    if txouts.is_empty() {
         return vec![Address::Coinbase];
     }
     txouts
@@ -276,7 +275,7 @@ async fn get_peer(Query(params): Query<PeerParams>) -> Result<Json<PeerResponse>
     let is_connected_now = crawler::peertracker::is_connected_now(&apn);
     let data = db::sqlite::get_peer(&apn)
         .await
-        .map(|v| Some(v))
+        .map(Some)
         .unwrap_or_default();
 
     Ok(Json(PeerResponse {
@@ -289,14 +288,14 @@ fn parse_peer_address(address: &str, port: u16) -> Option<AddressPortNetwork> {
     if let Ok(v) = address.parse::<Ipv4Addr>() {
         return Some(AddressPortNetwork {
             network_id: NetworkId::IPv4,
-            port: port,
+            port,
             address: v.octets().into(),
         });
     }
     if let Ok(v) = address.parse::<Ipv6Addr>() {
         return Some(AddressPortNetwork {
             network_id: NetworkId::IPv6,
-            port: port,
+            port,
             address: v.octets().into(),
         });
     }

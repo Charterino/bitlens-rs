@@ -6,7 +6,7 @@ where
 {
     match ua {
         Some(data) => {
-            let str = String::from_utf8_lossy(&data);
+            let str = String::from_utf8_lossy(data);
             str.serialize(serializer)
         }
         None => "".serialize(serializer),

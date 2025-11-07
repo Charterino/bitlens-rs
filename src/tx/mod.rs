@@ -352,7 +352,7 @@ pub fn get_human_address_from_script(script: &[u8]) -> Address {
     if let Some(bech32) = get_bech32_address_human(script) {
         return bech32;
     }
-    if script.len() > 0 && script[0] == OP_RETURN {
+    if !script.is_empty() && script[0] == OP_RETURN {
         return Address::OpReturn;
     }
 

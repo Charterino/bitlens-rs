@@ -22,9 +22,8 @@ use serde::{Deserialize, Serialize};
 use slog_scope::warn;
 use std::{
     collections::HashMap,
-    ops::Add,
     sync::{LazyLock, Mutex},
-    time::{SystemTime, UNIX_EPOCH},
+    time::SystemTime,
 };
 use tokio::{sync::mpsc::Sender, time::Instant};
 
@@ -206,8 +205,7 @@ pub async fn get_all_headers() -> Vec<BlockHeaderWithNumber> {
         })
         .unwrap();
     let result = iter
-        .filter(|x| x.is_ok())
-        .map(|x| x.unwrap())
+        .flatten()
         .collect::<Vec<BlockHeaderWithNumber>>();
     METRIC_SQLITE_REQUESTS_TIME.observe(Instant::now().duration_since(start).as_millis() as f64);
     result
