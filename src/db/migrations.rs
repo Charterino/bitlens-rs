@@ -57,4 +57,7 @@ CREATE TABLE IF NOT EXISTS block_stats (
     median_fee_rate REAL NOT NULL
 );
 "#,
+    r#"
+ALTER TABLE banned_peers ADD reasons_list TEXT;
+    "#, // that TEXT is json
 ];

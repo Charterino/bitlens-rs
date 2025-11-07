@@ -2,10 +2,10 @@ use std::{
     collections::HashMap,
     mem,
     sync::{LazyLock, Mutex, RwLock},
-    time::{Duration, SystemTime},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use tokio::time::sleep;
+use tokio::{join, time::sleep};
 
 use crate::{
     connect::{connect_and_handshake, connection::HandshakedConnection},
@@ -69,11 +69,11 @@ pub async fn peers_seen(apns: Vec<AddressPortNetwork>, time: u64) {
     }
 }
 
-pub async fn delete_and_ban_peer(apn: AddressPortNetwork) {
+pub async fn delete_and_ban_peer(apn: AddressPortNetwork, reasons: Vec<String>) {
     let rn = SystemTime::now();
     let banned_until = rn.checked_add(BAN_PEER_DURATION).unwrap();
     delete_peer(apn.clone()).await;
-    ban_peer(apn.clone(), rn, banned_until).await;
+    ban_peer(apn.clone(), rn, banned_until, reasons).await;
 }
 
 pub async fn update_peer_online(apn: AddressPortNetwork, services: u64) {
@@ -82,13 +82,22 @@ pub async fn update_peer_online(apn: AddressPortNetwork, services: u64) {
     w.peer_online(apn, services, rn);
 }
 
-pub async fn update_peer_from_version(
+pub async fn on_peer_version_received(
     apn: AddressPortNetwork,
     services: u64,
     block_height: u32,
     user_agent: Vec<u8>,
 ) {
-    db::sqlite::update_peer_from_version(apn, services, block_height, user_agent).await;
+    join!(
+        db::sqlite::update_peer_from_version(apn.clone(), services, block_height, user_agent),
+        db::sqlite::update_peer_first_online(
+            apn,
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs()
+        )
+    );
 }
 
 pub fn get_alive_peer(services: Option<u64>) -> Option<AddressPortNetwork> {

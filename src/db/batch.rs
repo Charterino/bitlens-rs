@@ -1,5 +1,6 @@
 use std::{mem::swap, time::Duration};
 
+use anyhow::Context;
 use rusqlite::Params;
 use tokio::{
     select,
@@ -64,7 +65,8 @@ pub async fn batch_process_requests(
         {
             let mut stmt = tx.prepare_cached(query).unwrap();
             for request in requests {
-                stmt.execute(request.into_params()).unwrap();
+                stmt.execute(request.into_params())
+                    .expect(&format!("to flush batch requests for {}", query));
             }
         }
         tx.commit().unwrap();

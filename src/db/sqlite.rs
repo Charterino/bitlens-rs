@@ -1,21 +1,3 @@
-use rusqlite::Connection;
-use std::{
-    collections::HashMap,
-    sync::{LazyLock, Mutex},
-    time::SystemTime,
-};
-use tokio::{sync::mpsc::Sender, time::Instant};
-
-use crate::{
-    metrics::METRIC_SQLITE_REQUESTS_TIME,
-    packets::blockheader::{BlockHeaderOwned, BlockHeaderRef},
-    types::{
-        addressportnetwork::AddressPortNetwork, blockheaderwithnumber::BlockHeaderWithNumber,
-        blockmetrics::BlockMetrics,
-    },
-    util::genesis::GENESIS_HEADER,
-};
-
 use super::{
     batch::start_batcher,
     batched::{
@@ -24,6 +6,27 @@ use super::{
     },
     migrations::MIGRATIONS,
 };
+use crate::{
+    db::batched::UpdatePeerFirstOnlineRequest,
+    metrics::METRIC_SQLITE_REQUESTS_TIME,
+    packets::blockheader::{BlockHeaderOwned, BlockHeaderRef},
+    types::{
+        addressportnetwork::AddressPortNetwork, blockheaderwithnumber::BlockHeaderWithNumber,
+        blockmetrics::BlockMetrics,
+    },
+    util::genesis::GENESIS_HEADER,
+};
+use anyhow::Result;
+use rusqlite::Connection;
+use serde::{Deserialize, Serialize};
+use slog_scope::warn;
+use std::{
+    collections::HashMap,
+    ops::Add,
+    sync::{LazyLock, Mutex},
+    time::{SystemTime, UNIX_EPOCH},
+};
+use tokio::{sync::mpsc::Sender, time::Instant};
 
 // Suboptimal because we cant have multiple simultanious reads, but it will do for now.
 pub(crate) static CONNECTION: LazyLock<Mutex<Connection>> = LazyLock::new(|| {
@@ -41,7 +44,7 @@ static INSERT_PEER_QUEUE: LazyLock<Sender<InsertPeerRequest>> = LazyLock::new(||
 
 static BAN_PEER_QUEUE: LazyLock<Sender<BanPeerRequest>> = LazyLock::new(|| {
     start_batcher(
-        "INSERT INTO banned_peers (network_id, address, port, banned_at, banned_until) VALUES (?, ?, ?, ?, ?);",
+        "INSERT INTO banned_peers (network_id, address, port, banned_at, banned_until, reasons) VALUES (?, ?, ?, ?, ?, ?);",
     )
 });
 
@@ -53,7 +56,7 @@ static UPDATE_PEER_BLOCK_HEIGHT_QUEUE: LazyLock<Sender<UpdatePeerBlockHeightRequ
 
 static INSERT_HEADER_QUEUE: LazyLock<Sender<InsertHeaderRequest>> = LazyLock::new(|| {
     start_batcher(
-        "INSERT INTO headers (version, previous_block, merkle_root, timestamp, bits, nonce, block_number, block_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?);",
+        "INSERT INTO headers (version, previous_block, merkle_root, timestamp, bits, nonce, block_number, block_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING;",
     )
 });
 
@@ -64,10 +67,23 @@ static UPDATE_PEER_FROM_VERSION_QUEUE: LazyLock<Sender<UpdatePeerFromVersionRequ
         )
     });
 
+static UPDATE_PEER_FIRST_ONLINE: LazyLock<Sender<UpdatePeerFirstOnlineRequest>> = LazyLock::new(
+    || {
+        start_batcher(
+            "UPDATE peers SET first_online = ? WHERE address = ? AND port = ? AND first_online is NULL;",
+        )
+    },
+);
+
 pub(crate) async fn setup_sqlite() {
     let conn = CONNECTION.lock().unwrap();
     for m in MIGRATIONS {
-        conn.execute(m, []).unwrap();
+        match conn.execute(m, []) {
+            Ok(_) => {}
+            Err(e) => {
+                warn!("failed to execute migration"; "error" => e.to_string());
+            }
+        }
     }
 }
 
@@ -103,12 +119,18 @@ pub async fn insert_peer(peer: AddressPortNetwork, first_seen: u64) {
         .unwrap();
 }
 
-pub async fn ban_peer(peer: AddressPortNetwork, banned_at: SystemTime, banned_until: SystemTime) {
+pub async fn ban_peer(
+    peer: AddressPortNetwork,
+    banned_at: SystemTime,
+    banned_until: SystemTime,
+    reasons: Vec<String>,
+) {
     BAN_PEER_QUEUE
         .send(BanPeerRequest {
             apn: peer,
             banned_at,
             banned_until,
+            reasons,
         })
         .await
         .unwrap();
@@ -184,6 +206,7 @@ pub async fn get_all_headers() -> Vec<BlockHeaderWithNumber> {
         })
         .unwrap();
     let result = iter
+        .filter(|x| x.is_ok())
         .map(|x| x.unwrap())
         .collect::<Vec<BlockHeaderWithNumber>>();
     METRIC_SQLITE_REQUESTS_TIME.observe(Instant::now().duration_since(start).as_millis() as f64);
@@ -202,6 +225,13 @@ pub async fn insert_header(header: BlockHeaderWithNumber) {
             number: header.number,
             hash: header.header.hash,
         })
+        .await
+        .unwrap();
+}
+
+pub async fn update_peer_first_online(peer: AddressPortNetwork, ts: u64) {
+    UPDATE_PEER_FIRST_ONLINE
+        .send(UpdatePeerFirstOnlineRequest { apn: peer, ts })
         .await
         .unwrap();
 }
@@ -262,4 +292,34 @@ pub async fn find_block_metrics(hash: [u8; 32]) -> BlockMetrics {
 
     METRIC_SQLITE_REQUESTS_TIME.observe(Instant::now().duration_since(start).as_millis() as f64);
     bms.unwrap()
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct PeerData {
+    first_seen: u64,
+    first_online: Option<u64>,
+    #[serde(serialize_with = "crate::util::serialize_try_string::serialize_try_string")]
+    user_agent: Option<Vec<u8>>,
+    height: Option<u64>,
+    services: Option<u64>,
+}
+
+pub async fn get_peer(apn: &AddressPortNetwork) -> Result<PeerData> {
+    let conn = CONNECTION.lock().unwrap();
+    let mut stmt = conn
+        .prepare_cached(
+            "SELECT first_seen, first_online, user_agent, height, services FROM peers WHERE address = ? AND port = ? AND network_id = ?;",
+        )
+        .unwrap();
+    Ok(
+        stmt.query_one((&apn.address, apn.port, apn.network_id), |row| {
+            Ok(PeerData {
+                first_seen: row.get(0)?,
+                first_online: row.get(1)?,
+                user_agent: row.get(2)?,
+                height: row.get(3)?,
+                services: row.get(4)?,
+            })
+        })?,
+    )
 }

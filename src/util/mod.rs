@@ -8,6 +8,7 @@ pub mod online_list;
 pub mod pow;
 pub mod serialize_as_hex;
 pub mod serialize_spends;
+pub mod serialize_try_string;
 pub mod serialize_witnesses;
 pub mod shortcircuit;
 pub mod speedtracker;

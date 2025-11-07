@@ -26,6 +26,7 @@ pub struct BanPeerRequest {
     pub apn: AddressPortNetwork,
     pub banned_at: SystemTime,
     pub banned_until: SystemTime,
+    pub reasons: Vec<String>,
 }
 
 impl Request for BanPeerRequest {
@@ -39,6 +40,7 @@ impl Request for BanPeerRequest {
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_secs(),
+            serde_json::to_string(&self.reasons).unwrap(),
         )
     }
 }
@@ -106,5 +108,16 @@ impl Request for InsertHeaderRequest {
             self.number,
             self.hash,
         )
+    }
+}
+
+pub struct UpdatePeerFirstOnlineRequest {
+    pub apn: AddressPortNetwork,
+    pub ts: u64,
+}
+
+impl Request for UpdatePeerFirstOnlineRequest {
+    fn into_params(self) -> impl Params {
+        (self.ts, self.apn.address, self.apn.port)
     }
 }

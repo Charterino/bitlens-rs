@@ -1,11 +1,19 @@
-use std::ops::Add;
+use std::net::{Ipv4Addr, Ipv6Addr};
 
 use crate::{
+    addrman,
     chainman::{self, FRONTPAGE_STATS},
-    db::{self, rocksdb::BlockTxEntry},
-    packets::tx::{TxInOwned, TxOutOwned, TxRef},
+    crawler::{self, crawl_forever},
+    db::{self, rocksdb::BlockTxEntry, sqlite::PeerData},
+    packets::{
+        network_id::NetworkId,
+        tx::{TxInOwned, TxOutOwned, TxRef},
+    },
     tx::{AnalyzedTx, address::Address, get_human_address_from_script},
-    types::{addresstransaction::AddressTransaction, blockheaderwithnumber::BlockHeaderWithNumber},
+    types::{
+        addressportnetwork::AddressPortNetwork, addresstransaction::AddressTransaction,
+        blockheaderwithnumber::BlockHeaderWithNumber,
+    },
 };
 use axum::{
     Json, Router,
@@ -24,6 +32,8 @@ pub async fn start() {
         .route("/api/tx", get(txdata))
         .route("/api/block", get(blockdata))
         .route("/api/address", get(address_data))
+        .route("/api/peers", get(current_peers))
+        .route("/api/getpeer", get(get_peer))
         .layer(
             CorsLayer::new()
                 .allow_origin("*".parse::<HeaderValue>().unwrap())
@@ -234,6 +244,61 @@ fn parse_address(address: &str) -> Option<Vec<u8>> {
             // taproot
             return Some(b);
         }
+    }
+
+    None
+}
+
+async fn current_peers() -> Result<Json<Vec<String>>, StatusCode> {
+    let all_peers = crawler::peertracker::get_all_connected_peers();
+    Ok(Json(all_peers))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PeerParams {
+    pub address: String,
+    pub port: u16,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct PeerResponse {
+    is_connected_now: bool,
+    #[serde(flatten)]
+    peer_data: Option<PeerData>,
+}
+
+async fn get_peer(Query(params): Query<PeerParams>) -> Result<Json<PeerResponse>, StatusCode> {
+    let apn = match parse_peer_address(&params.address, params.port) {
+        Some(v) => v,
+        None => return Err(StatusCode::BAD_REQUEST),
+    };
+
+    let is_connected_now = crawler::peertracker::is_connected_now(&apn);
+    let data = db::sqlite::get_peer(&apn)
+        .await
+        .map(|v| Some(v))
+        .unwrap_or_default();
+
+    Ok(Json(PeerResponse {
+        is_connected_now,
+        peer_data: data,
+    }))
+}
+
+fn parse_peer_address(address: &str, port: u16) -> Option<AddressPortNetwork> {
+    if let Ok(v) = address.parse::<Ipv4Addr>() {
+        return Some(AddressPortNetwork {
+            network_id: NetworkId::IPv4,
+            port: port,
+            address: v.octets().into(),
+        });
+    }
+    if let Ok(v) = address.parse::<Ipv6Addr>() {
+        return Some(AddressPortNetwork {
+            network_id: NetworkId::IPv6,
+            port: port,
+            address: v.octets().into(),
+        });
     }
 
     None

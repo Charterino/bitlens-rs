@@ -1,17 +1,3 @@
-use std::{
-    sync::atomic::Ordering,
-    time::{Duration, SystemTime, UNIX_EPOCH},
-};
-
-use anyhow::{Error, Result, bail};
-use rand::RngCore;
-use slog_scope::info;
-use tokio::{
-    select,
-    sync::oneshot,
-    time::{self, Instant, interval, sleep},
-};
-
 use crate::{
     addrman::{self, peers_seen},
     chainman::{
@@ -19,6 +5,7 @@ use crate::{
         keepup::{NEW_HEADER_BROADCAST, WORKER_REGISTRATION_CHANNEL},
     },
     connect::connect_and_handshake,
+    crawler::peertracker::TrackedConnection,
     packets::{
         getaddr::GetAddr,
         getdata::GetDataOwned,
@@ -32,6 +19,20 @@ use crate::{
     },
     types::addressportnetwork::AddressPortNetwork,
 };
+use anyhow::{Error, Result, bail};
+use rand::RngCore;
+use slog_scope::info;
+use std::{
+    sync::atomic::Ordering,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
+use tokio::{
+    select,
+    sync::oneshot,
+    time::{self, Instant, interval, sleep},
+};
+
+pub mod peertracker;
 
 const NO_PEERS_SLEEP_DURATION: Duration = Duration::from_secs(1);
 const SLEEP_BETWEEN_CRAWLS_DURATION: Duration = Duration::from_millis(20);
@@ -81,7 +82,7 @@ async fn crawl_with_backoff(peer: AddressPortNetwork) {
         }
     }
     info!("banning peer"; "peer" => peer.to_string(), "reasons" => fail_reasons.join(","));
-    addrman::delete_and_ban_peer(peer).await;
+    addrman::delete_and_ban_peer(peer, fail_reasons).await;
 }
 
 fn backoff_from_failed(failed_times: u32) -> Duration {
@@ -170,7 +171,8 @@ async fn crawl(peer: &AddressPortNetwork, res: &mut CrawlResult) -> Result<()> {
         bail!("failed to connect/handshake")
     }
     let mut connection = connection.unwrap();
-    addrman::update_peer_from_version(
+    let _track = TrackedConnection::new(peer.clone());
+    addrman::on_peer_version_received(
         peer.clone(),
         connection.remote_version.services,
         connection.remote_version.start_height,
