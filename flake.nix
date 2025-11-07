@@ -22,12 +22,13 @@
           system:
           f {
             pkgs = nixpkgs.legacyPackages.${system};
+            inherit system;
           }
         );
     in
     {
       packages = forAllSystems (
-        { pkgs }:
+        { pkgs, ... }:
         let
           bin = pkgs.rustPlatform.buildRustPackage.override { stdenv = pkgs.clangStdenv; } {
             pname = "bitlens";
@@ -65,23 +66,27 @@
       );
 
       devShells = forAllSystems (
-        { pkgs, ... }:
+        { pkgs, system, ... }:
         {
           default = pkgs.mkShell.override { stdenv = pkgs.clangStdenv; } {
-            packages = with pkgs; [
-              cargo
-              rustfmt
-              clippy
-              rustc
-              cargo-flamegraph
-              sqlite
-              pprof
-              graphviz
-              libllvm
-              llvmPackages_20.clang-unwrapped.lib
-              heaptrack
-              valgrind
-            ];
+            packages =
+              with pkgs;
+              [
+                cargo
+                rustfmt
+                clippy
+                rustc
+                cargo-flamegraph
+                sqlite
+                pprof
+                graphviz
+                libllvm
+                llvmPackages_20.clang-unwrapped.lib
+              ]
+              ++ pkgs.lib.optionals (system == "x86_64-linux") [
+                heaptrack
+                valgrind
+              ];
             hardeningDisable = [ "fortify" ];
             shellHook = ''
               export LIBCLANG_PATH=${pkgs.libclang.lib}/lib
