@@ -43,7 +43,7 @@ static INSERT_PEER_QUEUE: LazyLock<Sender<InsertPeerRequest>> = LazyLock::new(||
 
 static BAN_PEER_QUEUE: LazyLock<Sender<BanPeerRequest>> = LazyLock::new(|| {
     start_batcher(
-        "INSERT INTO banned_peers (network_id, address, port, banned_at, banned_until, reasons) VALUES (?, ?, ?, ?, ?, ?);",
+        "INSERT INTO banned_peers (network_id, address, port, banned_at, banned_until, reasons_list) VALUES (?, ?, ?, ?, ?, ?);",
     )
 });
 
@@ -204,9 +204,7 @@ pub async fn get_all_headers() -> Vec<BlockHeaderWithNumber> {
             })
         })
         .unwrap();
-    let result = iter
-        .flatten()
-        .collect::<Vec<BlockHeaderWithNumber>>();
+    let result = iter.flatten().collect::<Vec<BlockHeaderWithNumber>>();
     METRIC_SQLITE_REQUESTS_TIME.observe(Instant::now().duration_since(start).as_millis() as f64);
     result
 }
