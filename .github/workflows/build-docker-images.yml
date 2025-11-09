@@ -53,7 +53,7 @@ jobs:
     steps:
       - name: Install fuse-overlayfs so podman works
         run: |
-          sudo apt install -y fuse-overlayfs
+          sudo apt update && sudo apt install -y fuse-overlayfs
 
       - name: Login to registry
         env:
