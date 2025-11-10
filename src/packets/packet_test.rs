@@ -41,7 +41,7 @@ impl AllocationTracker for StdoutTracker {
             "allocation -> addr=0x{:0x} object_size={} wrapped_size={} group_id={:?}",
             addr, object_size, wrapped_size, group_id
         );
-        NET_EVENTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        NET_EVENTS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     }
 
     fn deallocated(
@@ -59,7 +59,7 @@ impl AllocationTracker for StdoutTracker {
             "deallocation -> addr=0x{:0x} object_size={} wrapped_size={} source_group_id={:?} current_group_id={:?}",
             addr, object_size, wrapped_size, source_group_id, current_group_id
         );
-        NET_EVENTS.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+        NET_EVENTS.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
     }
 }
 
@@ -82,6 +82,6 @@ fn test_deserialize_safety() {
     }
 
     drop(alloc_guard);
-    assert_eq!(NET_EVENTS.load(std::sync::atomic::Ordering::Relaxed), 0);
+    assert_eq!(NET_EVENTS.load(std::sync::atomic::Ordering::Acquire), 0);
     AllocationRegistry::disable_tracking();
 }
