@@ -7,6 +7,7 @@ use axum::{
     http::StatusCode,
     response::IntoResponse,
 };
+use tokio::select;
 
 pub async fn frontpagedata() -> impl IntoResponse {
     let r = FRONTPAGE_STATS.read().unwrap();
@@ -23,9 +24,20 @@ pub async fn frontpagesocket(ws: WebSocketUpgrade) -> impl IntoResponse {
 
 async fn handle_frontpage_socket(mut socket: WebSocket) {
     let mut subscriber = FRONTPAGE_UPDATE_BROADCAST.subscribe();
-    while let Ok(d) = subscriber.recv().await {
-        if let Err(_) = socket.send(Message::text(d)).await {
-            break;
+    loop {
+        select! {
+            Ok(d) = subscriber.recv() => {
+                if let Err(_) = socket.send(Message::text(d)).await {
+                    break;
+                }
+            }
+            Some(Ok(Message::Text(t))) = socket.recv() => {
+                if t == "ping" {
+                    if let Err(_) = socket.send(Message::text("pong")).await {
+                        break;
+                    }
+                }
+            }
         }
     }
 }
