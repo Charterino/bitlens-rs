@@ -67,12 +67,10 @@ jobs:
         run: |
           # For commit SHA tag
           podman manifest create ${{ secrets.DOCKER_REGISTRY }}/bitlens-${{ github.ref_name }}:${{ github.sha }} \
-            #--amend ${{ secrets.DOCKER_REGISTRY }}/bitlens-${{ github.ref_name }}:${{ github.sha }}-aarch64-linux \
             --amend ${{ secrets.DOCKER_REGISTRY }}/bitlens-${{ github.ref_name }}:${{ github.sha }}-x86_64-linux
           podman manifest push ${{ secrets.DOCKER_REGISTRY }}/bitlens-${{ github.ref_name }}:${{ github.sha }}
 
           # For latest tag
           podman manifest create ${{ secrets.DOCKER_REGISTRY }}/bitlens-${{ github.ref_name }}:latest \
-            #--amend ${{ secrets.DOCKER_REGISTRY }}/bitlens-${{ github.ref_name }}:latest-aarch64-linux \
             --amend ${{ secrets.DOCKER_REGISTRY }}/bitlens-${{ github.ref_name }}:latest-x86_64-linux
           podman manifest push ${{ secrets.DOCKER_REGISTRY }}/bitlens-${{ github.ref_name }}:latest
