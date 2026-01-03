@@ -53,6 +53,7 @@ mod blocksync;
 mod chain;
 mod headersync;
 pub mod keepup;
+mod syncspeedtracker;
 
 pub async fn start() {
     load_headers_from_sqlite().await;
@@ -224,8 +225,7 @@ async fn update_frontpage_data(
     top_block_hash: [u8; 32],
     metrics_cache: &[BlockMetrics],
     analyzed_cache: &[&[SerializedTx<'_>]],
-    // this will be none if we're fully synced and just keeping up with the chain
-    duration: Option<Duration>,
+    sync_speed_blocks_per_second: Option<f64>,
 ) {
     let stats = calculate_stats(top_block_hash, Some(metrics_cache)).await;
     let mut latest_blocks = Vec::with_capacity(FRONTPAGE_BLOCKS_COUNT);
@@ -280,11 +280,10 @@ async fn update_frontpage_data(
 
     // Calculate sync status here
     let remaining_blocks = r.top_header.number - top_synced_block_number;
-    let sync_stats = match duration {
-        Some(duration) => {
+    let sync_stats = match sync_speed_blocks_per_second {
+        Some(speed) => {
             if remaining_blocks != 0 {
-                let sync_speed_blocks_per_sec = metrics_cache.len() as f64 / duration.as_secs_f64();
-                let remaining_seconds = remaining_blocks as f64 / sync_speed_blocks_per_sec;
+                let remaining_seconds = remaining_blocks as f64 / speed;
                 info!("sync complete ETA"; "remaining_seconds" => remaining_seconds, "remaining_blocks" => remaining_blocks);
                 Some(SyncStats {
                     total_blocks: r.top_header.number + 1,

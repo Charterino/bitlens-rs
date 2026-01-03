@@ -1,6 +1,7 @@
 use super::{SYNCING_BODIES, mark_as_downloaded, update_frontpage_data};
 use crate::{
     addrman,
+    chainman::syncspeedtracker::SyncSpeedTracker,
     db::{self, rocksdb::SerializedTx, write_analyzed_txs},
     ok_or_break, ok_or_continue, ok_or_return,
     packets::{
@@ -35,6 +36,7 @@ use tokio::{
 const BLOCK_TIMEOUT: Duration = Duration::from_millis(5000);
 const INITIAL_WORKER_COUNT: usize = 20;
 const MAX_WORKERS: usize = 200;
+const SYNC_PROGRESS_AVERAGE_OF: usize = 20;
 
 pub enum DownloadWorkerMessage {
     PullFirstJob(tokio::sync::oneshot::Sender<BlockHashWithNumber>),
@@ -459,7 +461,7 @@ async fn receive_and_process_blocks(mut recv: Receiver<(PayloadWithAllocator, u6
     let previous_analyzed = Arc::new(Mutex::new(Some(Vec::with_capacity(MAX_BLOCKS_PER_FLUSH)))); // values live in `previous_arena`
     let previous_metrics = Arc::new(Mutex::new(Some(Vec::with_capacity(MAX_BLOCKS_PER_FLUSH)))); // all heap
 
-    let last_frontpage_update = Arc::new(Mutex::new(Instant::now()));
+    let sync_speed_tracker = Arc::new(SyncSpeedTracker::new(SYNC_PROGRESS_AVERAGE_OF));
 
     unsafe {
         let mut scope = async_scoped::Scope::create(async_scoped::spawner::use_tokio::Tokio);
@@ -500,7 +502,7 @@ async fn receive_and_process_blocks(mut recv: Receiver<(PayloadWithAllocator, u6
 
             let pm_clone = previous_metrics.clone();
             let pa_clone = previous_analyzed.clone();
-            let last_frontpage_update_clone = last_frontpage_update.clone();
+            let sync_speed_tracker_clone = sync_speed_tracker.clone();
             scope.spawn(async move {
                 write_analyzed_txs(
                     &next_batch,
@@ -513,17 +515,12 @@ async fn receive_and_process_blocks(mut recv: Receiver<(PayloadWithAllocator, u6
                 // update fetched_full in chainman's live state
                 let top = next_batch[next_batch.len() - 1];
                 mark_as_downloaded(next_batch);
-                let last_update = {
-                    let mut last_update_w = last_frontpage_update_clone.lock().unwrap();
-                    let last_update = *last_update_w;
-                    *last_update_w = Instant::now();
-                    last_update
-                };
+                sync_speed_tracker_clone.tick(current_analyzed.len());
                 update_frontpage_data(
                     top,
                     &current_metrics,
                     &current_analyzed,
-                    Some(last_update.elapsed()),
+                    Some(sync_speed_tracker_clone.estimate_speed()),
                 )
                 .await;
                 *pm_clone.lock().unwrap() = Some(current_metrics);
