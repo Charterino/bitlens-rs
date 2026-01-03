@@ -15,7 +15,9 @@ use crate::{
         addresstransaction::AddressTransaction,
         blockheaderwithnumber::BlockHeaderWithNumber,
         blockmetrics::BlockMetrics,
-        frontpagedata::{FrontPageData, FrontPageDataWithSerialized, ShortBlock, ShortTx},
+        frontpagedata::{
+            FrontPageData, FrontPageDataWithSerialized, ShortBlock, ShortTx, SyncStats,
+        },
         stats::Stats,
     },
 };
@@ -31,8 +33,9 @@ use std::{
         LazyLock, RwLock,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
+use tokio::time::Instant;
 
 const FRONTPAGE_TXS_COUNT: usize = 50;
 const FRONTPAGE_BLOCKS_COUNT: usize = 50;
@@ -210,6 +213,7 @@ async fn generate_frontpage_data(top_block_hash: [u8; 32]) {
         stats,
         latest_blocks,
         latest_txs,
+        sync_stats: None,
     };
     w.serialized = serde_json::to_string(&w.data).unwrap();
     debug!("generated front page response"; "new_response" => w.serialized.clone());
@@ -220,6 +224,8 @@ async fn update_frontpage_data(
     top_block_hash: [u8; 32],
     metrics_cache: &[BlockMetrics],
     analyzed_cache: &[&[SerializedTx<'_>]],
+    // this will be none if we're fully synced and just keeping up with the chain
+    duration: Option<Duration>,
 ) {
     let stats = calculate_stats(top_block_hash, Some(metrics_cache)).await;
     let mut latest_blocks = Vec::with_capacity(FRONTPAGE_BLOCKS_COUNT);
@@ -228,6 +234,9 @@ async fn update_frontpage_data(
     let r = CHAIN.read().unwrap();
     let mut i = analyzed_cache.len();
     let mut current_header = &r.known_headers[&top_block_hash];
+
+    let top_synced_block_number = current_header.number;
+
     while i > 0 {
         if latest_blocks.len() == FRONTPAGE_BLOCKS_COUNT && latest_txs.len() == FRONTPAGE_TXS_COUNT
         {
@@ -269,6 +278,26 @@ async fn update_frontpage_data(
         }
     }
 
+    // Calculate sync status here
+    let remaining_blocks = r.top_header.number - top_synced_block_number;
+    let sync_stats = match duration {
+        Some(duration) => {
+            if remaining_blocks != 0 {
+                let sync_speed_blocks_per_sec = metrics_cache.len() as f64 / duration.as_secs_f64();
+                let remaining_seconds = remaining_blocks as f64 / sync_speed_blocks_per_sec;
+                info!("sync complete ETA"; "remaining_seconds" => remaining_seconds, "remaining_blocks" => remaining_blocks);
+                Some(SyncStats {
+                    total_blocks: r.top_header.number + 1,
+                    synced_blocks: top_synced_block_number + 1,
+                    approx_remaining_seconds: remaining_seconds,
+                })
+            } else {
+                None
+            }
+        }
+        None => None,
+    };
+
     // We've either got all of the required blocks and txs, or ran out of blocks in `analyzed`.
     // If we're still missing blocks/txs, copy them from the previous response
     let missing_blocks = FRONTPAGE_BLOCKS_COUNT - latest_blocks.len();
@@ -287,6 +316,7 @@ async fn update_frontpage_data(
         stats,
         latest_blocks,
         latest_txs,
+        sync_stats,
     };
     w.serialized = serde_json::to_string(&w.data).unwrap();
     debug!("generated front page response"; "new_response" => w.serialized.clone());

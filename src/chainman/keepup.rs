@@ -383,7 +383,7 @@ async fn apply_block(block: BlockOwned, frontpage_strat: FrontPageDataUpdateStra
             generate_frontpage_data(block.header.hash).await;
         }
         FrontPageDataUpdateStrategy::Append => {
-            update_frontpage_data(block.header.hash, &bms, &[&analyzed_txs]).await;
+            update_frontpage_data(block.header.hash, &bms, &[&analyzed_txs], None).await;
         }
     }
 }

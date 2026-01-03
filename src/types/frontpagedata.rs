@@ -21,6 +21,15 @@ pub struct FrontPageData {
     pub stats: Stats,
     pub latest_blocks: Vec<ShortBlock>,
     pub latest_txs: Vec<ShortTx>,
+    pub sync_stats: Option<SyncStats>,
+}
+
+#[derive(Default, Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncStats {
+    pub total_blocks: u64,
+    pub synced_blocks: u64,
+    pub approx_remaining_seconds: f64,
 }
 
 #[derive(Default, Clone, Debug, Serialize, Deserialize)]

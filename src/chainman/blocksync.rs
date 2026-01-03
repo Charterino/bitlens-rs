@@ -459,6 +459,8 @@ async fn receive_and_process_blocks(mut recv: Receiver<(PayloadWithAllocator, u6
     let previous_analyzed = Arc::new(Mutex::new(Some(Vec::with_capacity(MAX_BLOCKS_PER_FLUSH)))); // values live in `previous_arena`
     let previous_metrics = Arc::new(Mutex::new(Some(Vec::with_capacity(MAX_BLOCKS_PER_FLUSH)))); // all heap
 
+    let last_frontpage_update = Arc::new(Mutex::new(Instant::now()));
+
     unsafe {
         let mut scope = async_scoped::Scope::create(async_scoped::spawner::use_tokio::Tokio);
 
@@ -498,6 +500,7 @@ async fn receive_and_process_blocks(mut recv: Receiver<(PayloadWithAllocator, u6
 
             let pm_clone = previous_metrics.clone();
             let pa_clone = previous_analyzed.clone();
+            let last_frontpage_update_clone = last_frontpage_update.clone();
             scope.spawn(async move {
                 write_analyzed_txs(
                     &next_batch,
@@ -510,7 +513,19 @@ async fn receive_and_process_blocks(mut recv: Receiver<(PayloadWithAllocator, u6
                 // update fetched_full in chainman's live state
                 let top = next_batch[next_batch.len() - 1];
                 mark_as_downloaded(next_batch);
-                update_frontpage_data(top, &current_metrics, &current_analyzed).await;
+                let last_update = {
+                    let mut last_update_w = last_frontpage_update_clone.lock().unwrap();
+                    let last_update = *last_update_w;
+                    *last_update_w = Instant::now();
+                    last_update
+                };
+                update_frontpage_data(
+                    top,
+                    &current_metrics,
+                    &current_analyzed,
+                    Some(last_update.elapsed()),
+                )
+                .await;
                 *pm_clone.lock().unwrap() = Some(current_metrics);
                 *pa_clone.lock().unwrap() = Some(current_analyzed);
             });
