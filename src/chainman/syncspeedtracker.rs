@@ -32,7 +32,7 @@ impl SyncSpeedTracker {
 
     pub fn estimate_speed(&self) -> f64 {
         let w = self.inner.lock().unwrap();
-        if w.last_speeds.len() == 0 {
+        if w.last_speeds.is_empty() {
             return 0.;
         }
 

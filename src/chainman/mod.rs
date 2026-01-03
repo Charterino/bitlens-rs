@@ -33,9 +33,8 @@ use std::{
         LazyLock, RwLock,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{SystemTime, UNIX_EPOCH},
 };
-use tokio::time::Instant;
 
 const FRONTPAGE_TXS_COUNT: usize = 50;
 const FRONTPAGE_BLOCKS_COUNT: usize = 50;
