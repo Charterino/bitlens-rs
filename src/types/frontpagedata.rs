@@ -15,6 +15,14 @@ impl Default for FrontPageDataWithSerialized {
     }
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum FrontPageDataUpdate {
+    Snapshot(FrontPageData),
+    // Delta is of the same type, but will contain less blocks
+    Delta(FrontPageData),
+}
+
 #[derive(Default, Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FrontPageData {

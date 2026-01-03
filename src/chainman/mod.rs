@@ -16,7 +16,8 @@ use crate::{
         blockheaderwithnumber::BlockHeaderWithNumber,
         blockmetrics::BlockMetrics,
         frontpagedata::{
-            FrontPageData, FrontPageDataWithSerialized, ShortBlock, ShortTx, SyncStats,
+            FrontPageData, FrontPageDataUpdate, FrontPageDataWithSerialized, ShortBlock, ShortTx,
+            SyncStats,
         },
         stats::Stats,
     },
@@ -47,6 +48,11 @@ static CHAIN: LazyLock<RwLock<Chain>> = LazyLock::new(|| RwLock::new(Chain::defa
 
 pub static FRONTPAGE_STATS: LazyLock<RwLock<FrontPageDataWithSerialized>> =
     LazyLock::new(|| RwLock::new(Default::default())); // empty initially
+pub static FRONTPAGE_UPDATE_BROADCAST: LazyLock<tokio::sync::broadcast::Sender<String>> =
+    LazyLock::new(|| {
+        let (tx, _) = tokio::sync::broadcast::channel(1);
+        tx
+    });
 
 mod blocksync;
 mod chain;
@@ -217,6 +223,7 @@ async fn generate_frontpage_data(top_block_hash: [u8; 32]) {
     };
     w.serialized = serde_json::to_string(&w.data).unwrap();
     debug!("generated front page response"; "new_response" => w.serialized.clone());
+    _ = FRONTPAGE_UPDATE_BROADCAST.send(w.serialized.clone());
 }
 
 // appends the new blocks to the already-generated frontpage data
@@ -318,6 +325,12 @@ async fn update_frontpage_data(
     };
     w.serialized = serde_json::to_string(&w.data).unwrap();
     debug!("generated front page response"; "new_response" => w.serialized.clone());
+    let update = if metrics_cache.len() >= FRONTPAGE_BLOCKS_COUNT {
+        FrontPageDataUpdate::Snapshot(w.data.clone())
+    } else {
+        FrontPageDataUpdate::Delta(w.data.clone())
+    };
+    _ = FRONTPAGE_UPDATE_BROADCAST.send(serde_json::to_string(&update).unwrap());
 }
 
 async fn calculate_stats(top: [u8; 32], cache: Option<&[BlockMetrics]>) -> Stats {
