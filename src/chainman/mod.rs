@@ -50,7 +50,7 @@ pub static FRONTPAGE_STATS: LazyLock<RwLock<FrontPageDataWithSerialized>> =
     LazyLock::new(|| RwLock::new(Default::default())); // empty initially
 pub static FRONTPAGE_UPDATE_BROADCAST: LazyLock<tokio::sync::broadcast::Sender<String>> =
     LazyLock::new(|| {
-        let (tx, _) = tokio::sync::broadcast::channel(1);
+        let (tx, _) = tokio::sync::broadcast::channel(128);
         tx
     });
 
@@ -213,17 +213,19 @@ async fn generate_frontpage_data(top_block_hash: [u8; 32]) {
         };
     }
 
-    let mut w = FRONTPAGE_STATS.write().unwrap();
-
-    w.data = FrontPageData {
-        stats,
-        latest_blocks,
-        latest_txs,
-        sync_stats: None,
+    let update_for_broadcast = {
+        let mut w = FRONTPAGE_STATS.write().unwrap();
+        w.data = FrontPageData {
+            stats,
+            latest_blocks,
+            latest_txs,
+            sync_stats: None,
+        };
+        w.serialized = serde_json::to_string(&w.data).unwrap();
+        debug!("generated front page response"; "new_response" => w.serialized.clone());
+        w.serialized.clone()
     };
-    w.serialized = serde_json::to_string(&w.data).unwrap();
-    debug!("generated front page response"; "new_response" => w.serialized.clone());
-    _ = FRONTPAGE_UPDATE_BROADCAST.send(w.serialized.clone());
+    _ = FRONTPAGE_UPDATE_BROADCAST.send(update_for_broadcast);
 }
 
 // appends the new blocks to the already-generated frontpage data
@@ -330,6 +332,7 @@ async fn update_frontpage_data(
     } else {
         FrontPageDataUpdate::Delta(w.data.clone())
     };
+    drop(w);
     _ = FRONTPAGE_UPDATE_BROADCAST.send(serde_json::to_string(&update).unwrap());
 }
 
