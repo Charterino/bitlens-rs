@@ -332,6 +332,7 @@ async fn apply_block(block: BlockOwned, frontpage_strat: FrontPageDataUpdateStra
             block.header.hash,
             txref,
             &deps[consumed..consumed + txin_count],
+            block.header.timestamp as u64,
             &analyzed_arena,
         );
         consumed += txin_count;

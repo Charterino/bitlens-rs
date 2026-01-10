@@ -17,7 +17,8 @@ pub async fn start() {
         .route("/api/frontpagedata", get(frontpage::frontpagedata))
         .route("/api/tx", get(tx::txdata))
         .route("/api/block", get(block::blockdata))
-        .route("/api/address", get(address::address_data))
+        .route("/api/address/top", get(address::address_data_top))
+        .route("/api/address/extra", get(address::address_data_extra))
         .route("/api/peers", get(peer::current_peers))
         .route("/api/getpeer", get(peer::get_peer))
         .route("/api/socket/frontpage", any(frontpage::frontpagesocket))
@@ -37,6 +38,14 @@ struct HashParam {
 }
 
 #[derive(Debug, Deserialize)]
-struct AddressParam {
+struct AddressTopParam {
     address: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct AddressExtraParam {
+    address: String,
+    from_timestamp: Option<u64>,
+    to_timestamp: Option<u64>,
+    limit: Option<usize>,
 }

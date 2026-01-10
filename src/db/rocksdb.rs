@@ -8,6 +8,7 @@ use anyhow::bail;
 use rocksdb::BlockBasedOptions;
 use rocksdb::Cache;
 use rocksdb::DBRawIteratorWithThreadMode;
+use rocksdb::ReadOptions;
 use rocksdb::SliceTransform;
 use rocksdb::WriteBufferManager;
 use rocksdb::{DB, IngestExternalFileOptions, Options};
@@ -57,30 +58,6 @@ static TXSPENDS_DB_OPEN_OPTIONS: LazyLock<Options> = LazyLock::new(|| {
     cloned
 });
 
-static ADDRESSES_DB_OPEN_OPTIONS: LazyLock<Options> = LazyLock::new(|| {
-    let mut cloned = OPEN_OPTIONS.clone();
-    cloned.set_prefix_extractor(SliceTransform::create(
-        "b",
-        |a| match a.len() {
-            // full p2pk
-            65 => a,
-            // full p2pk + txhash
-            97 => &a[0..65],
-            // p2sh or p2pkh or p2wsh
-            20 => a,
-            // p2sh or p2pkh or p2wsh + txhash
-            52 => &a[0..20],
-            // taproot or p2wpkh
-            32 => a,
-            // taproot or p2wpkh + txhash
-            64 => &a[0..32],
-            _ => panic!("unknown address size: {}", a.len()),
-        },
-        None,
-    ));
-    cloned
-});
-
 static INGEST_OPTIONS: LazyLock<IngestExternalFileOptions> = LazyLock::new(|| {
     let mut ingest_options = IngestExternalFileOptions::default();
     ingest_options.set_move_files(true);
@@ -102,7 +79,7 @@ pub static BLOCKTXS_DB: LazyLock<DB> = LazyLock::new(|| {
 });
 
 pub static ADDRESSES_DB: LazyLock<DB> = LazyLock::new(|| {
-    rocksdb::DB::open(&ADDRESSES_DB_OPEN_OPTIONS, "bitlens-addresses")
+    rocksdb::DB::open(&OPEN_OPTIONS, "bitlens-addresses")
         .expect("to have opened bitlens-addresses db")
 });
 
@@ -254,7 +231,7 @@ pub async fn write_txspends(spends: &[([u8; 36], [u8; 64])]) {
 }
 
 pub async fn write_address_amends(address_amends: &[(&[u8], [u8; 40])]) {
-    let mut writer = rocksdb::SstFileWriter::create(&ADDRESSES_DB_OPEN_OPTIONS);
+    let mut writer = rocksdb::SstFileWriter::create(&OPEN_OPTIONS);
     writer
         .open("bitlens-address-amends-temp.sst")
         .expect("to open bitlens-address-amends-temp.sst");
@@ -370,22 +347,42 @@ pub async fn get_tx_spends(txhash: [u8; 32]) -> Result<Vec<(u32, [u8; 32], [u8; 
     .await?)
 }
 
-pub async fn get_address_entires(address: Vec<u8>) -> Result<Vec<([u8; 32], [u8; 32], i64)>> {
+pub async fn get_address_entires(
+    mut address: Vec<u8>,
+    from_timestamp: u64,
+    to_timestamp: u64,
+    limit: usize,
+) -> Result<Vec<([u8; 32], [u8; 32], i64)>> {
     let _g = READ_SEMAPHORE
         .acquire()
         .await
         .expect("to have acquire a read permit from the semaphore");
 
     Ok(tokio::task::spawn_blocking(move || {
-        let mut prefixiter: DBRawIteratorWithThreadMode<_> =
-            ADDRESSES_DB.prefix_iterator(&address).into();
+        let expected_key_len = address.len() + 8 + 32;
+
+        let mut start = address.clone();
+        let inv_to = u64::MAX - to_timestamp;
+        start.extend_from_slice(&inv_to.to_be_bytes());
+        let inv_from = u64::MAX - from_timestamp;
+        address.extend_from_slice(&inv_from.to_be_bytes());
+        let end = address;
+
+        let mut read_options = ReadOptions::default();
+        read_options.set_iterate_lower_bound(start.clone());
+        read_options.set_iterate_upper_bound(end);
+
+        let mut iterator = ADDRESSES_DB.raw_iterator_opt(read_options);
+
+        iterator.seek(start);
+
         let mut results = Vec::new();
-        while let Some((key, value)) = prefixiter.item() {
-            assert_eq!(address.len() + 32, key.len());
+        while let Some((key, value)) = iterator.item() {
+            assert_eq!(expected_key_len, key.len());
             assert_eq!(40, value.len());
             let tx_hash = {
                 let mut i = [0u8; 32];
-                i.copy_from_slice(&key[address.len()..]);
+                i.copy_from_slice(&key[expected_key_len - 32..]);
                 i
             };
             let block_hash = {
@@ -395,10 +392,72 @@ pub async fn get_address_entires(address: Vec<u8>) -> Result<Vec<([u8; 32], [u8;
             };
             let delta = { i64::from_le_bytes(value[32..40].try_into().unwrap()) };
             results.push((tx_hash, block_hash, delta));
-            prefixiter.next();
+
+            if results.len() == limit {
+                break;
+            }
+
+            iterator.next();
         }
 
         results
+    })
+    .await?)
+}
+
+pub async fn get_top_address_entires_and_count(
+    mut address: Vec<u8>,
+    top_count: usize,
+) -> Result<(Vec<([u8; 32], [u8; 32], i64)>, usize)> {
+    let _g = READ_SEMAPHORE
+        .acquire()
+        .await
+        .expect("to have acquire a read permit from the semaphore");
+
+    Ok(tokio::task::spawn_blocking(move || {
+        let expected_key_len = address.len() + 8 + 32;
+
+        let mut start = address.clone();
+        let inv_to = 0u64;
+        start.extend_from_slice(&inv_to.to_be_bytes());
+        let inv_from = u64::MAX;
+        address.extend_from_slice(&inv_from.to_be_bytes());
+        let end = address;
+
+        let mut read_options = ReadOptions::default();
+        read_options.set_iterate_lower_bound(start.clone());
+        read_options.set_iterate_upper_bound(end);
+
+        let mut iterator = ADDRESSES_DB.raw_iterator_opt(read_options);
+
+        iterator.seek(start);
+
+        let mut results = Vec::new();
+        let mut total = 0usize;
+        while let Some((key, value)) = iterator.item() {
+            assert_eq!(expected_key_len, key.len());
+            assert_eq!(40, value.len());
+            let tx_hash = {
+                let mut i = [0u8; 32];
+                i.copy_from_slice(&key[expected_key_len - 32..]);
+                i
+            };
+            let block_hash = {
+                let mut t = [0u8; 32];
+                t.copy_from_slice(&value[0..32]);
+                t
+            };
+            let delta = { i64::from_le_bytes(value[32..40].try_into().unwrap()) };
+
+            if results.len() < top_count {
+                results.push((tx_hash, block_hash, delta));
+            }
+            total += 1;
+
+            iterator.next();
+        }
+
+        (results, total)
     })
     .await?)
 }

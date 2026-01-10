@@ -82,6 +82,7 @@ pub fn analyze_tx<'arena, 'data>(
     block_hash: [u8; 32],
     tx: TxRef<'data>,
     dependencies: &'data [TxOutRef<'data>],
+    timestamp: u64,
     arena: &'arena Arena,
 ) -> db::rocksdb::SerializedTx<'arena> {
     let fee = if tx.is_coinbase() {
@@ -139,7 +140,7 @@ pub fn analyze_tx<'arena, 'data>(
         } else {
             Some(serialize_spends(tx, arena))
         },
-        address_amends: serialize_address_amends(tx, dependencies, arena),
+        address_amends: serialize_address_amends(tx, dependencies, timestamp, arena),
         fee,
         txouts_sum,
         size_wus,
@@ -186,6 +187,7 @@ fn serialize_spends<'arena>(tx: TxRef, arena: &'arena Arena) -> &'arena [&'arena
 fn serialize_address_amends<'arena, 'data>(
     tx: TxRef,
     deps: &'data [TxOutRef<'data>],
+    timestamp: u64,
     arena: &'arena Arena,
 ) -> Option<&'arena [(&'arena [u8], i64)]> {
     let amends_count = if tx.is_coinbase() {
@@ -208,17 +210,23 @@ fn serialize_address_amends<'arena, 'data>(
         .expect("to allocate space for address amends");
 
     for txout in deps {
-        if let Some(address_bytes) =
-            get_address_from_script_copy_into_arena_with_txhash(txout.script(), tx.hash(), arena)
-        {
+        if let Some(address_bytes) = get_address_from_script_copy_into_arena_with_txhash(
+            txout.script(),
+            tx.hash(),
+            timestamp,
+            arena,
+        ) {
             amends.push((address_bytes, -(txout.value() as i64)));
         }
     }
 
     for txout in tx.txouts() {
-        if let Some(address_bytes) =
-            get_address_from_script_copy_into_arena_with_txhash(txout.script(), tx.hash(), arena)
-        {
+        if let Some(address_bytes) = get_address_from_script_copy_into_arena_with_txhash(
+            txout.script(),
+            tx.hash(),
+            timestamp,
+            arena,
+        ) {
             amends.push((address_bytes, txout.value() as i64));
         }
     }
@@ -248,38 +256,45 @@ fn script_has_address(script: &[u8]) -> bool {
 fn get_address_from_script_copy_into_arena_with_txhash<'data, 'arena: 'data>(
     script: &'data [u8],
     txhash: [u8; 32],
+    timestamp: u64,
     arena: &'arena Arena,
 ) -> Option<&'arena [u8]> {
+    // this is done so when we seek forward from lowest value to highest value we iterate from newer txs to older txs
+    let timestamp = u64::MAX - timestamp;
     if let Some(p2pk) = get_p2pk_address(script) {
         let key = arena
-            .try_alloc_array_fill_copy(p2pk.len() + 32, 0u8)
+            .try_alloc_array_fill_copy(p2pk.len() + 8 + 32, 0u8)
             .expect("to allocate space for address bytes");
         key[0..p2pk.len()].copy_from_slice(p2pk);
-        key[p2pk.len()..].copy_from_slice(&txhash);
+        key[p2pk.len()..p2pk.len() + 8].copy_from_slice(&timestamp.to_be_bytes());
+        key[p2pk.len() + 8..].copy_from_slice(&txhash);
         return Some(&*key);
     }
     if let Some(p2sh) = get_p2sh_address(script) {
         let key = arena
-            .try_alloc_array_fill_copy(p2sh.len() + 32, 0u8)
+            .try_alloc_array_fill_copy(p2sh.len() + 8 + 32, 0u8)
             .expect("to allocate space for address bytes");
         key[0..p2sh.len()].copy_from_slice(p2sh);
-        key[p2sh.len()..].copy_from_slice(&txhash);
+        key[p2sh.len()..p2sh.len() + 8].copy_from_slice(&timestamp.to_be_bytes());
+        key[p2sh.len() + 8..].copy_from_slice(&txhash);
         return Some(&*key);
     }
     if let Some(p2pkh) = get_p2pkh_address(script) {
         let key = arena
-            .try_alloc_array_fill_copy(p2pkh.len() + 32, 0u8)
+            .try_alloc_array_fill_copy(p2pkh.len() + 8 + 32, 0u8)
             .expect("to allocate space for address bytes");
         key[0..p2pkh.len()].copy_from_slice(p2pkh);
-        key[p2pkh.len()..].copy_from_slice(&txhash);
+        key[p2pkh.len()..p2pkh.len() + 8].copy_from_slice(&timestamp.to_be_bytes());
+        key[p2pkh.len() + 8..].copy_from_slice(&txhash);
         return Some(&*key);
     }
     if let Some(bech32) = get_bech32_address(script) {
         let key = arena
-            .try_alloc_array_fill_copy(bech32.len() + 32, 0u8)
+            .try_alloc_array_fill_copy(bech32.len() + 8 + 32, 0u8)
             .expect("to allocate space for address bytes");
         key[0..bech32.len()].copy_from_slice(bech32);
-        key[bech32.len()..].copy_from_slice(&txhash);
+        key[bech32.len()..bech32.len() + 8].copy_from_slice(&timestamp.to_be_bytes());
+        key[bech32.len() + 8..].copy_from_slice(&txhash);
         return Some(&*key);
     }
 

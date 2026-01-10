@@ -673,6 +673,7 @@ async fn process_block<'arena>(
                     block.header.hash,
                     TxRef::Borrowed(tx),
                     &deps,
+                    block.header.timestamp as u64,
                     analyzed_arena,
                 );
                 analyzed_txs[tx_idx] = analyzed;
