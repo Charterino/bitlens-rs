@@ -4,11 +4,11 @@ version = "0.1.0"
 edition = "2024"
 
 [profile.release]
-panic = 'abort'
+panic = 'unwind'
 debug = true
 
 [profile.dev]
-panic = 'abort'
+panic = 'unwind'
 
 [dependencies]
 anyhow = "1.0.98"
