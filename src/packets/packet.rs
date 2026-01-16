@@ -7,7 +7,8 @@ use anyhow::Result;
 use deadpool::unmanaged::Pool;
 use deadpool::unmanaged::{Object, PoolConfig};
 use ouroboros::self_referencing;
-use slog_scope::{debug, warn};
+use slog_scope::{debug, info, warn};
+use std::env::VarError;
 use std::sync::LazyLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
@@ -26,19 +27,73 @@ pub static SERIALIZE_POOL: LazyLock<Pool<Vec<u8>>> = LazyLock::new(|| {
 
 // So we start off with 128 4mb arenas. During block download we can have as many as 2k of them. After that, it's gonna go back to 128.
 // See deserializearenas.png for a drawing explaining this process.
-// TODO: configure these 2 variables via env variables
 pub const DESERIALIZE_POOL_TIMEOUT: Duration = Duration::from_millis(100);
-pub const INITIAL_DESERIALIZE_ARENA_COUNT: usize = 128;
-pub const MAX_DESERIALIZE_ARENA_COUNT_DURING_BLOCKSYNC: usize = 2048;
-pub static CURRENT_POOL_LIMIT: AtomicUsize = AtomicUsize::new(INITIAL_DESERIALIZE_ARENA_COUNT);
-pub static CURRENT_POOL_SIZE: AtomicUsize = AtomicUsize::new(INITIAL_DESERIALIZE_ARENA_COUNT);
+const DEFAULT_INITIAL_DESERIALIZE_ARENA_COUNT: usize = 128;
+const DEFAULT_MAX_DESERIALIZE_ARENA_COUNT: usize = 2048;
+pub static INITIAL_DESERIALIZE_ARENA_COUNT: LazyLock<usize> = LazyLock::new(
+    || match std::env::var("INITIAL_DESERIALIZE_ARENA_COUNT") {
+        Ok(v) => match v.parse::<usize>() {
+            Ok(v) => v,
+            Err(e) => {
+                info!(
+                    "failed to parse INITIAL_DESERIALIZE_ARENA_COUNT: {e} defaulting to {DEFAULT_INITIAL_DESERIALIZE_ARENA_COUNT}"
+                );
+                DEFAULT_INITIAL_DESERIALIZE_ARENA_COUNT
+            }
+        },
+        Err(e) => {
+            if let VarError::NotPresent = e {
+                info!(
+                    "INITIAL_DESERIALIZE_ARENA_COUNT is not set, defaulting to {DEFAULT_INITIAL_DESERIALIZE_ARENA_COUNT}"
+                );
+            } else {
+                info!(
+                    "failed to read INITIAL_DESERIALIZE_ARENA_COUNT: {e} defaulting to {DEFAULT_INITIAL_DESERIALIZE_ARENA_COUNT}"
+                );
+            }
+            DEFAULT_INITIAL_DESERIALIZE_ARENA_COUNT
+        }
+    },
+);
+
+pub static MAX_DESERIALIZE_ARENA_COUNT_DURING_BLOCKSYNC: LazyLock<usize> = LazyLock::new(|| {
+    match std::env::var("MAX_DESERIALIZE_ARENA_COUNT") {
+        Ok(v) => match v.parse::<usize>() {
+            Ok(v) => v,
+            Err(e) => {
+                info!(
+                    "failed to parse MAX_DESERIALIZE_ARENA_COUNT: {e} defaulting to {DEFAULT_MAX_DESERIALIZE_ARENA_COUNT}"
+                );
+                DEFAULT_MAX_DESERIALIZE_ARENA_COUNT
+            }
+        },
+        Err(e) => {
+            if let VarError::NotPresent = e {
+                info!(
+                    "MAX_DESERIALIZE_ARENA_COUNT is not set, defaulting to {DEFAULT_MAX_DESERIALIZE_ARENA_COUNT}"
+                );
+            } else {
+                info!(
+                    "failed to read MAX_DESERIALIZE_ARENA_COUNT: {e} defaulting to {DEFAULT_MAX_DESERIALIZE_ARENA_COUNT}"
+                );
+            }
+            DEFAULT_MAX_DESERIALIZE_ARENA_COUNT
+        }
+    }
+});
+
+pub static CURRENT_POOL_LIMIT: LazyLock<AtomicUsize> =
+    LazyLock::new(|| AtomicUsize::new(*INITIAL_DESERIALIZE_ARENA_COUNT));
+pub static CURRENT_POOL_SIZE: LazyLock<AtomicUsize> =
+    LazyLock::new(|| AtomicUsize::new(*INITIAL_DESERIALIZE_ARENA_COUNT));
+
 pub static DESERIALIZE_POOL: LazyLock<Pool<Arena>> = LazyLock::new(|| {
     let mut config = PoolConfig::new(1024 * 1024);
     config.runtime = Some(deadpool::Runtime::Tokio1);
     config.timeout = Some(DESERIALIZE_POOL_TIMEOUT);
 
     let pool = Pool::from_config(&config);
-    for _ in 0..INITIAL_DESERIALIZE_ARENA_COUNT {
+    for _ in 0..*INITIAL_DESERIALIZE_ARENA_COUNT {
         let a = Arena::new(MAX_PACKET_SIZE);
         pool.try_add(a).expect("to have added arena");
     }
