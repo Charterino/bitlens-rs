@@ -43,6 +43,7 @@ struct AddressTopParam {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct AddressExtraParam {
     address: String,
     from_timestamp: Option<u64>,

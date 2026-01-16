@@ -139,12 +139,15 @@ pub fn filter_and_populate_address_txs(
         .filter(|item| r.most_work_chain.contains(&item.1))
         .map(|item| {
             let block = r.known_headers.get(&item.1).unwrap();
+
             AddressTransaction {
                 transaction_hash: item.0,
                 block_hash: item.1,
                 block_number: block.number,
                 timestamp: block.header.timestamp,
                 value: item.2,
+                single_other_address: None,
+                distinct_other_addresses: 0,
             }
         })
         .collect()

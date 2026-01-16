@@ -27,15 +27,13 @@ async fn handle_frontpage_socket(mut socket: WebSocket) {
     loop {
         select! {
             Ok(d) = subscriber.recv() => {
-                if let Err(_) = socket.send(Message::text(d)).await {
+                if socket.send(Message::text(d)).await.is_err() {
                     break;
                 }
             }
             Some(Ok(Message::Text(t))) = socket.recv() => {
-                if t == "ping" {
-                    if let Err(_) = socket.send(Message::text("pong")).await {
-                        break;
-                    }
+                if t == "ping" && socket.send(Message::text("pong")).await.is_err() {
+                    break;
                 }
             }
         }

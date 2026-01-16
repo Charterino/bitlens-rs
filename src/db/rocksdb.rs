@@ -236,15 +236,10 @@ pub async fn write_address_amends(address_amends: &[(&[u8], [u8; 40])]) {
         .open("bitlens-address-amends-temp.sst")
         .expect("to open bitlens-address-amends-temp.sst");
 
-    let mut last = None;
     for pair in address_amends {
-        if last.is_some() && last.unwrap() == pair.0 {
-            continue;
-        }
         writer
             .put(pair.0, pair.1)
             .expect("to add tx hashes into sst file");
-        last = Some(pair.0);
     }
 
     writer
@@ -405,17 +400,26 @@ pub async fn get_address_entires(
     .await?)
 }
 
-pub async fn get_top_address_entires_and_count(
+pub struct TopAddressData {
+    pub transactions: Vec<([u8; 32], [u8; 32], i64)>,
+    pub total_txs: usize,
+    pub total_spent: u64,
+    pub total_received: u64,
+    pub first_seen: u64,
+}
+
+pub async fn get_top_address_data(
     mut address: Vec<u8>,
     top_count: usize,
-) -> Result<(Vec<([u8; 32], [u8; 32], i64)>, usize)> {
+) -> Result<TopAddressData> {
     let _g = READ_SEMAPHORE
         .acquire()
         .await
         .expect("to have acquire a read permit from the semaphore");
 
     Ok(tokio::task::spawn_blocking(move || {
-        let expected_key_len = address.len() + 8 + 32;
+        let address_len = address.len();
+        let expected_key_len = address_len + 8 + 32;
 
         let mut start = address.clone();
         let inv_to = 0u64;
@@ -433,7 +437,10 @@ pub async fn get_top_address_entires_and_count(
         iterator.seek(start);
 
         let mut results = Vec::new();
-        let mut total = 0usize;
+        let mut total_txs = 0usize;
+        let mut last_time = 0u64;
+        let mut total_received = 0u64;
+        let mut total_sent = 0u64;
         while let Some((key, value)) = iterator.item() {
             assert_eq!(expected_key_len, key.len());
             assert_eq!(40, value.len());
@@ -452,12 +459,29 @@ pub async fn get_top_address_entires_and_count(
             if results.len() < top_count {
                 results.push((tx_hash, block_hash, delta));
             }
-            total += 1;
+            total_txs += 1;
+
+            let mut timestamp_bytes = [0u8; 8];
+            timestamp_bytes.copy_from_slice(&key[address_len..address_len + 8]);
+            let timestamp = u64::MAX - u64::from_be_bytes(timestamp_bytes);
+            last_time = timestamp;
+
+            if delta < 0 {
+                total_sent += (-delta) as u64;
+            } else {
+                total_received += delta as u64;
+            }
 
             iterator.next();
         }
 
-        (results, total)
+        TopAddressData {
+            transactions: results,
+            total_txs,
+            total_spent: total_sent,
+            total_received,
+            first_seen: last_time,
+        }
     })
     .await?)
 }

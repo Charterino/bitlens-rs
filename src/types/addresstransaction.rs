@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::tx::address::Address;
+
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AddressTransaction {
@@ -10,4 +12,10 @@ pub struct AddressTransaction {
     pub block_number: u64,
     pub timestamp: u32,
     pub value: i64,
+
+    // If the tx has the address in the txouts and it only has 1 distinct input address, put it here
+    // If the tx has the address in the txins and it only has 1 distinct input address, put it here
+    pub single_other_address: Option<Address>,
+
+    pub distinct_other_addresses: usize,
 }
