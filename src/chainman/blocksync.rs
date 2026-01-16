@@ -22,7 +22,6 @@ use anyhow::Result;
 use core::panic;
 use slog_scope::{debug, info};
 use std::{
-    cmp::max,
     collections::HashMap,
     env::VarError,
     num::NonZeroUsize,
@@ -36,7 +35,7 @@ use tokio::{
 };
 
 const BLOCK_TIMEOUT: Duration = Duration::from_millis(5000);
-const INITIAL_WORKER_COUNT: usize = 20;
+const INITIAL_WORKER_COUNT: usize = 2;
 
 const DEFAULT_MAX_WORKERS: usize = 100;
 pub static MAX_WORKERS: LazyLock<usize> =
@@ -62,6 +61,34 @@ pub static MAX_WORKERS: LazyLock<usize> =
         }
     });
 const SYNC_PROGRESS_AVERAGE_OF: usize = 20;
+
+const DEFAULT_MAX_BLOCKS_PER_FLUSH: usize = 64;
+static MAX_BLOCKS_PER_FLUSH: LazyLock<usize> = LazyLock::new(|| {
+    match std::env::var("MAX_BLOCKS_PER_FLUSH") {
+        Ok(v) => match v.parse::<usize>() {
+            Ok(v) => v,
+            Err(e) => {
+                info!(
+                    "failed to parse MAX_BLOCKS_PER_FLUSH: {e} defaulting to {DEFAULT_MAX_BLOCKS_PER_FLUSH}"
+                );
+                DEFAULT_MAX_WORKERS
+            }
+        },
+        Err(e) => {
+            if let VarError::NotPresent = e {
+                info!(
+                    "MAX_BLOCKS_PER_FLUSH is not set, defaulting to {DEFAULT_MAX_BLOCKS_PER_FLUSH}"
+                );
+            } else {
+                info!(
+                    "failed to read MAX_BLOCKS_PER_FLUSH: {e} defaulting to {DEFAULT_MAX_BLOCKS_PER_FLUSH}"
+                );
+            }
+            DEFAULT_MAX_BLOCKS_PER_FLUSH
+        }
+    }
+});
+pub const ANALYZED_OVERHEAD_PER_BLOCK: usize = 4096 * 1024;
 
 pub enum DownloadWorkerMessage {
     PullFirstJob(tokio::sync::oneshot::Sender<BlockHashWithNumber>),
@@ -458,8 +485,6 @@ fn job_to_getdata(hash: [u8; 32]) -> PayloadToSend {
     })
 }
 
-const MAX_BLOCKS_PER_FLUSH: usize = 512;
-pub const ANALYZED_OVERHEAD_PER_BLOCK: usize = 4096 * 1024;
 type AnalyzedBlock<'a> = &'a [SerializedTx<'a>];
 struct ChainSyncState<'current, 'previous> {
     current_txouts: HashMap<[u8; 32], Vec<&'current TxOutBorrowed<'current>>>,
@@ -470,22 +495,24 @@ struct ChainSyncState<'current, 'previous> {
 
 async fn receive_and_process_blocks(mut recv: Receiver<(PayloadWithAllocator, u64)>) {
     let current_arena_b = Arena::new(
-        MAX_BLOCKS_PER_FLUSH * MAX_PACKET_SIZE + MAX_BLOCKS_PER_FLUSH * ANALYZED_OVERHEAD_PER_BLOCK,
+        *MAX_BLOCKS_PER_FLUSH * MAX_PACKET_SIZE
+            + *MAX_BLOCKS_PER_FLUSH * ANALYZED_OVERHEAD_PER_BLOCK,
     );
     let mut current_arena = &current_arena_b;
     let previous_arena_b = Arena::new(
-        MAX_BLOCKS_PER_FLUSH * MAX_PACKET_SIZE + MAX_BLOCKS_PER_FLUSH * ANALYZED_OVERHEAD_PER_BLOCK,
+        *MAX_BLOCKS_PER_FLUSH * MAX_PACKET_SIZE
+            + *MAX_BLOCKS_PER_FLUSH * ANALYZED_OVERHEAD_PER_BLOCK,
     );
     let mut previous_arena = &previous_arena_b;
     let mut current_state = Arc::new(RwLock::new(ChainSyncState {
-        current_txouts: HashMap::with_capacity(MAX_BLOCKS_PER_FLUSH * 4096), // values live in `current_arena`
-        previous_txouts: HashMap::with_capacity(MAX_BLOCKS_PER_FLUSH * 4096), // values live in `previous_arena`
-        current_analyzed: Vec::with_capacity(MAX_BLOCKS_PER_FLUSH), // values live in `current_arena`
-        current_metrics: Vec::with_capacity(MAX_BLOCKS_PER_FLUSH),  // all heap
+        current_txouts: HashMap::with_capacity(*MAX_BLOCKS_PER_FLUSH * 4096), // values live in `current_arena`
+        previous_txouts: HashMap::with_capacity(*MAX_BLOCKS_PER_FLUSH * 4096), // values live in `previous_arena`
+        current_analyzed: Vec::with_capacity(*MAX_BLOCKS_PER_FLUSH), // values live in `current_arena`
+        current_metrics: Vec::with_capacity(*MAX_BLOCKS_PER_FLUSH),  // all heap
     }));
 
-    let previous_analyzed = Arc::new(Mutex::new(Some(Vec::with_capacity(MAX_BLOCKS_PER_FLUSH)))); // values live in `previous_arena`
-    let previous_metrics = Arc::new(Mutex::new(Some(Vec::with_capacity(MAX_BLOCKS_PER_FLUSH)))); // all heap
+    let previous_analyzed = Arc::new(Mutex::new(Some(Vec::with_capacity(*MAX_BLOCKS_PER_FLUSH)))); // values live in `previous_arena`
+    let previous_metrics = Arc::new(Mutex::new(Some(Vec::with_capacity(*MAX_BLOCKS_PER_FLUSH)))); // all heap
 
     let sync_speed_tracker = Arc::new(SyncSpeedTracker::new(SYNC_PROGRESS_AVERAGE_OF));
 
@@ -576,7 +603,7 @@ async fn get_next_batch_to_flush<'current>(
     current_arena: &'current Arena,
 ) -> Vec<[u8; 32]> {
     assert_eq!(current_arena.used(), 0);
-    let mut current_blocks = Vec::with_capacity(MAX_BLOCKS_PER_FLUSH);
+    let mut current_blocks = Vec::with_capacity(*MAX_BLOCKS_PER_FLUSH);
     unsafe {
         let mut scope = async_scoped::Scope::create(async_scoped::spawner::use_tokio::Tokio);
         while let Some(b) = recv.recv().await {
@@ -610,7 +637,7 @@ async fn get_next_batch_to_flush<'current>(
                 index,
             ));
 
-            if current_blocks.len() == MAX_BLOCKS_PER_FLUSH {
+            if current_blocks.len() == *MAX_BLOCKS_PER_FLUSH {
                 break;
             }
         }
