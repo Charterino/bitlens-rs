@@ -1,7 +1,10 @@
 //#![allow(async_fn_in_trait, unused_variables)]
 
 use std::{
+    any::Any,
+    backtrace,
     net::ToSocketAddrs,
+    panic::PanicHookInfo,
     sync::mpsc::{Receiver, channel},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -9,7 +12,7 @@ use std::{
 use anyhow::{Result, bail};
 use log::setup_logging;
 use packets::network_id::NetworkId;
-use slog_scope::{debug, info};
+use slog_scope::{debug, error, info};
 use tokio::{
     runtime::Runtime,
     select,
@@ -31,12 +34,14 @@ pub mod tx;
 pub mod types;
 pub mod util;
 
+/*
 #[cfg(all(not(test), not(target_env = "msvc")))]
 use tikv_jemallocator::Jemalloc;
 
 #[cfg(all(not(test), not(target_env = "msvc")))]
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
+*/
 
 const DNS_SEEDS: &[&str] = &[
     "seed.bitcoin.sipa.be",
@@ -52,12 +57,15 @@ const DNS_SEEDS: &[&str] = &[
 
 fn main() -> Result<()> {
     let _guard = setup_logging();
-    let runtime: Runtime = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    let _ = runtime.block_on(async_main());
-    drop(runtime);
+    std::panic::set_hook(Box::new(handle_panic));
+    let _ = std::panic::catch_unwind(|| {
+        let runtime: Runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let _ = runtime.block_on(async_main());
+    });
+    let _ = std::panic::take_hook();
     drop(_guard);
     Ok(())
 }
@@ -158,4 +166,23 @@ fn ctrl_channel() -> Result<Receiver<()>, ctrlc::Error> {
     })?;
 
     Ok(receiver)
+}
+
+fn handle_panic(info: &PanicHookInfo) {
+    let location = info.location().unwrap();
+
+    let msg = payload_as_str(info.payload());
+    let trace = backtrace::Backtrace::force_capture();
+
+    error!("bitlens crashed"; "location" => location.to_string(), "message" => msg, "trace" => trace.to_string());
+}
+
+fn payload_as_str(payload: &dyn Any) -> &str {
+    if let Some(&s) = payload.downcast_ref::<&'static str>() {
+        s
+    } else if let Some(s) = payload.downcast_ref::<String>() {
+        s.as_str()
+    } else {
+        "Box<dyn Any>"
+    }
 }
