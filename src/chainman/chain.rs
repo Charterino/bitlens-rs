@@ -18,8 +18,8 @@ pub struct Chain {
 
 impl Default for Chain {
     fn default() -> Self {
-        let mut known = HashMap::new();
-        let mut most_work_chain = HashSet::new();
+        let mut known = HashMap::with_capacity(1024 * 1024);
+        let mut most_work_chain = HashSet::with_capacity(1024 * 1024);
         let genesis = BlockHeaderWithNumber {
             header: *GENESIS_HEADER,
             number: 0,

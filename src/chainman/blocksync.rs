@@ -22,9 +22,11 @@ use anyhow::Result;
 use core::panic;
 use slog_scope::{debug, info};
 use std::{
+    cmp::max,
     collections::HashMap,
+    env::VarError,
     num::NonZeroUsize,
-    sync::{Arc, Mutex, RwLock, atomic::Ordering},
+    sync::{Arc, LazyLock, Mutex, RwLock, atomic::Ordering},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tokio::{
@@ -35,7 +37,30 @@ use tokio::{
 
 const BLOCK_TIMEOUT: Duration = Duration::from_millis(5000);
 const INITIAL_WORKER_COUNT: usize = 20;
-const MAX_WORKERS: usize = 200;
+
+const DEFAULT_MAX_WORKERS: usize = 100;
+pub static MAX_WORKERS: LazyLock<usize> =
+    LazyLock::new(|| match std::env::var("MAX_DOWNLOAD_WORKERS") {
+        Ok(v) => match v.parse::<usize>() {
+            Ok(v) => v,
+            Err(e) => {
+                info!(
+                    "failed to parse MAX_DOWNLOAD_WORKERS: {e} defaulting to {DEFAULT_MAX_WORKERS}"
+                );
+                DEFAULT_MAX_WORKERS
+            }
+        },
+        Err(e) => {
+            if let VarError::NotPresent = e {
+                info!("MAX_DOWNLOAD_WORKERS is not set, defaulting to {DEFAULT_MAX_WORKERS}");
+            } else {
+                info!(
+                    "failed to read MAX_DOWNLOAD_WORKERS: {e} defaulting to {DEFAULT_MAX_WORKERS}"
+                );
+            }
+            DEFAULT_MAX_WORKERS
+        }
+    });
 const SYNC_PROGRESS_AVERAGE_OF: usize = 20;
 
 pub enum DownloadWorkerMessage {
@@ -53,13 +78,13 @@ pub fn start_syncing_blocks() {
     SYNCING_BODIES.store(true, Ordering::Relaxed);
     // Increase the max number of deserialize arenas while we're syncing blocks
     packet::CURRENT_POOL_LIMIT.store(
-        packet::MAX_DESERIALIZE_ARENA_COUNT_DURING_BLOCKSYNC,
+        *packet::MAX_DESERIALIZE_ARENA_COUNT_DURING_BLOCKSYNC,
         Ordering::Relaxed,
     );
 }
 
 pub fn stop_syncing_blocks() {
-    packet::CURRENT_POOL_LIMIT.store(packet::INITIAL_DESERIALIZE_ARENA_COUNT, Ordering::Relaxed);
+    packet::CURRENT_POOL_LIMIT.store(*packet::INITIAL_DESERIALIZE_ARENA_COUNT, Ordering::Relaxed);
     SYNCING_BODIES.store(false, Ordering::Relaxed);
 }
 
@@ -147,7 +172,7 @@ async fn run_master(
                 let elapsed_time_seconds = ((last_time.elapsed().as_micros() as u64) - state.flush_time_tracker.wait_time_micros()) as f64 / 1000. / 1000.;
 
                 let r = downloaded_bytes as f64 / (state.block_avg_size * workers.len() as f64) / elapsed_time_seconds;
-                if r >= 0.9 && workers.len() < MAX_WORKERS {
+                if r >= 0.9 && workers.len() < *MAX_WORKERS {
                     workers.push(tokio::spawn(run_download_worker(master_tx.clone())));
                     debug!("spawned a new block download worker"; "new_count" => workers.len());
                 } else if r <= 0.5 && workers.len() > 1 {
@@ -458,6 +483,7 @@ async fn receive_and_process_blocks(mut recv: Receiver<(PayloadWithAllocator, u6
         current_analyzed: Vec::with_capacity(MAX_BLOCKS_PER_FLUSH), // values live in `current_arena`
         current_metrics: Vec::with_capacity(MAX_BLOCKS_PER_FLUSH),  // all heap
     }));
+
     let previous_analyzed = Arc::new(Mutex::new(Some(Vec::with_capacity(MAX_BLOCKS_PER_FLUSH)))); // values live in `previous_arena`
     let previous_metrics = Arc::new(Mutex::new(Some(Vec::with_capacity(MAX_BLOCKS_PER_FLUSH)))); // all heap
 
