@@ -39,3 +39,4 @@ bitlens-txspends
 bitlens-addresses
 result
 *.sst
+*.zst
