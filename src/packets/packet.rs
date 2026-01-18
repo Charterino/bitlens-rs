@@ -25,6 +25,12 @@ pub static SERIALIZE_POOL: LazyLock<Pool<Vec<u8>>> = LazyLock::new(|| {
     Pool::from(pool)
 });
 
+pub static SHOULD_LOG_INSUFFICIENT_ARENAS: LazyLock<bool> =
+    LazyLock::new(|| match std::env::var("DISABLE_INSUFFICIENT_ARENAS_LOG") {
+        Ok(v) => v.is_empty(),
+        Err(_) => true,
+    });
+
 // So we start off with 128 4mb arenas. During block download we can have as many as 2k of them. After that, it's gonna go back to 128.
 // See deserializearenas.png for a drawing explaining this process.
 pub const DESERIALIZE_POOL_TIMEOUT: Duration = Duration::from_millis(100);
@@ -202,8 +208,9 @@ pub async fn read_packet(stream: &mut BufReader<OwnedReadHalf>) -> Result<Packet
                 }
                 // If we can't add a new arena, the loop will continue waiting.
                 if current_size >= limit {
-                    // TODO: add an env variable to disable this log
-                    warn!("insufficient arenas, considering adding more"; "size" => current_size, "limit" => limit);
+                    if *SHOULD_LOG_INSUFFICIENT_ARENAS {
+                        warn!("insufficient arenas, considering adding more"; "size" => current_size, "limit" => limit);
+                    }
                 }
             }
         }
