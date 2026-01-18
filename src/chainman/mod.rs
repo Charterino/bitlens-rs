@@ -29,7 +29,7 @@ use headersync::sync_headers;
 use slog_scope::{debug, info};
 use std::{
     cmp::min,
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     sync::{
         LazyLock, RwLock,
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -111,6 +111,11 @@ pub fn get_top_header_hash() -> [u8; 32] {
 pub fn get_header_by_hash(hash: [u8; 32]) -> Option<BlockHeaderWithNumber> {
     let r = CHAIN.read().unwrap();
     r.known_headers.get(&hash).cloned()
+}
+
+pub fn get_hash_by_number(number: u64) -> Option<[u8; 32]> {
+    let r = CHAIN.read().unwrap();
+    r.number_to_hash.get(&number).cloned()
 }
 
 pub fn filter_tx_spends(spends: Vec<(u32, [u8; 32], [u8; 32])>) -> Vec<(u32, [u8; 32])> {
@@ -502,9 +507,9 @@ fn build_get_headers() -> PayloadToSend {
 }
 
 struct HeaderApplicationResult {
-    removed_blocks: Vec<[u8; 32]>,
+    removed_blocks: Vec<([u8; 32], u64)>,
     // oldest to newest
-    added_blocks: Vec<[u8; 32]>,
+    added_blocks: Vec<([u8; 32], u64)>,
 }
 // if the returned value is Err, the header could not be applied
 // if the returned value is Ok(None), the header was inserted but no bodies need to be downloaded & applied
@@ -573,7 +578,7 @@ fn validate_and_apply_header_inner(
         w.top_header = new_header;
         // queue this block to be downloaded and applied
         return Ok(Some(HeaderApplicationResult {
-            added_blocks: vec![w.top_header.header.hash],
+            added_blocks: vec![(w.top_header.header.hash, w.top_header.number)],
             removed_blocks: vec![],
         }));
     }
@@ -581,31 +586,36 @@ fn validate_and_apply_header_inner(
     // this is a fork, so we return all blocks since the split
     // and update DOWNLOADED_BLOCKS
     let (mut visited_new, visited_old) = {
-        let mut from_new = new_header.header.parent;
-        let mut visited_new = vec![new_header.header.hash];
-        let mut visited_old = vec![w.top_header.header.hash];
+        let mut from_new_hash = new_header.header.parent;
+        let mut from_new_number = new_header.number;
+        let mut visited_new = vec![(new_header.header.hash, new_header.number)];
+        let mut visited_old = vec![(w.top_header.header.hash, w.top_header.number)];
         // first find the block that's on the main chain with the same block number as the parent
-        let mut from_old = {
+        let (mut from_old_hash, mut from_old_number) = {
             let mut last = w.top_header.header.hash;
+            let mut last_number = w.top_header.number;
             loop {
                 let header = w.known_headers.get(&last).unwrap();
                 if header.number == parent_number {
                     break;
                 }
-                visited_old.push(header.header.hash);
+                visited_old.push((header.header.hash, header.number));
                 last = header.header.parent;
+                last_number -= 1;
             }
-            last
+            (last, last_number)
         };
         // then step back until they match
         loop {
-            if from_new == from_old {
+            if from_new_hash == from_old_hash {
                 break;
             }
-            visited_new.push(from_new);
-            visited_old.push(from_old);
-            from_old = w.known_headers.get(&from_old).unwrap().header.parent;
-            from_new = w.known_headers.get(&from_new).unwrap().header.parent;
+            visited_new.push((from_new_hash, from_new_number));
+            visited_old.push((from_old_hash, from_old_number));
+            from_old_hash = w.known_headers.get(&from_old_hash).unwrap().header.parent;
+            from_old_number -= 1;
+            from_new_hash = w.known_headers.get(&from_new_hash).unwrap().header.parent;
+            from_new_number -= 1;
         }
         (visited_new, visited_old)
     };
@@ -647,16 +657,19 @@ fn calculate_downloaded_blocks(r: &Chain) -> u64 {
 }
 
 fn generate_top_work_chain_hashset(w: &mut Chain) {
-    let mut new_hashset = HashSet::new();
+    let mut new_hashset = HashSet::with_capacity(1024 * 1024);
+    let mut new_number_to_hash = HashMap::with_capacity(1024 * 1024);
     let mut last = &w.top_header;
     loop {
         new_hashset.insert(last.header.hash);
+        new_number_to_hash.insert(last.number, last.header.hash);
         if last.number == 0 {
             break;
         }
         last = w.known_headers.get(last.header.parent.as_slice()).unwrap();
     }
     w.most_work_chain = new_hashset;
+    w.number_to_hash = new_number_to_hash;
 }
 
 fn get_top_downloaded_block_hash(r: &Chain) -> Option<[u8; 32]> {

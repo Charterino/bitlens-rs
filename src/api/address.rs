@@ -220,7 +220,7 @@ async fn populate_other_address_fields(
     Ok(())
 }
 
-fn parse_address(address: String) -> Option<(Vec<u8>, Address)> {
+pub fn parse_address(address: String) -> Option<(Vec<u8>, Address)> {
     if let Ok(b) = hex::decode(&address) {
         if b.len() == 65 {
             // p2pk full

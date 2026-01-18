@@ -13,23 +13,28 @@ use crate::{
 pub struct Chain {
     pub top_header: BlockHeaderWithNumber,
     pub known_headers: HashMap<[u8; 32], BlockHeaderWithNumber>,
+    // this is on the most_work_chain
+    pub number_to_hash: HashMap<u64, [u8; 32]>,
     pub most_work_chain: HashSet<[u8; 32]>,
 }
 
 impl Default for Chain {
     fn default() -> Self {
-        let mut known = HashMap::with_capacity(1024 * 1024);
+        let mut known_headers = HashMap::with_capacity(1024 * 1024);
         let mut most_work_chain = HashSet::with_capacity(1024 * 1024);
+        let mut number_to_hash = HashMap::with_capacity(1024 * 1024);
         let genesis = BlockHeaderWithNumber {
             header: *GENESIS_HEADER,
             number: 0,
             fetched_full: false,
             total_work: BlockHeaderRef::Owned(&GENESIS_HEADER).get_work(),
         };
-        known.insert(GENESIS_HEADER.hash, genesis.clone());
+        known_headers.insert(GENESIS_HEADER.hash, genesis.clone());
+        number_to_hash.insert(0, GENESIS_HEADER.hash);
         most_work_chain.insert(GENESIS_HEADER.hash);
         Self {
-            known_headers: known,
+            known_headers,
+            number_to_hash,
             top_header: genesis,
             most_work_chain,
         }
@@ -77,11 +82,12 @@ impl Chain {
     }
 
     pub fn update_most_work_chain(&mut self, result: &HeaderApplicationResult) {
-        for hash in &result.removed_blocks {
+        for (hash, _) in &result.removed_blocks {
             self.most_work_chain.remove(hash);
         }
-        for hash in &result.added_blocks {
+        for (hash, number) in &result.added_blocks {
             self.most_work_chain.insert(*hash);
+            self.number_to_hash.insert(*number, *hash);
         }
     }
 }

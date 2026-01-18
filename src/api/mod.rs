@@ -10,6 +10,7 @@ mod address;
 mod block;
 mod frontpage;
 mod peer;
+mod search;
 mod tx;
 
 pub async fn start() {
@@ -21,6 +22,7 @@ pub async fn start() {
         .route("/api/address/extra", get(address::address_data_extra))
         .route("/api/peers", get(peer::current_peers))
         .route("/api/getpeer", get(peer::get_peer))
+        .route("/api/search", get(search::search))
         .route("/api/socket/frontpage", any(frontpage::frontpagesocket))
         .layer(
             CorsLayer::new()
@@ -30,6 +32,11 @@ pub async fn start() {
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8122").await.unwrap();
     tokio::spawn(async { axum::serve(listener, app).await });
+}
+
+#[derive(Debug, Deserialize)]
+struct SearchParam {
+    term: String,
 }
 
 #[derive(Debug, Deserialize)]
