@@ -400,6 +400,65 @@ pub async fn get_address_entires(
     .await?)
 }
 
+pub async fn get_address_entires_continue(
+    mut address: Vec<u8>,
+    after: [u8; 32],
+    limit: usize,
+) -> Result<Vec<([u8; 32], [u8; 32], i64)>> {
+    let _g = READ_SEMAPHORE
+        .acquire()
+        .await
+        .expect("to have acquire a read permit from the semaphore");
+
+    Ok(tokio::task::spawn_blocking(move || {
+        let expected_key_len = address.len() + 8 + 32;
+
+        let mut start = address.clone();
+        let inv_to = u64::MAX;
+        start.extend_from_slice(&inv_to.to_be_bytes());
+        start.extend_from_slice(&after);
+
+        let inv_from = u64::MAX;
+        address.extend_from_slice(&inv_from.to_be_bytes());
+        let end = address;
+
+        let mut read_options = ReadOptions::default();
+        read_options.set_iterate_lower_bound(start.clone());
+        read_options.set_iterate_upper_bound(end);
+
+        let mut iterator = ADDRESSES_DB.raw_iterator_opt(read_options);
+
+        iterator.seek(start);
+
+        let mut results = Vec::new();
+        while let Some((key, value)) = iterator.item() {
+            assert_eq!(expected_key_len, key.len());
+            assert_eq!(40, value.len());
+            let tx_hash = {
+                let mut i = [0u8; 32];
+                i.copy_from_slice(&key[expected_key_len - 32..]);
+                i
+            };
+            let block_hash = {
+                let mut t = [0u8; 32];
+                t.copy_from_slice(&value[0..32]);
+                t
+            };
+            let delta = { i64::from_le_bytes(value[32..40].try_into().unwrap()) };
+            results.push((tx_hash, block_hash, delta));
+
+            if results.len() == limit {
+                break;
+            }
+
+            iterator.next();
+        }
+
+        results
+    })
+    .await?)
+}
+
 pub struct TopAddressData {
     pub transactions: Vec<([u8; 32], [u8; 32], i64)>,
     pub total_txs: usize,

@@ -20,6 +20,7 @@ pub async fn start() {
         .route("/api/block", get(block::blockdata))
         .route("/api/address/top", get(address::address_data_top))
         .route("/api/address/extra", get(address::address_data_extra))
+        .route("/api/address/continue", get(address::address_data_continue))
         .route("/api/peers", get(peer::current_peers))
         .route("/api/getpeer", get(peer::get_peer))
         .route("/api/search", get(search::search))
@@ -55,5 +56,13 @@ struct AddressExtraParam {
     address: String,
     from_timestamp: Option<u64>,
     to_timestamp: Option<u64>,
+    limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AddressContinueParam {
+    address: String,
+    after_tx: String,
     limit: Option<usize>,
 }

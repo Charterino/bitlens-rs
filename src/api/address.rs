@@ -1,5 +1,5 @@
 use crate::{
-    api::{AddressExtraParam, AddressTopParam},
+    api::{AddressContinueParam, AddressExtraParam, AddressTopParam},
     chainman, db,
     packets::tx::TxRef,
     tx::{AnalyzedTx, address::Address, get_human_address_from_script},
@@ -69,6 +69,37 @@ pub async fn address_data_extra(
         db::rocksdb::get_address_entires(address_bytes, from_timestamp, to_timestamp, limit)
             .await
             .unwrap_or_default();
+
+    let mut transactions = chainman::filter_and_populate_address_txs(amends);
+    transactions.sort_unstable_by(|a, b| b.timestamp.cmp(&a.timestamp));
+
+    populate_other_address_fields(human_address, &mut transactions).await?;
+
+    Ok(Json(transactions))
+}
+
+pub async fn address_data_continue(
+    Query(params): Query<AddressContinueParam>,
+) -> Result<Json<Vec<AddressTransaction>>, StatusCode> {
+    let (address_bytes, human_address) = match parse_address(params.address) {
+        None => return Err(StatusCode::BAD_REQUEST),
+        Some(b) => b,
+    };
+
+    let mut unhexxed = match hex::decode(params.after_tx) {
+        Err(_) => return Err(StatusCode::BAD_REQUEST),
+        Ok(v) => v,
+    };
+    if unhexxed.len() != 32 {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    unhexxed.reverse();
+    let unhexxed: [u8; 32] = unhexxed.try_into().unwrap();
+    let limit = params.limit.unwrap_or(50);
+
+    let amends = db::rocksdb::get_address_entires_continue(address_bytes, unhexxed, limit)
+        .await
+        .unwrap_or_default();
 
     let mut transactions = chainman::filter_and_populate_address_txs(amends);
     transactions.sort_unstable_by(|a, b| b.timestamp.cmp(&a.timestamp));

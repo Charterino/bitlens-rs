@@ -207,10 +207,8 @@ pub async fn read_packet(stream: &mut BufReader<OwnedReadHalf>) -> Result<Packet
                     }
                 }
                 // If we can't add a new arena, the loop will continue waiting.
-                if current_size >= limit {
-                    if *SHOULD_LOG_INSUFFICIENT_ARENAS {
-                        warn!("insufficient arenas, considering adding more"; "size" => current_size, "limit" => limit);
-                    }
+                if current_size >= limit && *SHOULD_LOG_INSUFFICIENT_ARENAS {
+                    warn!("insufficient arenas, considering adding more"; "size" => current_size, "limit" => limit);
                 }
             }
         }
