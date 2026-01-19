@@ -97,9 +97,14 @@ pub async fn address_data_continue(
     let unhexxed: [u8; 32] = unhexxed.try_into().unwrap();
     let limit = params.limit.unwrap_or(50);
 
-    let amends = db::rocksdb::get_address_entires_continue(address_bytes, unhexxed, limit)
-        .await
-        .unwrap_or_default();
+    let amends = db::rocksdb::get_address_entires_continue(
+        address_bytes,
+        unhexxed,
+        params.after_timestamp,
+        limit,
+    )
+    .await
+    .unwrap_or_default();
 
     let mut transactions = chainman::filter_and_populate_address_txs(amends);
     transactions.sort_unstable_by(|a, b| b.timestamp.cmp(&a.timestamp));

@@ -64,5 +64,6 @@ struct AddressExtraParam {
 struct AddressContinueParam {
     address: String,
     after_tx: String,
+    after_timestamp: u64,
     limit: Option<usize>,
 }

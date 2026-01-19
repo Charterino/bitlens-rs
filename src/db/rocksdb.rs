@@ -402,7 +402,8 @@ pub async fn get_address_entires(
 
 pub async fn get_address_entires_continue(
     mut address: Vec<u8>,
-    after: [u8; 32],
+    after_tx: [u8; 32],
+    after_timestamp: u64,
     limit: usize,
 ) -> Result<Vec<([u8; 32], [u8; 32], i64)>> {
     let _g = READ_SEMAPHORE
@@ -414,9 +415,9 @@ pub async fn get_address_entires_continue(
         let expected_key_len = address.len() + 8 + 32;
 
         let mut start = address.clone();
-        let inv_to = u64::MAX;
+        let inv_to = u64::MAX - after_timestamp;
         start.extend_from_slice(&inv_to.to_be_bytes());
-        start.extend_from_slice(&after);
+        start.extend_from_slice(&after_tx);
 
         let inv_from = u64::MAX;
         address.extend_from_slice(&inv_from.to_be_bytes());
@@ -429,6 +430,7 @@ pub async fn get_address_entires_continue(
         let mut iterator = ADDRESSES_DB.raw_iterator_opt(read_options);
 
         iterator.seek(start);
+        iterator.next();
 
         let mut results = Vec::new();
         while let Some((key, value)) = iterator.item() {
