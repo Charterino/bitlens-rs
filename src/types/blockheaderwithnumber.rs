@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use crate::packets::blockheader::BlockHeaderOwned;
 
 #[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct BlockHeaderWithNumber {
     #[serde(flatten)]
     pub header: BlockHeaderOwned,

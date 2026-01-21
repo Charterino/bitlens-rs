@@ -61,6 +61,7 @@ impl<'a> DeserializableBorrowed<'a> for BlockHeaderBorrowed<'a> {
 }
 
 #[derive(Clone, Debug, Copy, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct BlockHeaderOwned {
     pub version: u32,
     #[serde(serialize_with = "crate::util::serialize_as_hex::serialize_hash_as_hex_reversed")]

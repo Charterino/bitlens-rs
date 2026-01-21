@@ -8,6 +8,7 @@ use axum::{Json, extract::Query, http::StatusCode};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct BlockDataResponse {
     #[serde(flatten)]
     pub header: BlockHeaderWithNumber,
