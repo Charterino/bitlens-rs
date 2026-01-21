@@ -8,6 +8,7 @@ use crate::{
 };
 
 #[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SearchResponse {
     address: Option<String>,
     #[serde(
