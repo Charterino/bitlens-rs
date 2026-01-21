@@ -55,7 +55,7 @@ pub struct ShortBlock {
 #[serde(rename_all = "camelCase")]
 pub struct ShortTx {
     pub hash: String,
-    pub value: f64,
+    pub value: u64,
     pub size_wus: u32,
     pub timestamp: u32,
     pub block_number: u64,

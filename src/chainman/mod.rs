@@ -202,7 +202,7 @@ async fn generate_frontpage_data(top_block_hash: [u8; 32]) {
             let human_hash = hex::encode(human_hash);
             latest_txs.push(ShortTx {
                 hash: human_hash,
-                value: tx.txouts_sum as f64 / 100_000_000.,
+                value: tx.txouts_sum,
                 size_wus: tx.size_wus,
                 block_number: current_header.number,
                 block_hash: BlockHeaderRef::Owned(&current_header.header).human_hash(),
@@ -278,7 +278,7 @@ async fn update_frontpage_data(
             let human_hash = hex::encode(human_hash);
             latest_txs.push(ShortTx {
                 hash: human_hash,
-                value: tx.txouts_sum as f64 / 100_000_000.,
+                value: tx.txouts_sum,
                 size_wus: tx.size_wus,
                 block_number: current_header.number,
                 block_hash: BlockHeaderRef::Owned(&current_header.header).human_hash(),
@@ -404,11 +404,11 @@ async fn calculate_stats(top: [u8; 32], cache: Option<&[BlockMetrics]>) -> Stats
         if timestamps[i] < cutoff {
             // blocks[boundary:i] belong to day `cutoff`
 
-            let mut total_vol = 0.;
+            let mut total_vol = 0;
             let mut total_txs = 0;
             let mut median_fees_sum = 0.;
             for bm in &bms[boundary..i] {
-                total_vol += bm.volume as f64 / 100_000_000.;
+                total_vol += bm.volume;
                 total_txs += bm.txs_count;
                 median_fees_sum += bm.median_fee_rate;
             }
