@@ -43,9 +43,8 @@ pub async fn write_analyzed_txs(
 
             for transaction in transactions.iter() {
                 serialized[offset..offset + 32].copy_from_slice(&transaction.hash);
-                serialized[offset + 32..offset + 40].copy_from_slice(
-                    &((transaction.txouts_sum as f64 / 100_000_000.).to_le_bytes()),
-                );
+                serialized[offset + 32..offset + 40]
+                    .copy_from_slice(&(transaction.txouts_sum.to_le_bytes()));
                 serialized[offset + 40..offset + 48]
                     .copy_from_slice(&(transaction.fee.to_le_bytes()));
                 serialized[offset + 48..offset + 52]

@@ -46,7 +46,7 @@ pub struct ShortBlock {
     pub number: u64,
     pub hash: String,
     pub tx_count: u64,
-    pub reward_btc: f64,
+    pub reward_sats: u64,
     pub btc_price: f64,
     pub timestamp: u32,
 }

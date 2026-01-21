@@ -184,7 +184,7 @@ async fn generate_frontpage_data(top_block_hash: [u8; 32]) {
             number: current_header.number,
             hash: BlockHeaderRef::Owned(&current_header.header).human_hash(),
             tx_count: block_tx_hashes.len() as u64,
-            reward_btc: block_tx_hashes.first().unwrap().value,
+            reward_sats: block_tx_hashes.first().unwrap().value_sats,
             btc_price: 0., // todo
             timestamp: current_header.header.timestamp,
         });
@@ -265,7 +265,7 @@ async fn update_frontpage_data(
             number: current_header.number,
             hash: BlockHeaderRef::Owned(&current_header.header).human_hash(),
             tx_count: block_txs.len() as u64,
-            reward_btc: block_txs[0].txouts_sum as f64 / 100_000_000.,
+            reward_sats: block_txs[0].txouts_sum,
             btc_price: 0., // TODO
             timestamp: current_header.header.timestamp,
         });

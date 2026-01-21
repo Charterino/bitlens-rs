@@ -112,7 +112,7 @@ pub struct SerializedTx<'a> {
 pub struct BlockTxEntry {
     #[serde(serialize_with = "crate::util::serialize_as_hex::serialize_hash_as_hex_reversed")]
     pub hash: [u8; 32],
-    pub value: f64,
+    pub value_sats: u64,
     pub fee_sats: u64,
     pub size_wus: u32,
 }
@@ -274,7 +274,7 @@ pub async fn get_block_tx_entries(hash: [u8; 32]) -> Result<Vec<BlockTxEntry>> {
                 let bytes = &data[continue_at..];
                 result.push(BlockTxEntry {
                     hash: bytes[0..32].try_into().unwrap(),
-                    value: f64::from_le_bytes(bytes[32..40].try_into().unwrap()),
+                    value_sats: u64::from_le_bytes(bytes[32..40].try_into().unwrap()),
                     fee_sats: u64::from_le_bytes(bytes[40..48].try_into().unwrap()),
                     size_wus: u32::from_le_bytes(bytes[48..52].try_into().unwrap()),
                 });
