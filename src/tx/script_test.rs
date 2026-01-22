@@ -315,5 +315,5 @@ fn build_txs<'creation>(
         spending_tx.witness_data = None;
     }
 
-    vec![TxOutRef::Owned(creation_tx.txouts.first().unwrap())]
+    vec![TxOutRef::Owned(&creation_tx.txouts[0])]
 }

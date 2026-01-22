@@ -26,7 +26,7 @@ use anyhow::{Result, bail};
 use blocksync::sync_blocks;
 use chain::Chain;
 use headersync::sync_headers;
-use slog_scope::{debug, info};
+use slog_scope::{debug, info, warn};
 use std::{
     cmp::min,
     collections::{HashMap, HashSet},
@@ -61,7 +61,7 @@ pub mod keepup;
 mod syncspeedtracker;
 
 pub async fn start() {
-    load_headers_from_sqlite().await;
+    load_headers_from_sqlite();
     keepup::start();
     tokio::spawn(async {
         // get blocks to download without unlocking CHAIN
@@ -100,7 +100,59 @@ pub async fn start() {
         } else {
             stop_syncing_headers();
         }
+
+        // After we're done syncing the blocks, make sure sqlite has the coinbase_ascii for all blocks.
+        ensure_coinbase_ascii_populated().await;
     });
+}
+
+pub async fn ensure_coinbase_ascii_populated() {
+    let hashes = match db::sqlite::get_block_hashes_with_missing_coinbase_ascii() {
+        Err(e) => {
+            warn!("failed to get block hashes with missing coinbase_ascii from sqlite"; "error" => e.to_string());
+            return;
+        }
+        Ok(v) => v,
+    };
+
+    if hashes.is_empty() {
+        return;
+    }
+
+    info!("populating coinbase_ascii for headers"; "count" => hashes.len());
+    let mut result_hashes = Vec::with_capacity(hashes.len());
+    let mut result_coinbase_asciis = Vec::with_capacity(hashes.len());
+
+    for hash in hashes {
+        let txs = match db::rocksdb::get_block_tx_entries(hash).await {
+            Err(e) => {
+                let mut human_hash = hash.to_vec();
+                human_hash.reverse();
+                let human_hash = hex::encode(human_hash);
+                warn!("failed to get tx hashes while populating coinbase_ascii"; "error" => e.to_string(), "block_hash" => human_hash);
+                continue;
+            }
+            Ok(v) => v,
+        };
+        let first_tx = match db::rocksdb::get_analyzed_tx(txs[0].hash).await {
+            Err(e) => {
+                let mut human_hash = txs[0].hash.to_vec();
+                human_hash.reverse();
+                let human_hash = hex::encode(human_hash);
+                warn!("failed to get analyzed tx data while populating coinbase_ascii"; "error" => e.to_string(), "tx_hash" => human_hash);
+                continue;
+            }
+            Ok(v) => v,
+        };
+        let coinbase_ascii = first_tx.tx.txins[0].sig_script.clone();
+
+        result_hashes.push(hash);
+        result_coinbase_asciis.push(coinbase_ascii);
+    }
+
+    db::sqlite::update_coinbase_asciis(&result_hashes, &result_coinbase_asciis);
+
+    // TODO: also keep the coinbase ascii thing in the memory
 }
 
 pub fn get_top_header_hash() -> [u8; 32] {
@@ -184,7 +236,7 @@ async fn generate_frontpage_data(top_block_hash: [u8; 32]) {
             number: current_header.number,
             hash: BlockHeaderRef::Owned(&current_header.header).human_hash(),
             tx_count: block_tx_hashes.len() as u64,
-            reward_sats: block_tx_hashes.first().unwrap().value_sats,
+            reward_sats: block_tx_hashes[0].value_sats,
             btc_price: 0., // todo
             timestamp: current_header.header.timestamp,
         });
@@ -384,7 +436,10 @@ async fn calculate_stats(top: [u8; 32], cache: Option<&[BlockMetrics]>) -> Stats
     }
     let mut handles = Vec::new();
     for hash in relevant_blocks.iter().skip(bms.len()) {
-        handles.push(tokio::spawn(db::sqlite::find_block_metrics(*hash)));
+        let hash = *hash;
+        handles.push(tokio::task::spawn_blocking(move || {
+            db::sqlite::find_block_metrics(hash)
+        }));
     }
 
     let mut results = Vec::with_capacity(handles.len());
@@ -427,8 +482,8 @@ async fn calculate_stats(top: [u8; 32], cache: Option<&[BlockMetrics]>) -> Stats
     result
 }
 
-async fn load_headers_from_sqlite() {
-    let headers = db::sqlite::get_all_headers().await;
+fn load_headers_from_sqlite() {
+    let headers = db::sqlite::get_all_headers();
     let mut w = CHAIN.write().unwrap();
     for new_header in headers {
         if new_header.total_work > w.top_header.total_work {

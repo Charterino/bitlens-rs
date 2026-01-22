@@ -86,7 +86,7 @@ pub(crate) async fn setup_sqlite() {
     }
 }
 
-pub async fn get_all_peers() -> Vec<AddressPortNetwork> {
+pub fn get_all_peers() -> Vec<AddressPortNetwork> {
     let conn = CONNECTION.lock().unwrap();
     let start = Instant::now();
     let mut stmt = conn
@@ -169,7 +169,7 @@ pub async fn update_peer_from_version(
         .unwrap();
 }
 
-pub async fn get_all_headers() -> Vec<BlockHeaderWithNumber> {
+pub fn get_all_headers() -> Vec<BlockHeaderWithNumber> {
     let conn = CONNECTION.lock().unwrap();
     let start = Instant::now();
     let mut stmt = conn.prepare_cached("SELECT version, previous_block, merkle_root, timestamp, bits, nonce, block_number, block_hash, fetched_full FROM headers ORDER BY block_number ASC;").unwrap();
@@ -232,18 +232,25 @@ pub async fn update_peer_first_online(peer: AddressPortNetwork, ts: u64) {
         .unwrap();
 }
 
-pub fn mark_blocks_as_downloaded(hashes: &[[u8; 32]], metrics: &[BlockMetrics]) {
+pub fn mark_blocks_as_downloaded(
+    hashes: &[[u8; 32]],
+    coinbase_asciis: &[&[u8]],
+    metrics: &[BlockMetrics],
+) {
     assert_eq!(hashes.len(), metrics.len());
+    assert_eq!(hashes.len(), coinbase_asciis.len());
     let mut conn = CONNECTION.lock().unwrap();
     let start = Instant::now();
-    let tx = conn.transaction().expect("to being sqlite transaction");
+    let tx = conn.transaction().expect("to begin sqlite transaction");
     {
         let mut stmt = tx
-            .prepare_cached("UPDATE headers SET fetched_full = ? WHERE block_hash = ?")
+            .prepare_cached(
+                "UPDATE headers SET fetched_full = ?, coinbase_ascii = ? WHERE block_hash = ?",
+            )
             .expect("to prepare statement");
 
-        for hash in hashes {
-            stmt.execute((true, hash))
+        for (hash, coinbase_ascii) in hashes.iter().zip(coinbase_asciis) {
+            stmt.execute((true, coinbase_ascii, hash))
                 .expect("to execute fetched_full update");
         }
 
@@ -270,7 +277,26 @@ pub fn mark_blocks_as_downloaded(hashes: &[[u8; 32]], metrics: &[BlockMetrics]) 
     METRIC_SQLITE_REQUESTS_TIME.observe(Instant::now().duration_since(start).as_millis() as f64);
 }
 
-pub async fn find_block_metrics(hash: [u8; 32]) -> BlockMetrics {
+pub fn update_coinbase_asciis(hashes: &[[u8; 32]], coinbase_asciis: &[Vec<u8>]) {
+    assert_eq!(hashes.len(), coinbase_asciis.len());
+    let mut conn = CONNECTION.lock().unwrap();
+    let start = Instant::now();
+    let tx = conn.transaction().expect("to begin sqlite transaction");
+    {
+        let mut stmt = tx
+            .prepare_cached("UPDATE headers SET coinbase_ascii = ? WHERE block_hash = ?")
+            .expect("to prepare statement");
+
+        for (hash, coinbase_ascii) in hashes.iter().zip(coinbase_asciis) {
+            stmt.execute((coinbase_ascii, hash))
+                .expect("to execute coinbase_ascii update");
+        }
+    }
+    tx.commit().expect("to commit tx");
+    METRIC_SQLITE_REQUESTS_TIME.observe(Instant::now().duration_since(start).as_millis() as f64);
+}
+
+pub fn find_block_metrics(hash: [u8; 32]) -> BlockMetrics {
     let conn = CONNECTION.lock().unwrap();
     let start = Instant::now();
     let mut stmt = conn.prepare_cached("SELECT fees_total, volume, txs_count, avg_fee_rate, lowest_fee_rate, highest_fee_rate, median_fee_rate FROM block_stats WHERE hash=?;").expect("to prepare stmt");
@@ -300,7 +326,7 @@ pub struct PeerData {
     services: Option<u64>,
 }
 
-pub async fn get_peer(apn: &AddressPortNetwork) -> Result<PeerData> {
+pub fn get_peer(apn: &AddressPortNetwork) -> Result<PeerData> {
     let conn = CONNECTION.lock().unwrap();
     let mut stmt = conn
         .prepare_cached(
@@ -318,4 +344,14 @@ pub async fn get_peer(apn: &AddressPortNetwork) -> Result<PeerData> {
             })
         })?,
     )
+}
+
+pub fn get_block_hashes_with_missing_coinbase_ascii() -> Result<Vec<[u8; 32]>> {
+    let conn = CONNECTION.lock().unwrap();
+    let mut stmt = conn
+        .prepare_cached("SELECT block_hash FROM headers WHERE coinbase_ascii = NULL")
+        .unwrap();
+    Ok(stmt
+        .query_map((), |row| row.get::<usize, [u8; 32]>(0))?
+        .collect::<std::result::Result<Vec<[u8; 32]>, rusqlite::Error>>()?)
 }

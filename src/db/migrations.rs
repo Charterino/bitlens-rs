@@ -60,4 +60,7 @@ CREATE TABLE IF NOT EXISTS block_stats (
     r#"
 ALTER TABLE banned_peers ADD reasons_list TEXT;
     "#, // that TEXT is json
+    r#"
+ALTER TABLE headers ADD coinbase_ascii BLOB;
+    "#,
 ];

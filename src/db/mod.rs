@@ -1,3 +1,4 @@
+
 use crate::{
     db::rocksdb::{write_address_amends, write_txspends},
     packets::varint::{VarInt, length_varint, serialize_varint_into_slice},
@@ -24,10 +25,12 @@ pub async fn setup() {
 pub async fn write_analyzed_txs(
     blocks: &[[u8; 32]],
     txs: &[&[SerializedTx<'_>]],
+    coinbase_asciis: &[&[u8]],
     block_metrics: &[BlockMetrics],
     arena: &Arena,
 ) {
-    debug_assert_eq!(blocks.len(), txs.len());
+    assert_eq!(blocks.len(), txs.len());
+    assert_eq!(blocks.len(), coinbase_asciis.len());
 
     let serialized_txhashes = {
         let mut blocks_arena_array: ArenaArray<([u8; 32], &[u8])> = arena
@@ -185,5 +188,5 @@ pub async fn write_analyzed_txs(
     });
 
     // after we're done with txs, update fetched_full in sqlite
-    mark_blocks_as_downloaded(blocks, block_metrics);
+    mark_blocks_as_downloaded(blocks, coinbase_asciis, block_metrics);
 }

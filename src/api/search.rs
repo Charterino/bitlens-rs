@@ -27,7 +27,7 @@ pub async fn search(Query(params): Query<SearchParam>) -> Result<Json<SearchResp
         block_hash: None,
         tx_hash: None,
     };
-    // the user might be search for an:
+    // the user might be searching for an:
     // - address
     // - block hash
     // - block number
@@ -85,7 +85,7 @@ pub async fn search(Query(params): Query<SearchParam>) -> Result<Json<SearchResp
         }));
     }
 
-    if let Ok(_) = db::rocksdb::get_analyzed_tx(unhexxed).await {
+    if db::rocksdb::get_analyzed_tx(unhexxed).await.is_ok() {
         return Ok(Json(SearchResponse {
             address: None,
             block_hash: None,

@@ -33,10 +33,7 @@ pub async fn get_peer(Query(params): Query<PeerParams>) -> Result<Json<PeerRespo
     };
 
     let is_connected_now = crawler::peertracker::is_connected_now(&apn);
-    let data = db::sqlite::get_peer(&apn)
-        .await
-        .map(Some)
-        .unwrap_or_default();
+    let data = db::sqlite::get_peer(&apn).map(Some).unwrap_or_default();
 
     Ok(Json(PeerResponse {
         is_connected_now,

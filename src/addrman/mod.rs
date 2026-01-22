@@ -29,7 +29,7 @@ static ONLINE_PEERS: LazyLock<RwLock<OnlineList>> =
     LazyLock::new(|| RwLock::new(OnlineList::new(Duration::from_secs(60 * 3))));
 
 pub async fn start() {
-    let all_peers = get_all_peers().await;
+    let all_peers = get_all_peers();
 
     let mut known = KNOWN_PEERS.lock().unwrap();
     let mut to_check = PEERS_TO_CHECK.lock().unwrap();

@@ -34,6 +34,7 @@ use rand::Rng;
 use slog_scope::{debug, info};
 use std::{
     collections::{HashMap, VecDeque},
+    os::unix::ffi::OsStringExt,
     sync::{LazyLock, OnceLock},
     time::Duration,
 };
@@ -347,6 +348,11 @@ async fn apply_block(block: BlockOwned, frontpage_strat: FrontPageDataUpdateStra
         analyzed_txs.push(analyzed);
     }
 
+    let coinbase_ascii = block.txs[0].txins[0].sig_script.as_ref();
+    let coinbase_asciis = analyzed_arena
+        .try_alloc_array_copy(&[coinbase_ascii])
+        .expect("should always have enough space in analyzed_arena to allocate space for coinbase_asciis");
+
     // calculate block metrics
     let (lowest, highest, median, average) = if fee_rates.is_empty() {
         (0., 0., 0., 0.)
@@ -374,6 +380,7 @@ async fn apply_block(block: BlockOwned, frontpage_strat: FrontPageDataUpdateStra
     write_analyzed_txs(
         &[block.header.hash],
         &[&analyzed_txs],
+        coinbase_asciis,
         &bms,
         &analyzed_arena,
     )

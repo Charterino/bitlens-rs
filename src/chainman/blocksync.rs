@@ -491,6 +491,7 @@ struct ChainSyncState<'current, 'previous> {
     previous_txouts: HashMap<[u8; 32], Vec<&'previous TxOutBorrowed<'previous>>>,
     current_analyzed: Vec<AnalyzedBlock<'current>>,
     current_metrics: Vec<BlockMetrics>,
+    coinbase_asciis: Vec<&'current [u8]>,
 }
 
 async fn receive_and_process_blocks(mut recv: Receiver<(PayloadWithAllocator, u64)>) {
@@ -508,10 +509,13 @@ async fn receive_and_process_blocks(mut recv: Receiver<(PayloadWithAllocator, u6
         current_txouts: HashMap::with_capacity(*MAX_BLOCKS_PER_FLUSH * 4096), // values live in `current_arena`
         previous_txouts: HashMap::with_capacity(*MAX_BLOCKS_PER_FLUSH * 4096), // values live in `previous_arena`
         current_analyzed: Vec::with_capacity(*MAX_BLOCKS_PER_FLUSH), // values live in `current_arena`
-        current_metrics: Vec::with_capacity(*MAX_BLOCKS_PER_FLUSH),  // all heap
+        coinbase_asciis: Vec::with_capacity(*MAX_BLOCKS_PER_FLUSH), // values live in `current_arena`
+        current_metrics: Vec::with_capacity(*MAX_BLOCKS_PER_FLUSH), // all heap
     }));
 
     let previous_analyzed = Arc::new(Mutex::new(Some(Vec::with_capacity(*MAX_BLOCKS_PER_FLUSH)))); // values live in `previous_arena`
+    let previous_coinbase_asciis =
+        Arc::new(Mutex::new(Some(Vec::with_capacity(*MAX_BLOCKS_PER_FLUSH)))); // values live in `previous_arena`
     let previous_metrics = Arc::new(Mutex::new(Some(Vec::with_capacity(*MAX_BLOCKS_PER_FLUSH)))); // all heap
 
     let sync_speed_tracker = Arc::new(SyncSpeedTracker::new(SYNC_PROGRESS_AVERAGE_OF));
@@ -534,6 +538,7 @@ async fn receive_and_process_blocks(mut recv: Receiver<(PayloadWithAllocator, u6
                 current_txouts,
                 mut previous_txouts,
                 current_analyzed,
+                coinbase_asciis,
                 current_metrics,
             } = Arc::into_inner(current_state)
                 .expect("to have no other arcs for current_state")
@@ -548,18 +553,21 @@ async fn receive_and_process_blocks(mut recv: Receiver<(PayloadWithAllocator, u6
             previous_txouts.clear();
             let mut pm = previous_metrics.lock().unwrap().take().unwrap();
             let mut pa = previous_analyzed.lock().unwrap().take().unwrap();
-            info!("sizes"; "previous_txouts" => previous_txouts.len(), "current_txouts" => current_txouts.len(), "current_metrics" => current_metrics.len(), "previous_metrics" => pm.len(), "current_analyzed" => current_analyzed.len(), "previous_analyzed" => pa.len());
+            let mut pca = previous_coinbase_asciis.lock().unwrap().take().unwrap();
             pm.clear();
             pa.clear();
+            pca.clear();
             previous_arena.reset();
 
             let pm_clone = previous_metrics.clone();
             let pa_clone = previous_analyzed.clone();
+            let pca_clone = previous_coinbase_asciis.clone();
             let sync_speed_tracker_clone = sync_speed_tracker.clone();
             scope.spawn(async move {
                 write_analyzed_txs(
                     &next_batch,
                     &current_analyzed,
+                    &coinbase_asciis,
                     &current_metrics,
                     current_arena,
                 )
@@ -578,6 +586,7 @@ async fn receive_and_process_blocks(mut recv: Receiver<(PayloadWithAllocator, u6
                 .await;
                 *pm_clone.lock().unwrap() = Some(current_metrics);
                 *pa_clone.lock().unwrap() = Some(current_analyzed);
+                *pca_clone.lock().unwrap() = Some(coinbase_asciis);
             });
 
             // previous_* is stored as the new current_*
@@ -587,6 +596,7 @@ async fn receive_and_process_blocks(mut recv: Receiver<(PayloadWithAllocator, u6
                 current_txouts: previous_txouts,
                 previous_txouts: current_txouts,
                 current_analyzed: pa,
+                coinbase_asciis: pca,
                 current_metrics: pm,
             }));
             (previous_arena, current_arena) = (current_arena, previous_arena);
@@ -624,6 +634,7 @@ async fn get_next_batch_to_flush<'current>(
                     let index = w.current_analyzed.len();
                     w.current_analyzed.push(Default::default());
                     w.current_metrics.push(Default::default());
+                    w.coinbase_asciis.push(Default::default());
                     index
                 } else {
                     unreachable!()
@@ -739,6 +750,9 @@ async fn process_block<'arena>(
                 volume += analyzed.txouts_sum;
             }
             drop(r);
+            let cloned_coinbase_ascii = analyzed_arena
+                .try_alloc_array_copy(block.txs[0].txins[0].sig_script)
+                .expect("to have enough space to clone the coinbase sig script");
 
             let (lowest, highest, median, average) = if fee_rates.is_empty() {
                 (0., 0., 0., 0.)
@@ -765,6 +779,7 @@ async fn process_block<'arena>(
                 highest_fee_rate: highest,
                 median_fee_rate: median,
             };
+            w.coinbase_asciis[index_into_analyzed_and_metrics] = cloned_coinbase_ascii;
         })
         .await;
 }
