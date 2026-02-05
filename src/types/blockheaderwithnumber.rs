@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::packets::blockheader::BlockHeaderOwned;
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BlockHeaderWithNumber {
     #[serde(flatten)]
@@ -11,4 +11,5 @@ pub struct BlockHeaderWithNumber {
     pub number: u64,
     pub fetched_full: bool,
     pub total_work: U256,
+    pub coinbase_ascii: Option<String>,
 }

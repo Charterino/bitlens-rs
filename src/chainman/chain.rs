@@ -28,6 +28,7 @@ impl Default for Chain {
             number: 0,
             fetched_full: false,
             total_work: BlockHeaderRef::Owned(&GENESIS_HEADER).get_work(),
+            coinbase_ascii: None,
         };
         known_headers.insert(GENESIS_HEADER.hash, genesis.clone());
         number_to_hash.insert(0, GENESIS_HEADER.hash);

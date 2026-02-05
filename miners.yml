@@ -1,0 +1,5 @@
+binance:
+  display_name: Binance
+  icon: null
+  regexes:
+  - binance

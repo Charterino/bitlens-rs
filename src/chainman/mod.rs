@@ -5,6 +5,7 @@ use crate::{
     },
     db::{self, rocksdb::SerializedTx},
     metrics::{METRIC_FULL_BLOCKS_DOWNLOADED, METRIC_TOP_HEADER_HEIGHT},
+    miners,
     packets::{
         blockheader::{BlockHeaderBorrowed, BlockHeaderRef},
         getheaders::GetHeadersOwned,
@@ -26,7 +27,7 @@ use anyhow::{Result, bail};
 use blocksync::sync_blocks;
 use chain::Chain;
 use headersync::sync_headers;
-use slog_scope::{debug, info, warn};
+use slog_scope::{info, warn};
 use std::{
     cmp::min,
     collections::{HashMap, HashSet},
@@ -62,6 +63,7 @@ mod syncspeedtracker;
 
 pub async fn start() {
     load_headers_from_sqlite();
+    miners::callback_after_headers_loaded();
     keepup::start();
     tokio::spawn(async {
         // get blocks to download without unlocking CHAIN
@@ -170,6 +172,32 @@ pub fn get_hash_by_number(number: u64) -> Option<[u8; 32]> {
     r.number_to_hash.get(&number).cloned()
 }
 
+pub fn get_block_hashes_with_timestamps_and_coinbase_asciis() -> Vec<([u8; 32], u64, String)> {
+    let r = CHAIN.read().unwrap();
+    let mut result = vec![];
+
+    for block_number in 0..r.top_header.number + 1 {
+        let hash = r.number_to_hash[&block_number];
+        let header = &r.known_headers[&hash];
+        match &header.coinbase_ascii {
+            Some(v) => result.push((hash, header.header.timestamp as u64, v.clone())),
+            None => {
+                break;
+            }
+        }
+    }
+
+    result
+}
+
+pub fn get_block_timestamps(hashes: &[[u8; 32]]) -> Vec<u64> {
+    let r = CHAIN.read().unwrap();
+    hashes
+        .iter()
+        .map(|v| r.known_headers[v].header.timestamp as u64)
+        .collect()
+}
+
 pub fn filter_tx_spends(spends: Vec<(u32, [u8; 32], [u8; 32])>) -> Vec<(u32, [u8; 32])> {
     if spends.is_empty() {
         return vec![];
@@ -232,6 +260,8 @@ async fn generate_frontpage_data(top_block_hash: [u8; 32]) {
             .await
             .expect("to fetch block txs from rocksdb");
 
+        let (miner, recent_miner_share) =
+            miners::get_miner_for_block_and_share(current_header.header.hash).unwrap();
         latest_blocks.push(ShortBlock {
             number: current_header.number,
             hash: BlockHeaderRef::Owned(&current_header.header).human_hash(),
@@ -239,6 +269,8 @@ async fn generate_frontpage_data(top_block_hash: [u8; 32]) {
             reward_sats: block_tx_hashes[0].value_sats,
             btc_price: 0., // todo
             timestamp: current_header.header.timestamp,
+            miner,
+            recent_miner_share,
         });
 
         let missing_txs = min(
@@ -282,7 +314,6 @@ async fn generate_frontpage_data(top_block_hash: [u8; 32]) {
             sync_stats: None,
         };
         w.serialized = serde_json::to_string(&w.data).unwrap();
-        debug!("generated front page response"; "new_response" => w.serialized.clone());
         w.serialized.clone()
     };
     _ = FRONTPAGE_UPDATE_BROADCAST.send(update_for_broadcast);
@@ -313,6 +344,8 @@ async fn update_frontpage_data(
 
         let block_txs = &analyzed_cache[i - 1];
 
+        let (miner, recent_miner_share) =
+            miners::get_miner_for_block_and_share(current_header.header.hash).unwrap();
         latest_blocks.push(ShortBlock {
             number: current_header.number,
             hash: BlockHeaderRef::Owned(&current_header.header).human_hash(),
@@ -320,6 +353,8 @@ async fn update_frontpage_data(
             reward_sats: block_txs[0].txouts_sum,
             btc_price: 0., // TODO
             timestamp: current_header.header.timestamp,
+            miner,
+            recent_miner_share,
         });
 
         let missing_txs = min(FRONTPAGE_TXS_COUNT - latest_txs.len(), block_txs.len());
@@ -386,7 +421,6 @@ async fn update_frontpage_data(
         sync_stats,
     };
     w.serialized = serde_json::to_string(&w.data).unwrap();
-    debug!("generated front page response"; "new_response" => w.serialized.clone());
     let update = if metrics_cache.len() >= FRONTPAGE_BLOCKS_COUNT {
         FrontPageDataUpdate::Snapshot(w.data.clone())
     } else {
@@ -606,6 +640,7 @@ fn validate_and_apply_header_inner(
         number: parent.number + 1,
         fetched_full: false,
         total_work: new_total_work,
+        coinbase_ascii: None,
     };
     let parent_number = parent.number;
 
@@ -768,13 +803,15 @@ fn get_block_hashes_to_download(chain: &Chain) -> Option<(Vec<[u8; 32]>, u64)> {
     Some((all, last_added))
 }
 
-fn mark_as_downloaded(blocks: Vec<[u8; 32]>) {
+fn mark_as_downloaded(blocks: Vec<[u8; 32]>, coinbase_asciis: &[&[u8]]) {
     let mut w = CHAIN.write().unwrap();
-    for block in blocks {
-        w.known_headers
-            .get_mut(&block)
-            .expect("the header to be present in known_headers")
-            .fetched_full = true;
+    for (block, coinbase_ascii) in blocks.iter().zip(coinbase_asciis) {
+        let h = w
+            .known_headers
+            .get_mut(block)
+            .expect("the header to be present in known_headers");
+        h.fetched_full = true;
+        h.coinbase_ascii = Some(String::from_utf8_lossy(coinbase_ascii).to_string());
     }
     // Technically the top header is stored twice: in known_headers and as w.top_header.
     // Which means fetched_full might be different in these two structs. This is the only place where we change data inside of a header,

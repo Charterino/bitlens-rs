@@ -47,6 +47,7 @@ use tokio::{
 use crate::{
     chainman::blocksync::ANALYZED_OVERHEAD_PER_BLOCK,
     db::{self, write_analyzed_txs},
+    miners,
     packets::{
         block::BlockOwned,
         blockheader::{BlockHeaderBorrowed, BlockHeaderOwned, BlockHeaderRef},
@@ -385,12 +386,18 @@ async fn apply_block(block: BlockOwned, frontpage_strat: FrontPageDataUpdateStra
         &analyzed_arena,
     )
     .await;
-    mark_as_downloaded(vec![block.header.hash]);
+    mark_as_downloaded(vec![block.header.hash], coinbase_asciis);
     match frontpage_strat {
         FrontPageDataUpdateStrategy::RegenerateFromScratch => {
+            miners::callback_chain_reorg();
             generate_frontpage_data(block.header.hash).await;
         }
         FrontPageDataUpdateStrategy::Append => {
+            miners::callback_chain_extended(
+                &[block.header.hash],
+                &[block.header.timestamp as u64],
+                coinbase_asciis,
+            );
             update_frontpage_data(block.header.hash, &bms, &[&analyzed_txs], None).await;
         }
     }

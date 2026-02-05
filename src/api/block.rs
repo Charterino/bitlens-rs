@@ -2,6 +2,7 @@ use crate::{
     api::HashParam,
     chainman,
     db::{self, rocksdb::BlockTxEntry},
+    miners,
     types::blockheaderwithnumber::BlockHeaderWithNumber,
 };
 use axum::{Json, extract::Query, http::StatusCode};
@@ -13,6 +14,8 @@ pub struct BlockDataResponse {
     #[serde(flatten)]
     pub header: BlockHeaderWithNumber,
     pub txs: Vec<BlockTxEntry>,
+    pub miner: String,
+    pub recent_miner_share: f64,
 }
 
 pub async fn blockdata(
@@ -35,6 +38,13 @@ pub async fn blockdata(
     let txs = db::rocksdb::get_block_tx_entries(unhexxed)
         .await
         .unwrap_or_default();
+    let (miner, recent_miner_share) =
+        miners::get_miner_for_block_and_share(header.header.hash).unwrap_or_default();
 
-    Ok(Json(BlockDataResponse { header, txs }))
+    Ok(Json(BlockDataResponse {
+        header,
+        txs,
+        miner,
+        recent_miner_share,
+    }))
 }

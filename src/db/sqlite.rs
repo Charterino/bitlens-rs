@@ -17,6 +17,7 @@ use crate::{
     util::genesis::GENESIS_HEADER,
 };
 use anyhow::Result;
+use primitive_types::U256;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use slog_scope::warn;
@@ -84,6 +85,18 @@ pub(crate) async fn setup_sqlite() {
             }
         }
     }
+    ensure_genesis_header_exists_in_db().await;
+}
+
+async fn ensure_genesis_header_exists_in_db() {
+    insert_header(BlockHeaderWithNumber {
+        header: *GENESIS_HEADER,
+        number: 0,
+        fetched_full: false,
+        total_work: BlockHeaderRef::Owned(&GENESIS_HEADER).get_work(),
+        coinbase_ascii: None,
+    })
+    .await;
 }
 
 pub fn get_all_peers() -> Vec<AddressPortNetwork> {
@@ -172,12 +185,9 @@ pub async fn update_peer_from_version(
 pub fn get_all_headers() -> Vec<BlockHeaderWithNumber> {
     let conn = CONNECTION.lock().unwrap();
     let start = Instant::now();
-    let mut stmt = conn.prepare_cached("SELECT version, previous_block, merkle_root, timestamp, bits, nonce, block_number, block_hash, fetched_full FROM headers ORDER BY block_number ASC;").unwrap();
+    let mut stmt = conn.prepare_cached("SELECT version, previous_block, merkle_root, timestamp, bits, nonce, block_number, block_hash, fetched_full, coinbase_ascii FROM headers ORDER BY block_number ASC;").unwrap();
     let mut work_totals = HashMap::new();
-    work_totals.insert(
-        GENESIS_HEADER.hash,
-        BlockHeaderRef::Owned(&GENESIS_HEADER).get_work(),
-    );
+    work_totals.insert([0u8; 32], U256::zero());
     let iter = stmt
         .query_map([], |row| {
             let header = BlockHeaderOwned {
@@ -196,11 +206,17 @@ pub fn get_all_headers() -> Vec<BlockHeaderWithNumber> {
             };
             let our_work = *parent_work + BlockHeaderRef::Owned(&header).get_work();
             work_totals.insert(header.hash, our_work);
+
+            let coinbase_ascii = row
+                .get::<usize, Option<Vec<u8>>>(9)?
+                .map(|v| String::from_utf8_lossy(&v).to_string());
+
             Ok(BlockHeaderWithNumber {
                 header,
                 number: row.get(6)?,
                 fetched_full: row.get(8)?,
                 total_work: our_work,
+                coinbase_ascii,
             })
         })
         .unwrap();

@@ -29,6 +29,7 @@ pub mod crawler;
 pub mod db;
 pub mod log;
 pub mod metrics;
+pub mod miners;
 pub mod packets;
 pub mod tx;
 pub mod types;
@@ -75,7 +76,7 @@ async fn async_main() -> Result<()> {
 
     info!("starting bitlens..");
     metrics::start().await;
-
+    miners::start();
     db::setup().await;
     addrman::start().await;
     chainman::start().await;

@@ -49,6 +49,8 @@ pub struct ShortBlock {
     pub reward_sats: u64,
     pub btc_price: f64,
     pub timestamp: u32,
+    pub miner: String,
+    pub recent_miner_share: f64,
 }
 
 #[derive(Default, Clone, Debug, Serialize, Deserialize)]
