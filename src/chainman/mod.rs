@@ -62,6 +62,8 @@ pub mod keepup;
 mod syncspeedtracker;
 
 pub async fn start() {
+    ensure_coinbase_ascii_populated().await;
+
     load_headers_from_sqlite();
     miners::callback_after_headers_loaded();
     keepup::start();
@@ -103,7 +105,7 @@ pub async fn start() {
             stop_syncing_headers();
         }
 
-        // After we're done syncing the blocks, make sure sqlite has the coinbase_ascii for all blocks.
+        // After we're done syncing the blocks, again make sure sqlite has the coinbase_ascii for all blocks.
         ensure_coinbase_ascii_populated().await;
     });
 }
@@ -154,7 +156,15 @@ pub async fn ensure_coinbase_ascii_populated() {
 
     db::sqlite::update_coinbase_asciis(&result_hashes, &result_coinbase_asciis);
 
-    // TODO: also keep the coinbase ascii thing in the memory
+    let mut w = CHAIN.write().unwrap();
+    for (hash, ascii) in result_hashes.iter().zip(result_coinbase_asciis.iter()) {
+        if let Some(header) = w.known_headers.get_mut(hash) {
+            header.coinbase_ascii = Some(String::from_utf8_lossy(ascii.as_ref()).to_string());
+        }
+        if w.top_header.header.hash == *hash {
+            w.top_header.coinbase_ascii = Some(String::from_utf8_lossy(ascii.as_ref()).to_string());
+        }
+    }
 }
 
 pub fn get_top_header_hash() -> [u8; 32] {
