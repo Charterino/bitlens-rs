@@ -365,7 +365,9 @@ pub fn get_peer(apn: &AddressPortNetwork) -> Result<PeerData> {
 pub fn get_block_hashes_with_missing_coinbase_ascii() -> Result<Vec<[u8; 32]>> {
     let conn = CONNECTION.lock().unwrap();
     let mut stmt = conn
-        .prepare_cached("SELECT block_hash FROM headers WHERE coinbase_ascii IS NULL;")
+        .prepare_cached(
+            "SELECT block_hash FROM headers WHERE coinbase_ascii IS NULL AND fetched_full = TRUE;",
+        )
         .unwrap();
     Ok(stmt
         .query_map((), |row| row.get::<usize, [u8; 32]>(0))?
