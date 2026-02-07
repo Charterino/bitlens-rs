@@ -62,8 +62,6 @@ pub mod keepup;
 mod syncspeedtracker;
 
 pub async fn start() {
-    ensure_coinbase_ascii_populated().await;
-
     load_headers_from_sqlite();
     miners::callback_after_headers_loaded();
     keepup::start();
@@ -104,67 +102,7 @@ pub async fn start() {
         } else {
             stop_syncing_headers();
         }
-
-        // After we're done syncing the blocks, again make sure sqlite has the coinbase_ascii for all blocks.
-        ensure_coinbase_ascii_populated().await;
     });
-}
-
-pub async fn ensure_coinbase_ascii_populated() {
-    let hashes = match db::sqlite::get_block_hashes_with_missing_coinbase_ascii() {
-        Err(e) => {
-            warn!("failed to get block hashes with missing coinbase_ascii from sqlite"; "error" => e.to_string());
-            return;
-        }
-        Ok(v) => v,
-    };
-
-    if hashes.is_empty() {
-        return;
-    }
-
-    info!("populating coinbase_ascii for headers"; "count" => hashes.len());
-    let mut result_hashes = Vec::with_capacity(hashes.len());
-    let mut result_coinbase_asciis = Vec::with_capacity(hashes.len());
-
-    for hash in hashes {
-        let txs = match db::rocksdb::get_block_tx_entries(hash).await {
-            Err(e) => {
-                let mut human_hash = hash.to_vec();
-                human_hash.reverse();
-                let human_hash = hex::encode(human_hash);
-                warn!("failed to get tx hashes while populating coinbase_ascii"; "error" => e.to_string(), "block_hash" => human_hash);
-                continue;
-            }
-            Ok(v) => v,
-        };
-        let first_tx = match db::rocksdb::get_analyzed_tx(txs[0].hash).await {
-            Err(e) => {
-                let mut human_hash = txs[0].hash.to_vec();
-                human_hash.reverse();
-                let human_hash = hex::encode(human_hash);
-                warn!("failed to get analyzed tx data while populating coinbase_ascii"; "error" => e.to_string(), "tx_hash" => human_hash);
-                continue;
-            }
-            Ok(v) => v,
-        };
-        let coinbase_ascii = first_tx.tx.txins[0].sig_script.clone();
-
-        result_hashes.push(hash);
-        result_coinbase_asciis.push(coinbase_ascii);
-    }
-
-    db::sqlite::update_coinbase_asciis(&result_hashes, &result_coinbase_asciis);
-
-    let mut w = CHAIN.write().unwrap();
-    for (hash, ascii) in result_hashes.iter().zip(result_coinbase_asciis.iter()) {
-        if let Some(header) = w.known_headers.get_mut(hash) {
-            header.coinbase_ascii = Some(String::from_utf8_lossy(ascii.as_ref()).to_string());
-        }
-        if w.top_header.header.hash == *hash {
-            w.top_header.coinbase_ascii = Some(String::from_utf8_lossy(ascii.as_ref()).to_string());
-        }
-    }
 }
 
 pub fn get_top_header_hash() -> [u8; 32] {
