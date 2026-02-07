@@ -5,8 +5,10 @@ use crate::{
     tx::{AnalyzedTx, address::Address, get_human_address_from_script},
     types::blockheaderwithnumber::BlockHeaderWithNumber,
 };
+use anyhow::Context;
 use axum::{Json, extract::Query, http::StatusCode};
 use serde::{Deserialize, Serialize};
+use tokio::task::JoinHandle;
 
 #[derive(Serialize, Deserialize)]
 pub struct TxDataResponse {
@@ -75,22 +77,19 @@ pub async fn txdata(Query(params): Query<HashParam>) -> Result<Json<TxDataRespon
 }
 
 async fn get_txouts_for_txins(txins: &[TxInOwned]) -> anyhow::Result<Vec<TxOutOwned>> {
-    let mut handles = Vec::with_capacity(txins.len());
+    let mut handles: Vec<JoinHandle<anyhow::Result<TxOutOwned>>> = Vec::with_capacity(txins.len());
     for txin in txins {
         let hash = txin.prevout_hash;
         let index = txin.prevout_index;
         handles.push(tokio::spawn(async move {
-            let mut txouts = db::rocksdb::get_transaction_outputs(hash)
-                .await
-                .expect("to have found txouts in the db");
-
-            txouts.swap_remove(index as usize)
+            let mut txouts = db::rocksdb::get_transaction_outputs(hash).await?;
+            Ok(txouts.swap_remove(index as usize))
         }));
     }
 
     let mut results = Vec::with_capacity(handles.len());
     for handle in handles {
-        results.push(handle.await?);
+        results.push(handle.await??);
     }
 
     Ok(results)
