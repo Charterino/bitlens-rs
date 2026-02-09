@@ -35,7 +35,7 @@ use tokio::{
 };
 
 const BLOCK_TIMEOUT: Duration = Duration::from_millis(5000);
-const INITIAL_WORKER_COUNT: usize = 2;
+const INITIAL_WORKER_COUNT: usize = 10;
 
 const DEFAULT_MAX_WORKERS: usize = 100;
 pub static MAX_WORKERS: LazyLock<usize> =
