@@ -121,6 +121,8 @@ pub fn callback_chain_extended(hashes: &[[u8; 32]], timestamps: &[u64], coinbase
             *w.recent_blocks_mined_by_miners_counts
                 .get_mut(&miner_id)
                 .unwrap() -= 1;
+        } else {
+            break;
         }
     }
 
