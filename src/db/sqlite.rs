@@ -76,12 +76,14 @@ static UPDATE_PEER_FIRST_ONLINE: LazyLock<Sender<UpdatePeerFirstOnlineRequest>> 
 );
 
 pub(crate) async fn setup_sqlite() {
-    let conn = CONNECTION.lock().unwrap();
-    for m in MIGRATIONS {
-        match conn.execute(m, []) {
-            Ok(_) => {}
-            Err(e) => {
-                warn!("failed to execute migration"; "error" => e.to_string());
+    {
+        let conn = CONNECTION.lock().unwrap();
+        for m in MIGRATIONS {
+            match conn.execute(m, []) {
+                Ok(_) => {}
+                Err(e) => {
+                    warn!("failed to execute migration"; "error" => e.to_string());
+                }
             }
         }
     }

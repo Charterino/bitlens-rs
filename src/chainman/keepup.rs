@@ -34,7 +34,6 @@ use rand::Rng;
 use slog_scope::{debug, info};
 use std::{
     collections::{HashMap, VecDeque},
-    os::unix::ffi::OsStringExt,
     sync::{LazyLock, OnceLock},
     time::Duration,
 };
@@ -212,7 +211,7 @@ async fn handle_new_header(
             // Fork
             let first_number = new_top_number - blocks_to_apply.len() as u64 - 1;
             for i in 0..blocks_to_apply.len() {
-                let (hash, number) = blocks_to_apply[i];
+                let (hash, _) = blocks_to_apply[i];
                 // Regenerate from scratch for the first block
                 if i == 0 {
                     queue.push_back((

@@ -46,7 +46,7 @@ impl Connection {
         packet.serialize(buf);
         let mut hash = Sha256::digest(&buf);
         hash = Sha256::digest(hash);
-        let shorthash = &hash.as_slice()[..4];
+        let shorthash = &hash[..4];
 
         self.write_stream.write_u32_le(ACTIVE_MAGIC).await?;
         self.write_stream.write_all(packet.command()).await?;

@@ -53,7 +53,7 @@ pub fn deserialize_payload(
     let allocator = allocator_with_buffer.borrow_allocator();
     let mut hash = Sha256::digest(buffer);
     hash = Sha256::digest(hash);
-    let shorthash = hash.as_slice()[..4].try_into().unwrap();
+    let shorthash = hash[..4].try_into().unwrap();
     let shorthash = u32::from_le_bytes(shorthash);
 
     if shorthash != checksum {
