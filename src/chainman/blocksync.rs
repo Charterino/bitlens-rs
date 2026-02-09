@@ -691,7 +691,14 @@ async fn process_block<'arena>(
     payload
         .with_block_async(async |block| {
             // First we load all dependencies we dont have from disk:
-            let deps_from_disk = fetch_missing_dependencies(block, current_state.clone()).await;
+            let deps_from_disk =
+                match fetch_missing_dependencies(block, current_state.clone()).await {
+                    Ok(v) => v,
+                    Err(_) => {
+                        // cancelled
+                        return;
+                    }
+                };
             let mut deps_from_disk_index = 0;
 
             let r = current_state.read().unwrap();
@@ -791,7 +798,7 @@ async fn process_block<'arena>(
 async fn fetch_missing_dependencies(
     block: &BlockBorrowed<'_>,
     current_state: Arc<RwLock<ChainSyncState<'_, '_>>>,
-) -> Vec<TxOutOwned> {
+) -> Result<Vec<TxOutOwned>> {
     let loaded_deps = Arc::new(Mutex::new(Vec::new()));
     let mut loaded_deps_handles = Vec::new();
     {
@@ -828,7 +835,7 @@ async fn fetch_missing_dependencies(
     }
     // Wait for all tasks to finish
     for h in loaded_deps_handles {
-        h.await.expect("the task to finish successfully");
+        h.await?;
     }
     // Now we know loaded_deps is populated
     let loaded_deps = Arc::try_unwrap(loaded_deps)
@@ -837,10 +844,10 @@ async fn fetch_missing_dependencies(
         .expect("to take ownership of loaded_deps");
 
     // convert Vec<Option<T>> into Vec<T>, unwrapping all options
-    loaded_deps
+    Ok(loaded_deps
         .into_iter()
         .map(|option| option.expect("for the option to be Some"))
-        .collect()
+        .collect())
 }
 
 async fn fetch_dependency_and_insert(

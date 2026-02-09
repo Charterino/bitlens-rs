@@ -156,7 +156,7 @@ async fn chain_watcher(
                 if queue.is_empty() {
                     continue
                 }
-                job_tx.send(queue[0].1).await.expect("to send job to worker manager");
+                let _ = job_tx.send(queue[0].1).await;
             }
             new_header = new_header_rx.recv() => {
                 let new_header = match new_header {
