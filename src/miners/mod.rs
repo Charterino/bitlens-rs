@@ -4,9 +4,11 @@ use crate::miners::config::Miner;
 use crate::miners::config::compile_regexes;
 use crate::miners::config::ensure_miners_file_exists;
 use crate::miners::config::reload_miners_config;
+use notify::Config;
 use notify::Event;
 use notify::Result;
 use notify::Watcher;
+use notify::event::MetadataKind;
 use regex::bytes::Regex;
 use slog_scope::info;
 use slog_scope::warn;
@@ -59,7 +61,7 @@ fn start_miner_watcher() {
 
     let (tx, rx) = mpsc::channel::<Result<Event>>();
 
-    let mut watcher = match notify::recommended_watcher(tx) {
+    let mut watcher = match notify::PollWatcher::new(tx, Config::default()) {
         Err(e) => {
             warn!("failed to create a file watcher"; "error" => e.to_string());
             return;
@@ -73,7 +75,10 @@ fn start_miner_watcher() {
     reload_miners_config();
 
     while let Ok(Ok(update)) = rx.recv() {
-        if let notify::EventKind::Modify(notify::event::ModifyKind::Data(_)) = update.kind {
+        if let notify::EventKind::Modify(notify::event::ModifyKind::Metadata(
+            MetadataKind::WriteTime,
+        )) = update.kind
+        {
             reload_miners_config();
         }
     }
