@@ -300,7 +300,13 @@ async fn apply_block(block: BlockOwned, frontpage_strat: FrontPageDataUpdateStra
 
     let mut owned_deps = Vec::with_capacity(deps_handles.len());
     for handle in deps_handles {
-        owned_deps.push(handle.await.unwrap());
+        match handle.await {
+            Ok(v) => owned_deps.push(v),
+            Err(_) => {
+                // cancelled
+                return;
+            }
+        }
     }
 
     let mut deps = Vec::with_capacity(pending_deps.len());

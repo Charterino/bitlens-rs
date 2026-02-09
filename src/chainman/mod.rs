@@ -27,7 +27,7 @@ use anyhow::{Result, bail};
 use blocksync::sync_blocks;
 use chain::Chain;
 use headersync::sync_headers;
-use slog_scope::{info, warn};
+use slog_scope::info;
 use std::{
     cmp::min,
     collections::{HashMap, HashSet},
@@ -188,7 +188,13 @@ pub fn filter_and_populate_address_txs(
 
 // generates the frontpage data from nothing but the top block hash, pulling all data from the store
 async fn generate_frontpage_data(top_block_hash: [u8; 32]) {
-    let stats = calculate_stats(top_block_hash, None).await;
+    let stats = match calculate_stats(top_block_hash, None).await {
+        Ok(v) => v,
+        Err(_) => {
+            // Right now calculate_stats only returns Err if it was cancelled, so we can safely return here
+            return;
+        }
+    };
     let mut latest_blocks = Vec::with_capacity(FRONTPAGE_BLOCKS_COUNT);
     let mut latest_txs = Vec::with_capacity(FRONTPAGE_TXS_COUNT);
 
@@ -274,7 +280,13 @@ async fn update_frontpage_data(
     analyzed_cache: &[&[SerializedTx<'_>]],
     sync_speed_blocks_per_second: Option<f64>,
 ) {
-    let stats = calculate_stats(top_block_hash, Some(metrics_cache)).await;
+    let stats = match calculate_stats(top_block_hash, Some(metrics_cache)).await {
+        Ok(v) => v,
+        Err(_) => {
+            // Right now calculate_stats only returns Err if it was cancelled, so we can safely return here
+            return;
+        }
+    };
     let mut latest_blocks = Vec::with_capacity(FRONTPAGE_BLOCKS_COUNT);
     let mut latest_txs = Vec::with_capacity(FRONTPAGE_TXS_COUNT);
 
@@ -378,7 +390,7 @@ async fn update_frontpage_data(
     _ = FRONTPAGE_UPDATE_BROADCAST.send(serde_json::to_string(&update).unwrap());
 }
 
-async fn calculate_stats(top: [u8; 32], cache: Option<&[BlockMetrics]>) -> Stats {
+async fn calculate_stats(top: [u8; 32], cache: Option<&[BlockMetrics]>) -> Result<Stats> {
     let (relevant_blocks, timestamps, now) = {
         let r = CHAIN.read().unwrap();
         let top_header = &r.known_headers[&top];
@@ -426,7 +438,7 @@ async fn calculate_stats(top: [u8; 32], cache: Option<&[BlockMetrics]>) -> Stats
 
     let mut results = Vec::with_capacity(handles.len());
     for handle in handles {
-        results.push(handle.await.unwrap());
+        results.push(handle.await?);
     }
 
     bms.append(&mut results);
@@ -461,7 +473,7 @@ async fn calculate_stats(top: [u8; 32], cache: Option<&[BlockMetrics]>) -> Stats
         }
     }
 
-    result
+    Ok(result)
 }
 
 fn load_headers_from_sqlite() {

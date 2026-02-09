@@ -31,7 +31,9 @@ pub async fn start() {
                 .allow_methods([Method::GET]),
         );
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:8122").await.unwrap();
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:8122")
+        .await
+        .expect("to start http server");
     tokio::spawn(async { axum::serve(listener, app).await });
 }
 

@@ -41,7 +41,7 @@ impl Drop for Connection {
 
 impl Connection {
     pub async fn write_packet(&mut self, packet: &PayloadToSend) -> Result<()> {
-        let mut serialize_buffer = SERIALIZE_POOL.get().await.unwrap();
+        let mut serialize_buffer = SERIALIZE_POOL.get().await?;
         let buf = serialize_buffer.deref_mut();
         packet.serialize(buf);
         let mut hash = Sha256::digest(&buf);

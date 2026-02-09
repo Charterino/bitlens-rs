@@ -105,8 +105,11 @@ async fn resolve_dns_and_add_to_addrman(peers: &[&'static str]) {
     for i in 0..handles.len() {
         let handle = handles.pop().unwrap();
         let addy = peers[peers.len() - i - 1];
-        match handle.await.unwrap() {
-            Ok(addys) => resolved_peers.extend_from_slice(&addys),
+        match handle.await {
+            Ok(Ok(addys)) => resolved_peers.extend_from_slice(&addys),
+            Ok(Err(e)) => {
+                debug!("failed to resolve dns"; "address" => addy, "err" => e.to_string())
+            }
             Err(e) => debug!("failed to resolve dns"; "address" => addy, "err" => e.to_string()),
         }
     }

@@ -5,7 +5,6 @@ use crate::{
     tx::{AnalyzedTx, address::Address, get_human_address_from_script},
     types::blockheaderwithnumber::BlockHeaderWithNumber,
 };
-use anyhow::Context;
 use axum::{Json, extract::Query, http::StatusCode};
 use serde::{Deserialize, Serialize};
 use tokio::task::JoinHandle;

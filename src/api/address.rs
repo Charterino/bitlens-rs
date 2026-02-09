@@ -5,6 +5,7 @@ use crate::{
     tx::{AnalyzedTx, address::Address, get_human_address_from_script},
     types::addresstransaction::AddressTransaction,
 };
+use anyhow::anyhow;
 use axum::{Json, extract::Query, http::StatusCode};
 use bech32::{Fe32, hrp};
 use serde::{Deserialize, Serialize};
@@ -130,7 +131,7 @@ async fn populate_other_address_fields(
 
     let mut full_txs_results = Vec::with_capacity(full_txs_tasks.len());
     for task in full_txs_tasks {
-        full_txs_results.push(task.await.unwrap());
+        full_txs_results.push(task.await.unwrap_or(Err(anyhow!("cancelled"))));
     }
     let full_txs = match full_txs_results
         .into_iter()
@@ -168,13 +169,17 @@ async fn populate_other_address_fields(
     }
     let mut gain_txouts = Vec::with_capacity(gain_txouts_tasks.len());
     for task in gain_txouts_tasks {
-        match task.await.unwrap() {
-            Ok(v) => {
+        match task.await {
+            Ok(Ok(v)) => {
                 gain_txouts.push(v);
             }
-            Err(e) => {
+            Ok(Err(e)) => {
                 // TODO: better logging here ig
                 warn!("failed to fetch txouts for address_data_top"; "error" => e.to_string(), "for_address" => human_address.to_string());
+                return Err(StatusCode::INTERNAL_SERVER_ERROR);
+            }
+            Err(_) => {
+                // cancelled
                 return Err(StatusCode::INTERNAL_SERVER_ERROR);
             }
         }
@@ -196,13 +201,17 @@ async fn populate_other_address_fields(
     }
     let mut lose_txouts = Vec::with_capacity(lose_txouts_tasks.len());
     for task in lose_txouts_tasks {
-        match task.await.unwrap() {
-            Ok(v) => {
+        match task.await {
+            Ok(Ok(v)) => {
                 lose_txouts.push(v);
             }
-            Err(e) => {
+            Ok(Err(e)) => {
                 // TODO: better logging here ig
                 warn!("failed to fetch txouts for address_data_top"; "error" => e.to_string(), "for_address" => human_address.to_string());
+                return Err(StatusCode::INTERNAL_SERVER_ERROR);
+            }
+            Err(_) => {
+                // cancelled
                 return Err(StatusCode::INTERNAL_SERVER_ERROR);
             }
         }
