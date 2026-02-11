@@ -84,17 +84,18 @@ fn start_miner_watcher() {
     }
 }
 
-pub fn get_miner_for_block_and_share(block: [u8; 32]) -> Option<(String, f64)> {
+pub fn get_miner_for_block_and_share(block: [u8; 32]) -> Option<(String, String, f64)> {
     let r = MINER_DATA.read().unwrap();
-    if let Some(miner) = r.block_miners.get(&block) {
-        let mined_recently = r.recent_blocks_mined_by_miners_counts[miner];
+    if let Some(miner_id) = r.block_miners.get(&block) {
+        let mined_recently = r.recent_blocks_mined_by_miners_counts[miner_id];
         let recent_blocks = r.recent_blocks.len();
         let share = if recent_blocks != 0 {
             mined_recently as f64 / recent_blocks as f64
         } else {
             0.
         };
-        return Some((miner.clone(), share));
+        let miner_name = r.rules[miner_id].display_name.clone();
+        return Some((miner_id.clone(), miner_name, share));
     }
 
     None

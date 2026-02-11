@@ -9,6 +9,7 @@ use tower_http::cors::CorsLayer;
 mod address;
 mod block;
 mod frontpage;
+mod miner;
 mod peer;
 mod search;
 mod tx;

@@ -14,7 +14,8 @@ pub struct BlockDataResponse {
     #[serde(flatten)]
     pub header: BlockHeaderWithNumber,
     pub txs: Vec<BlockTxEntry>,
-    pub miner: String,
+    pub miner_id: String,
+    pub miner_name: String,
     pub recent_miner_share: f64,
 }
 
@@ -38,13 +39,14 @@ pub async fn blockdata(
     let txs = db::rocksdb::get_block_tx_entries(unhexxed)
         .await
         .unwrap_or_default();
-    let (miner, recent_miner_share) =
+    let (miner_id, miner_name, recent_miner_share) =
         miners::get_miner_for_block_and_share(header.header.hash).unwrap_or_default();
 
     Ok(Json(BlockDataResponse {
         header,
         txs,
-        miner,
+        miner_id,
+        miner_name,
         recent_miner_share,
     }))
 }

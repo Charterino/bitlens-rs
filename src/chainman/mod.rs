@@ -214,7 +214,7 @@ async fn generate_frontpage_data(top_block_hash: [u8; 32]) {
             .await
             .expect("to fetch block txs from rocksdb");
 
-        let (miner, recent_miner_share) =
+        let (miner_id, miner_name, recent_miner_share) =
             miners::get_miner_for_block_and_share(current_header.header.hash).unwrap();
         latest_blocks.push(ShortBlock {
             number: current_header.number,
@@ -223,7 +223,8 @@ async fn generate_frontpage_data(top_block_hash: [u8; 32]) {
             reward_sats: block_tx_hashes[0].value_sats,
             btc_price: 0., // todo
             timestamp: current_header.header.timestamp,
-            miner,
+            miner_id,
+            miner_name,
             recent_miner_share,
         });
 
@@ -304,7 +305,7 @@ async fn update_frontpage_data(
 
         let block_txs = &analyzed_cache[i - 1];
 
-        let (miner, recent_miner_share) =
+        let (miner_id, miner_name, recent_miner_share) =
             miners::get_miner_for_block_and_share(current_header.header.hash).unwrap();
         latest_blocks.push(ShortBlock {
             number: current_header.number,
@@ -313,7 +314,8 @@ async fn update_frontpage_data(
             reward_sats: block_txs[0].txouts_sum,
             btc_price: 0., // TODO
             timestamp: current_header.header.timestamp,
-            miner,
+            miner_id,
+            miner_name,
             recent_miner_share,
         });
 

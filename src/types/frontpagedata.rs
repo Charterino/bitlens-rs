@@ -49,7 +49,8 @@ pub struct ShortBlock {
     pub reward_sats: u64,
     pub btc_price: f64,
     pub timestamp: u32,
-    pub miner: String,
+    pub miner_id: String,
+    pub miner_name: String,
     pub recent_miner_share: f64,
 }
 
