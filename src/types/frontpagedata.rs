@@ -1,6 +1,5 @@
-use serde::{Deserialize, Serialize};
-
 use super::stats::Stats;
+use serde::{Deserialize, Serialize};
 
 pub struct FrontPageDataWithSerialized {
     pub data: FrontPageData,
@@ -44,7 +43,8 @@ pub struct SyncStats {
 #[serde(rename_all = "camelCase")]
 pub struct ShortBlock {
     pub number: u64,
-    pub hash: String,
+    #[serde(serialize_with = "crate::util::serialize_as_hex::serialize_hash_as_hex_reversed")]
+    pub hash: [u8; 32],
     pub tx_count: u64,
     pub reward_sats: u64,
     pub btc_price: f64,
@@ -62,7 +62,8 @@ pub struct ShortTx {
     pub size_wus: u32,
     pub timestamp: u32,
     pub block_number: u64,
-    pub block_hash: String,
+    #[serde(serialize_with = "crate::util::serialize_as_hex::serialize_hash_as_hex_reversed")]
+    pub block_hash: [u8; 32],
     pub fee_sats: u64,
     pub btc_price: f64,
 }

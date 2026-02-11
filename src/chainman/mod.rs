@@ -218,7 +218,7 @@ async fn generate_frontpage_data(top_block_hash: [u8; 32]) {
             miners::get_miner_for_block_and_share(current_header.header.hash).unwrap();
         latest_blocks.push(ShortBlock {
             number: current_header.number,
-            hash: BlockHeaderRef::Owned(&current_header.header).human_hash(),
+            hash: current_header.header.hash,
             tx_count: block_tx_hashes.len() as u64,
             reward_sats: block_tx_hashes[0].value_sats,
             btc_price: 0., // todo
@@ -244,7 +244,7 @@ async fn generate_frontpage_data(top_block_hash: [u8; 32]) {
                 value: tx.txouts_sum,
                 size_wus: tx.size_wus,
                 block_number: current_header.number,
-                block_hash: BlockHeaderRef::Owned(&current_header.header).human_hash(),
+                block_hash: current_header.header.hash,
                 fee_sats: tx.fee,
                 btc_price: 0., // TODO
                 timestamp: current_header.header.timestamp,
@@ -309,7 +309,7 @@ async fn update_frontpage_data(
             miners::get_miner_for_block_and_share(current_header.header.hash).unwrap();
         latest_blocks.push(ShortBlock {
             number: current_header.number,
-            hash: BlockHeaderRef::Owned(&current_header.header).human_hash(),
+            hash: current_header.header.hash,
             tx_count: block_txs.len() as u64,
             reward_sats: block_txs[0].txouts_sum,
             btc_price: 0., // TODO
@@ -330,7 +330,7 @@ async fn update_frontpage_data(
                 value: tx.txouts_sum,
                 size_wus: tx.size_wus,
                 block_number: current_header.number,
-                block_hash: BlockHeaderRef::Owned(&current_header.header).human_hash(),
+                block_hash: current_header.header.hash,
                 fee_sats: tx.fee,
                 btc_price: 0., // TODO
                 timestamp: current_header.header.timestamp,
