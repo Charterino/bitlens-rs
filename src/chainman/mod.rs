@@ -149,10 +149,7 @@ pub fn get_block_timestamps_and_numbers(hashes: &[[u8; 32]]) -> (Vec<u64>, Vec<u
         .iter()
         .map(|v| r.known_headers[v].header.timestamp as u64)
         .collect();
-    let numbers = hashes
-        .iter()
-        .map(|v| r.known_headers[v].number)
-        .collect();
+    let numbers = hashes.iter().map(|v| r.known_headers[v].number).collect();
     (timestamps, numbers)
 }
 

@@ -22,7 +22,7 @@ use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use slog_scope::warn;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{LazyLock, Mutex},
     time::SystemTime,
 };
@@ -190,6 +190,8 @@ pub fn get_all_headers() -> Vec<BlockHeaderWithNumber> {
     let mut stmt = conn.prepare_cached("SELECT version, previous_block, merkle_root, timestamp, bits, nonce, block_number, block_hash, fetched_full, coinbase_ascii FROM headers ORDER BY block_number ASC;").unwrap();
     let mut work_totals = HashMap::new();
     work_totals.insert([0u8; 32], U256::zero());
+    let mut parents_fetched = HashSet::new();
+    parents_fetched.insert([0u8; 32]);
     let iter = stmt
         .query_map([], |row| {
             let header = BlockHeaderOwned {
@@ -209,14 +211,24 @@ pub fn get_all_headers() -> Vec<BlockHeaderWithNumber> {
             let our_work = *parent_work + BlockHeaderRef::Owned(&header).get_work();
             work_totals.insert(header.hash, our_work);
 
-            let coinbase_ascii = row
-                .get::<usize, Option<Vec<u8>>>(9)?
-                .map(|v| String::from_utf8_lossy(&v).to_string());
+            let is_parent_fetched = parents_fetched.contains(header.parent.as_slice());
+            let fetched_full_field: bool = row.get(8)?;
+            let actually_fetched = is_parent_fetched && fetched_full_field;
+            if actually_fetched {
+                parents_fetched.insert(header.hash);
+            }
+
+            let coinbase_ascii = if actually_fetched {
+                row.get::<usize, Option<Vec<u8>>>(9)?
+                    .map(|v| String::from_utf8_lossy(&v).to_string())
+            } else {
+                None
+            };
 
             Ok(BlockHeaderWithNumber {
                 header,
                 number: row.get(6)?,
-                fetched_full: row.get(8)?,
+                fetched_full: actually_fetched,
                 total_work: our_work,
                 coinbase_ascii,
             })
