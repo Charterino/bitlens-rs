@@ -26,6 +26,7 @@ pub async fn start() {
         .route("/api/getpeer", get(peer::get_peer))
         .route("/api/search", get(search::search))
         .route("/api/socket/frontpage", any(frontpage::frontpagesocket))
+        .route("/api/miner/page", get(miner::get_miners_page))
         .layer(
             CorsLayer::new()
                 .allow_origin("*".parse::<HeaderValue>().unwrap())

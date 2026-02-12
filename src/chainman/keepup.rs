@@ -257,14 +257,14 @@ async fn handle_new_block(
             }
         }
         queue.pop_front();
-        apply_block((*block).into(), strat).await;
+        apply_block((*block).into(), number, strat).await;
         info!("block applied"; "hash" => hh, "number" => number);
     } else {
         panic!("keepup got a payload that is not a block")
     }
 }
 
-async fn apply_block(block: BlockOwned, frontpage_strat: FrontPageDataUpdateStrategy) {
+async fn apply_block(block: BlockOwned, number: u64, frontpage_strat: FrontPageDataUpdateStrategy) {
     info!("applying block"; "hash" => BlockHeaderRef::Owned(&block.header).human_hash());
     // first fetch all dependencies
     let mut self_txs = HashMap::with_capacity(block.txs.len());
@@ -400,6 +400,7 @@ async fn apply_block(block: BlockOwned, frontpage_strat: FrontPageDataUpdateStra
         FrontPageDataUpdateStrategy::Append => {
             miners::callback_chain_extended(
                 &[block.header.hash],
+                &[number],
                 &[block.header.timestamp as u64],
                 coinbase_asciis,
             );

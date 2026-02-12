@@ -3,19 +3,19 @@ use std::{
     fs::File,
     io::{Read, Write},
     path::Path,
-    sync::LazyLock,
+    sync::{Arc, LazyLock},
 };
 
 use regex::bytes::Regex;
 use serde::{Deserialize, Serialize};
 use slog_scope::{info, warn};
 
-use crate::miners::callback_config_updated;
+use crate::miners::{MinerId, callback_config_updated};
 
-pub static DEFAULT_MINERS_CONFIG: LazyLock<HashMap<String, Miner>> = LazyLock::new(|| {
+pub static DEFAULT_MINERS_CONFIG: LazyLock<HashMap<MinerId, Miner>> = LazyLock::new(|| {
     let mut h = HashMap::new();
     h.insert(
-        "binance".to_string(),
+        Arc::new("binance".to_owned()),
         Miner {
             display_name: "Binance".to_string(),
             icon: None,
@@ -62,7 +62,7 @@ pub fn reload_miners_config() {
         return;
     }
 
-    let parsed = match serde_yaml::from_slice::<HashMap<String, Miner>>(&data) {
+    let parsed = match serde_yaml::from_slice::<HashMap<MinerId, Miner>>(&data) {
         Err(e) => {
             warn!("failed to parse miners.yml"; "error" => e.to_string());
             return;
@@ -82,8 +82,8 @@ pub fn reload_miners_config() {
 }
 
 pub fn compile_regexes(
-    rules: &HashMap<String, Miner>,
-) -> anyhow::Result<HashMap<String, Vec<Regex>>> {
+    rules: &HashMap<MinerId, Miner>,
+) -> anyhow::Result<HashMap<MinerId, Vec<Regex>>> {
     let mut result = HashMap::with_capacity(rules.len());
     for (id, miner) in rules {
         let mut compiled_regrets = Vec::with_capacity(miner.regexes.len());

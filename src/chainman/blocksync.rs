@@ -1,7 +1,7 @@
 use super::{SYNCING_BODIES, mark_as_downloaded, update_frontpage_data};
 use crate::{
     addrman,
-    chainman::{get_block_timestamps, syncspeedtracker::SyncSpeedTracker},
+    chainman::{get_block_timestamps_and_numbers, syncspeedtracker::SyncSpeedTracker},
     db::{self, rocksdb::SerializedTx, write_analyzed_txs},
     miners, ok_or_break, ok_or_continue, ok_or_return,
     packets::{
@@ -576,9 +576,14 @@ async fn receive_and_process_blocks(mut recv: Receiver<(PayloadWithAllocator, u6
                 // update fetched_full in chainman's live state
                 let top = next_batch[next_batch.len() - 1];
 
-                let timestamps = get_block_timestamps(&next_batch);
+                let (timestamps, numbers) = get_block_timestamps_and_numbers(&next_batch);
 
-                miners::callback_chain_extended(&next_batch, &timestamps, &coinbase_asciis);
+                miners::callback_chain_extended(
+                    &next_batch,
+                    &numbers,
+                    &timestamps,
+                    &coinbase_asciis,
+                );
                 mark_as_downloaded(next_batch, &coinbase_asciis);
                 sync_speed_tracker_clone.tick(current_analyzed.len());
                 update_frontpage_data(

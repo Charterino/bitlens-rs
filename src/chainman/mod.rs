@@ -120,7 +120,7 @@ pub fn get_hash_by_number(number: u64) -> Option<[u8; 32]> {
     r.number_to_hash.get(&number).cloned()
 }
 
-pub fn get_block_hashes_with_timestamps_and_coinbase_asciis() -> Vec<([u8; 32], u64, String)> {
+pub fn get_blocks_with_timestamps_and_coinbase_asciis() -> Vec<([u8; 32], u64, u64, String)> {
     let r = CHAIN.read().unwrap();
     let mut result = vec![];
 
@@ -128,7 +128,12 @@ pub fn get_block_hashes_with_timestamps_and_coinbase_asciis() -> Vec<([u8; 32], 
         let hash = r.number_to_hash[&block_number];
         let header = &r.known_headers[&hash];
         match &header.coinbase_ascii {
-            Some(v) => result.push((hash, header.header.timestamp as u64, v.clone())),
+            Some(v) => result.push((
+                hash,
+                header.number,
+                header.header.timestamp as u64,
+                v.clone(),
+            )),
             None => {
                 break;
             }
@@ -138,12 +143,17 @@ pub fn get_block_hashes_with_timestamps_and_coinbase_asciis() -> Vec<([u8; 32], 
     result
 }
 
-pub fn get_block_timestamps(hashes: &[[u8; 32]]) -> Vec<u64> {
+pub fn get_block_timestamps_and_numbers(hashes: &[[u8; 32]]) -> (Vec<u64>, Vec<u64>) {
     let r = CHAIN.read().unwrap();
-    hashes
+    let timestamps = hashes
         .iter()
         .map(|v| r.known_headers[v].header.timestamp as u64)
-        .collect()
+        .collect();
+    let numbers = hashes
+        .iter()
+        .map(|v| r.known_headers[v].number)
+        .collect();
+    (timestamps, numbers)
 }
 
 pub fn filter_tx_spends(spends: Vec<(u32, [u8; 32], [u8; 32])>) -> Vec<(u32, [u8; 32])> {
