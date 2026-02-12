@@ -8,11 +8,11 @@ use crate::{
 use anyhow::anyhow;
 use axum::{Json, extract::Query, http::StatusCode};
 use bech32::{Fe32, hrp};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use slog_scope::warn;
 use tokio::task::JoinHandle;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AddressTopResponse {
     pub total_txs: usize,
@@ -30,7 +30,7 @@ pub async fn address_data_top(
         Some(b) => b,
     };
 
-    let limit = 50;
+    let limit = params.limit.unwrap_or(50);
 
     let top_data = match db::rocksdb::get_top_address_data(address_bytes.clone(), limit).await {
         Ok(v) => v,

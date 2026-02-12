@@ -10,7 +10,6 @@ use notify::Result;
 use notify::Watcher;
 use notify::event::MetadataKind;
 use regex::bytes::Regex;
-use serde::Deserialize;
 use serde::Serialize;
 use slog_scope::info;
 use slog_scope::warn;
@@ -30,14 +29,14 @@ mod config;
 const MINER_PERCENTAGE_OVER_LAST_SECONDS: u64 = 3600 * 24 * 14; // 2 weeks
 static UNKNOWN_ID: LazyLock<MinerId> = LazyLock::new(|| Arc::new("unknown".to_owned()));
 
-#[derive(Default, Clone, Debug, Serialize, Deserialize)]
+#[derive(Default, Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MinersPageData {
     pub recent_blocks: VecDeque<RecentBlock>,
     pub recent_shares: Vec<(MinerId, String, f64)>, // miner_id, miner_name, share
 }
 
-#[derive(Default, Clone, Debug, Serialize, Deserialize)]
+#[derive(Default, Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RecentBlock {
     #[serde(serialize_with = "crate::util::serialize_as_hex::serialize_hash_as_hex_reversed")]

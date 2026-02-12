@@ -19,7 +19,7 @@ pub struct PeerParams {
     pub port: u16,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize)]
 pub struct PeerResponse {
     is_connected_now: bool,
     #[serde(flatten)]

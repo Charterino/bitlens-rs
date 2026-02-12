@@ -7,7 +7,7 @@ use super::{
 use crate::util::{arena::Arena, compact::u256_from_compact};
 use anyhow::bail;
 use primitive_types::U256;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 #[derive(Clone, Debug, Copy)]
@@ -60,7 +60,7 @@ impl<'a> DeserializableBorrowed<'a> for BlockHeaderBorrowed<'a> {
     }
 }
 
-#[derive(Clone, Debug, Copy, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Copy, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BlockHeaderOwned {
     pub version: u32,

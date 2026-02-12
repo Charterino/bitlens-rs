@@ -11,7 +11,7 @@ use super::{
 };
 use anyhow::{Result, anyhow, bail};
 use either::Either;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -110,7 +110,7 @@ impl<'a> DeserializableBorrowed<'a> for TxBorrowed<'a> {
     }
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TxOwned {
     pub version: u32,
@@ -407,7 +407,7 @@ impl Serializable for TxInBorrowed<'_> {
     }
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TxInOwned {
     #[serde(serialize_with = "crate::util::serialize_as_hex::serialize_hash_as_hex_reversed")]
@@ -528,7 +528,7 @@ impl<'a> DeserializableBorrowed<'a> for TxOutBorrowed<'a> {
     }
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TxOutOwned {
     pub value: u64,

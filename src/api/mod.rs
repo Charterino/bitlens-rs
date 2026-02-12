@@ -18,7 +18,8 @@ pub async fn start() {
     let app = Router::new()
         .route("/api/frontpagedata", get(frontpage::frontpagedata))
         .route("/api/tx", get(tx::txdata))
-        .route("/api/block", get(block::blockdata))
+        .route("/api/block/top", get(block::block_data_top))
+        .route("/api/block/extra", get(block::block_data_extra))
         .route("/api/address/top", get(address::address_data_top))
         .route("/api/address/extra", get(address::address_data_extra))
         .route("/api/address/continue", get(address::address_data_continue))
@@ -50,8 +51,22 @@ struct HashParam {
 }
 
 #[derive(Debug, Deserialize)]
+struct HashTopParam {
+    hash: String,
+    limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+struct HashExtraParam {
+    hash: String,
+    skip: usize,
+    limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
 struct AddressTopParam {
     address: String,
+    limit: Option<usize>,
 }
 
 #[derive(Debug, Deserialize)]

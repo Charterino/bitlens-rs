@@ -1,8 +1,8 @@
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 use crate::tx::address::Address;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AddressTransaction {
     #[serde(serialize_with = "crate::util::serialize_as_hex::serialize_hash_as_hex_reversed")]

@@ -12,7 +12,6 @@ use rocksdb::ReadOptions;
 use rocksdb::SliceTransform;
 use rocksdb::WriteBufferManager;
 use rocksdb::{DB, IngestExternalFileOptions, Options};
-use serde::Deserialize;
 use serde::Serialize;
 use std::sync::LazyLock;
 use tokio::sync::Semaphore;
@@ -108,7 +107,7 @@ pub struct SerializedTx<'a> {
     pub size_wus: u32,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BlockTxEntry {
     #[serde(serialize_with = "crate::util::serialize_as_hex::serialize_hash_as_hex_reversed")]

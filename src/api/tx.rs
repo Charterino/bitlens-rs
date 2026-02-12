@@ -6,10 +6,10 @@ use crate::{
     types::blockheaderwithnumber::BlockHeaderWithNumber,
 };
 use axum::{Json, extract::Query, http::StatusCode};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use tokio::task::JoinHandle;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize)]
 pub struct TxDataResponse {
     pub header: BlockHeaderWithNumber,
     #[serde(flatten)]

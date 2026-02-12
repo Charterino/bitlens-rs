@@ -1,8 +1,8 @@
 use std::fmt::Display;
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
-#[derive(Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Clone, Debug)]
+#[derive(Serialize, PartialEq, Eq, PartialOrd, Ord, Clone, Debug)]
 #[serde(tag = "type")]
 pub enum Address {
     P2PKFull { value: String },

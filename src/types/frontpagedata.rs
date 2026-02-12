@@ -1,7 +1,7 @@
 use crate::miners::MinerId;
 
 use super::stats::Stats;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 pub struct FrontPageDataWithSerialized {
     pub data: FrontPageData,
@@ -16,7 +16,7 @@ impl Default for FrontPageDataWithSerialized {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum FrontPageDataUpdate {
     Snapshot(FrontPageData),
@@ -24,7 +24,7 @@ pub enum FrontPageDataUpdate {
     Delta(FrontPageData),
 }
 
-#[derive(Default, Clone, Debug, Serialize, Deserialize)]
+#[derive(Default, Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FrontPageData {
     pub stats: Stats,
@@ -33,7 +33,7 @@ pub struct FrontPageData {
     pub sync_stats: Option<SyncStats>,
 }
 
-#[derive(Default, Clone, Debug, Serialize, Deserialize)]
+#[derive(Default, Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncStats {
     pub total_blocks: u64,
@@ -41,7 +41,7 @@ pub struct SyncStats {
     pub approx_remaining_seconds: f64,
 }
 
-#[derive(Default, Clone, Debug, Serialize, Deserialize)]
+#[derive(Default, Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ShortBlock {
     pub number: u64,
@@ -56,7 +56,7 @@ pub struct ShortBlock {
     pub recent_miner_share: f64,
 }
 
-#[derive(Default, Clone, Debug, Serialize, Deserialize)]
+#[derive(Default, Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ShortTx {
     pub hash: String,

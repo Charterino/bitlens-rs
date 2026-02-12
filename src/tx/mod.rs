@@ -17,7 +17,7 @@ use fee::calculate_fee;
 use flags::{SCRIPT_VERIFY_P2SH, SCRIPT_VERIFY_WITNESS};
 use opcodes::{OP_0, OP_1, OP_CHECKSIG, OP_DUP, OP_EQUALVERIFY, OP_HASH160};
 use script::get_transaction_sigop_cost;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use size::calculate_tx_size_wus;
 
 pub mod address;
@@ -31,7 +31,7 @@ mod size;
 #[cfg(test)]
 mod size_test;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AnalyzedTx {
     pub fee: u64,

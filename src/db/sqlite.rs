@@ -19,7 +19,7 @@ use crate::{
 use anyhow::Result;
 use primitive_types::U256;
 use rusqlite::Connection;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use slog_scope::warn;
 use std::{
     collections::{HashMap, HashSet},
@@ -346,7 +346,7 @@ pub fn find_block_metrics(hash: [u8; 32]) -> BlockMetrics {
     bms.unwrap()
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize)]
 pub struct PeerData {
     first_seen: u64,
     first_online: Option<u64>,

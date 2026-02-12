@@ -1,9 +1,9 @@
 use primitive_types::U256;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 use crate::packets::blockheader::BlockHeaderOwned;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BlockHeaderWithNumber {
     #[serde(flatten)]

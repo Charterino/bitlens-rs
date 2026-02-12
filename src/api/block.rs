@@ -1,14 +1,14 @@
 use crate::{
-    api::HashParam,
+    api::{HashExtraParam, HashTopParam},
     chainman,
     db::{self, rocksdb::BlockTxEntry},
     miners::{self, MinerId},
     types::blockheaderwithnumber::BlockHeaderWithNumber,
 };
 use axum::{Json, extract::Query, http::StatusCode};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BlockDataResponse {
     #[serde(flatten)]
@@ -19,8 +19,8 @@ pub struct BlockDataResponse {
     pub recent_miner_share: f64,
 }
 
-pub async fn blockdata(
-    Query(params): Query<HashParam>,
+pub async fn block_data_top(
+    Query(params): Query<HashTopParam>,
 ) -> Result<Json<BlockDataResponse>, StatusCode> {
     let mut unhexxed = match hex::decode(params.hash) {
         Err(_) => return Err(StatusCode::BAD_REQUEST),
@@ -36,9 +36,14 @@ pub async fn blockdata(
         Some(v) => v,
     };
 
+    let limit = params.limit.unwrap_or(50);
+
     let txs = db::rocksdb::get_block_tx_entries(unhexxed)
         .await
-        .unwrap_or_default();
+        .unwrap_or_default()
+        .into_iter()
+        .take(limit)
+        .collect();
     let (miner_id, miner_name, recent_miner_share) =
         miners::get_miner_for_block_and_share(header.header.hash).unwrap_or_default();
 
@@ -49,4 +54,30 @@ pub async fn blockdata(
         miner_name,
         recent_miner_share,
     }))
+}
+
+pub async fn block_data_extra(
+    Query(params): Query<HashExtraParam>,
+) -> Result<Json<Vec<BlockTxEntry>>, StatusCode> {
+    let mut unhexxed = match hex::decode(params.hash) {
+        Err(_) => return Err(StatusCode::BAD_REQUEST),
+        Ok(v) => v,
+    };
+    if unhexxed.len() != 32 {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    unhexxed.reverse();
+    let unhexxed: [u8; 32] = unhexxed.try_into().unwrap();
+
+    let limit = params.limit.unwrap_or(50);
+
+    let txs = db::rocksdb::get_block_tx_entries(unhexxed)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .skip(params.skip)
+        .take(limit)
+        .collect();
+
+    Ok(Json(txs))
 }

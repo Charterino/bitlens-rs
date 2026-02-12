@@ -1,5 +1,5 @@
 use axum::{Json, extract::Query, http::StatusCode};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use slog_scope::warn;
 
 use crate::{
@@ -7,7 +7,7 @@ use crate::{
     chainman, db,
 };
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchResponse {
     address: Option<String>,
