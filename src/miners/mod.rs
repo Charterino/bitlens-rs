@@ -120,8 +120,12 @@ pub fn get_miner_for_block_and_share(block: [u8; 32]) -> Option<(MinerId, String
         } else {
             0.
         };
-        let miner_name = r.rules[miner_id].display_name.clone();
-        return Some((miner_id.clone(), miner_name, share));
+        let display_name = if miner_id.as_str() == "unknown" {
+            "UNKNOWN".to_string()
+        } else {
+            r.rules[miner_id].display_name.clone()
+        };
+        return Some((miner_id.clone(), display_name, share));
     }
 
     None
@@ -142,7 +146,8 @@ pub fn callback_chain_extended(
     timestamps: &[u64],
     coinbase_asciis: &[&[u8]],
 ) {
-    let mut w = MINER_DATA.write().unwrap();
+    let mut w_outer = MINER_DATA.write().unwrap();
+    let w: &mut Miners = &mut w_outer;
 
     // first pop all blocks that are no longer "recent"
     let last_timestamp = *timestamps.last().unwrap();
@@ -214,6 +219,25 @@ pub fn callback_chain_extended(
                 .unwrap() += 1;
         }
     }
+
+    w.page_data.recent_shares.clear();
+    for (miner_id, mined) in w.recent_blocks_mined_by_miners_counts.iter() {
+        if *mined != 0 {
+            let display_name = if miner_id.as_str() == "unknown" {
+                "UNKNOWN".to_string()
+            } else {
+                w.rules[miner_id].display_name.clone()
+            };
+            w.page_data.recent_shares.push((
+                miner_id.clone(),
+                display_name,
+                (*mined as f64) / w.page_data.recent_blocks.len() as f64,
+            ));
+        }
+    }
+
+    let mut w2 = MINERS_PAGE_DATA.write().unwrap();
+    *w2 = serde_json::to_string(&w.page_data).unwrap();
 }
 
 pub fn callback_chain_reorg() {
