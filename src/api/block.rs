@@ -13,6 +13,7 @@ use serde::Serialize;
 pub struct BlockDataResponse {
     #[serde(flatten)]
     pub header: BlockHeaderWithNumber,
+    pub total_txs_count: usize,
     pub txs: Vec<BlockTxEntry>,
     pub miner_id: MinerId,
     pub miner_name: String,
@@ -40,10 +41,9 @@ pub async fn block_data_top(
 
     let txs = db::rocksdb::get_block_tx_entries(unhexxed)
         .await
-        .unwrap_or_default()
-        .into_iter()
-        .take(limit)
-        .collect();
+        .unwrap_or_default();
+    let total_txs_count = txs.len();
+    let txs = txs.into_iter().take(limit).collect();
     let (miner_id, miner_name, recent_miner_share) =
         miners::get_miner_for_block_and_share(header.header.hash).unwrap_or_default();
 
@@ -53,6 +53,7 @@ pub async fn block_data_top(
         miner_id,
         miner_name,
         recent_miner_share,
+        total_txs_count,
     }))
 }
 
