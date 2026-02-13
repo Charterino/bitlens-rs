@@ -38,6 +38,9 @@ pub async fn block_data_top(
     };
 
     let limit = params.limit.unwrap_or(50);
+    if limit > 1000 {
+        return Err(StatusCode::BAD_REQUEST);
+    }
 
     let txs = db::rocksdb::get_block_tx_entries(unhexxed)
         .await
@@ -71,6 +74,9 @@ pub async fn block_data_extra(
     let unhexxed: [u8; 32] = unhexxed.try_into().unwrap();
 
     let limit = params.limit.unwrap_or(50);
+    if limit > 1000 {
+        return Err(StatusCode::BAD_REQUEST);
+    }
 
     let txs = db::rocksdb::get_block_tx_entries(unhexxed)
         .await

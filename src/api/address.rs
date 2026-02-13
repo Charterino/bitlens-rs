@@ -31,6 +31,9 @@ pub async fn address_data_top(
     };
 
     let limit = params.limit.unwrap_or(50);
+    if limit > 1000 {
+        return Err(StatusCode::BAD_REQUEST);
+    }
 
     let top_data = match db::rocksdb::get_top_address_data(address_bytes.clone(), limit).await {
         Ok(v) => v,
@@ -65,6 +68,9 @@ pub async fn address_data_extra(
     let from_timestamp = params.from_timestamp.unwrap_or(0);
     let to_timestamp = params.to_timestamp.unwrap_or(u64::MAX);
     let limit = params.limit.unwrap_or(50);
+    if limit > 1000 {
+        return Err(StatusCode::BAD_REQUEST);
+    }
 
     let amends =
         db::rocksdb::get_address_entires(address_bytes, from_timestamp, to_timestamp, limit)
@@ -97,6 +103,9 @@ pub async fn address_data_continue(
     unhexxed.reverse();
     let unhexxed: [u8; 32] = unhexxed.try_into().unwrap();
     let limit = params.limit.unwrap_or(50);
+    if limit > 1000 {
+        return Err(StatusCode::BAD_REQUEST);
+    }
 
     let amends = db::rocksdb::get_address_entires_continue(
         address_bytes,
