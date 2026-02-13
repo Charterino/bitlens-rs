@@ -16,6 +16,7 @@ use crate::{
         packet::PayloadWithAllocator,
         packetpayload::{InvalidChecksum, PayloadToSend, ReceivedPayload},
         ping::Ping,
+        pong::Pong,
     },
     types::addressportnetwork::AddressPortNetwork,
 };
@@ -220,7 +221,11 @@ async fn crawl(peer: &AddressPortNetwork, res: &mut CrawlResult) -> Result<()> {
                 let packet = packet?;
                 {
                     let payload = packet.payload;
-                    handle_payload(payload).await;
+                    if let Some(responses) = handle_payload(payload).await {
+                        for packet in responses {
+                            connection.inner.write_packet(&packet).await?;
+                        }
+                    }
                     res.packets_received_total += 1;
                 }
                 addrman::update_peer_online(peer.clone(), connection.remote_version.services).await;
@@ -249,6 +254,9 @@ async fn handle_payload(payload: PayloadWithAllocator) -> Option<Vec<PayloadToSe
     let should_process_blocks = should_process_headers && !SYNCING_BODIES.load(Ordering::Relaxed);
     if let Some(payload) = payload.borrow_payload() {
         match payload {
+            ReceivedPayload::Ping(ping) => {
+                return Some(vec![PayloadToSend::Pong(Pong { nonce: ping.nonce })]);
+            }
             ReceivedPayload::Addr(addys) => {
                 let time = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
