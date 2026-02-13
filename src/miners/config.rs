@@ -26,6 +26,7 @@ pub static DEFAULT_MINERS_CONFIG: LazyLock<HashMap<MinerId, Miner>> = LazyLock::
 });
 
 #[derive(Default, Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Miner {
     pub display_name: String,
     pub icon: Option<String>,
