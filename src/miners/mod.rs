@@ -31,9 +31,9 @@ static UNKNOWN_ID: LazyLock<MinerId> = LazyLock::new(|| Arc::new("unknown".to_ow
 
 #[derive(Default, Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct MinersPageData {
-    pub recent_blocks: VecDeque<RecentBlock>,
-    pub recent_shares: Vec<(MinerId, String, f64)>, // miner_id, miner_name, share
+pub struct MinersPageData<'a> {
+    pub recent_blocks: Vec<&'a RecentBlock>,
+    pub recent_shares: &'a [(MinerId, String, f64)], // miner_id, miner_name, share
 }
 
 #[derive(Default, Clone, Debug, Serialize)]
@@ -55,7 +55,8 @@ pub struct Miners {
     pub blocks_mined_by_miners: HashMap<MinerId, Vec<[u8; 32]>>, // miner id -> all mined blocks, the vec is oldest to newest
     pub recent_blocks_mined_by_miners_counts: HashMap<MinerId, u64>, // miner id -> recently mined blocks count
     pub block_miners: HashMap<[u8; 32], MinerId>,                    // block hash -> miner id
-    pub page_data: MinersPageData,
+    pub recent_blocks: VecDeque<RecentBlock>,
+    pub recent_shares: Vec<(MinerId, String, f64)>, // miner_id, miner_name, share
 }
 
 pub type MinerId = Arc<String>;
@@ -70,7 +71,8 @@ static MINER_DATA: LazyLock<RwLock<Miners>> = LazyLock::new(|| {
         block_miners: Default::default(),
         blocks_mined_by_miners: Default::default(),
         recent_blocks_mined_by_miners_counts: Default::default(),
-        page_data: Default::default(),
+        recent_blocks: Default::default(),
+        recent_shares: Default::default(),
     })
 });
 
@@ -113,13 +115,13 @@ pub fn get_miner_for_block_and_share(block: [u8; 32]) -> Option<(MinerId, String
     let r = MINER_DATA.read().unwrap();
     if let Some(miner_id) = r.block_miners.get(&block) {
         let mined_recently = r.recent_blocks_mined_by_miners_counts[miner_id];
-        let recent_blocks = r.page_data.recent_blocks.len();
+        let recent_blocks = r.recent_blocks.len();
         let share = if recent_blocks != 0 {
             mined_recently as f64 / recent_blocks as f64
         } else {
             0.
         };
-        let display_name = if miner_id.as_str() == "unknown" {
+        let display_name = if miner_id.as_str() == UNKNOWN_ID.as_str() {
             "UNKNOWN".to_string()
         } else {
             r.rules[miner_id].display_name.clone()
@@ -151,10 +153,10 @@ pub fn callback_chain_extended(
     // first pop all blocks that are no longer "recent"
     let last_timestamp = *timestamps.last().unwrap();
     let recent_after = last_timestamp - MINER_PERCENTAGE_OVER_LAST_SECONDS;
-    while let Some(block) = w.page_data.recent_blocks.front() {
+    while let Some(block) = w.recent_blocks.front() {
         if block.timestamp < recent_after {
             // this block is no longer recent
-            let block = w.page_data.recent_blocks.pop_front().unwrap();
+            let block = w.recent_blocks.pop_front().unwrap();
             *w.recent_blocks_mined_by_miners_counts
                 .get_mut(&block.miner_id)
                 .unwrap() -= 1;
@@ -182,7 +184,7 @@ pub fn callback_chain_extended(
                     if is_recent {
                         let display_name = w.rules[&id].display_name.clone();
                         *w.recent_blocks_mined_by_miners_counts.get_mut(&id).unwrap() += 1;
-                        w.page_data.recent_blocks.push_back(RecentBlock {
+                        w.recent_blocks.push_back(RecentBlock {
                             hash: *hash,
                             number: *number,
                             coinbase_ascii: String::from_utf8_lossy(coinbase_ascii).to_string(),
@@ -205,7 +207,7 @@ pub fn callback_chain_extended(
             .push(*hash);
 
         if is_recent {
-            w.page_data.recent_blocks.push_back(RecentBlock {
+            w.recent_blocks.push_back(RecentBlock {
                 hash: *hash,
                 number: *number,
                 coinbase_ascii: String::from_utf8_lossy(coinbase_ascii).to_string(),
@@ -219,24 +221,23 @@ pub fn callback_chain_extended(
         }
     }
 
-    w.page_data.recent_shares.clear();
+    w.recent_shares.clear();
     for (miner_id, mined) in w.recent_blocks_mined_by_miners_counts.iter() {
         if *mined != 0 {
-            let display_name = if miner_id.as_str() == "unknown" {
+            let display_name = if miner_id.as_str() == UNKNOWN_ID.as_str() {
                 "UNKNOWN".to_string()
             } else {
                 w.rules[miner_id].display_name.clone()
             };
-            w.page_data.recent_shares.push((
+            w.recent_shares.push((
                 miner_id.clone(),
                 display_name,
-                (*mined as f64) / w.page_data.recent_blocks.len() as f64,
+                (*mined as f64) / w.recent_blocks.len() as f64,
             ));
         }
     }
 
-    let mut w2 = MINERS_PAGE_DATA.write().unwrap();
-    *w2 = serde_json::to_string(&w.page_data).unwrap();
+    update_page_data(w);
 }
 
 pub fn callback_chain_reorg() {
@@ -258,7 +259,7 @@ pub fn callback_config_updated(
 fn recalculate_full_miner_stats(data: &mut Miners) {
     data.blocks_mined_by_miners.clear();
     data.block_miners.clear();
-    data.page_data.recent_blocks.clear();
+    data.recent_blocks.clear();
     data.recent_blocks_mined_by_miners_counts.clear();
 
     // Insert the "unknown" miner
@@ -300,7 +301,7 @@ fn recalculate_full_miner_stats(data: &mut Miners) {
                             .recent_blocks_mined_by_miners_counts
                             .get_mut(id)
                             .unwrap() += 1;
-                        data.page_data.recent_blocks.push_back(RecentBlock {
+                        data.recent_blocks.push_back(RecentBlock {
                             hash,
                             number,
                             coinbase_ascii,
@@ -323,7 +324,7 @@ fn recalculate_full_miner_stats(data: &mut Miners) {
             .push(hash);
 
         if is_recent {
-            data.page_data.recent_blocks.push_back(RecentBlock {
+            data.recent_blocks.push_back(RecentBlock {
                 hash,
                 number,
                 coinbase_ascii,
@@ -338,22 +339,60 @@ fn recalculate_full_miner_stats(data: &mut Miners) {
         }
     }
 
-    data.page_data.recent_shares.clear();
+    data.recent_shares.clear();
     for (miner_id, mined) in data.recent_blocks_mined_by_miners_counts.iter() {
         if *mined != 0 {
-            let display_name = if miner_id.as_str() == "unknown" {
+            let display_name = if miner_id.as_str() == UNKNOWN_ID.as_str() {
                 "UNKNOWN".to_string()
             } else {
                 data.rules[miner_id].display_name.clone()
             };
-            data.page_data.recent_shares.push((
+            data.recent_shares.push((
                 miner_id.clone(),
                 display_name,
-                (*mined as f64) / data.page_data.recent_blocks.len() as f64,
+                (*mined as f64) / data.recent_blocks.len() as f64,
             ));
         }
     }
 
+    update_page_data(data);
+}
+
+fn update_page_data(data: &Miners) {
+    let data = MinersPageData {
+        recent_shares: &data.recent_shares,
+        recent_blocks: data.recent_blocks.iter().rev().take(50).collect(),
+    };
     let mut w = MINERS_PAGE_DATA.write().unwrap();
-    *w = serde_json::to_string(&data.page_data).unwrap();
+    *w = serde_json::to_string(&data).unwrap();
+}
+
+pub fn get_block_data(hashes: &[[u8; 32]]) -> anyhow::Result<Vec<RecentBlock>> {
+    let data = chainman::try_get_block_timestamps_and_numbers_and_cb_asciis(hashes)?;
+    let r = MINER_DATA.read().unwrap();
+    Ok(hashes
+        .iter()
+        .zip(data)
+        .map(|(hash, data)| {
+            let miner_id = r.block_miners.get(hash).unwrap_or(&UNKNOWN_ID).clone();
+            (hash, data.0, data.1, data.2, miner_id)
+        })
+        .map(
+            |(hash, timestamp, number, coinbase_ascii, miner_id)| RecentBlock {
+                hash: *hash,
+                number,
+                coinbase_ascii,
+                miner_name: if miner_id.as_str() == UNKNOWN_ID.as_str() {
+                    "UNKNOWN".to_string()
+                } else {
+                    r.rules
+                        .get(&miner_id)
+                        .map(|v| v.display_name.clone())
+                        .unwrap_or_else(|| "UNKNOWN".to_string())
+                },
+                miner_id,
+                timestamp,
+            },
+        )
+        .collect())
 }

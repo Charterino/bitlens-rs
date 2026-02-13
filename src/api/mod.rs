@@ -27,7 +27,11 @@ pub async fn start() {
         .route("/api/getpeer", get(peer::get_peer))
         .route("/api/search", get(search::search))
         .route("/api/socket/frontpage", any(frontpage::frontpagesocket))
-        .route("/api/miner/page", get(miner::get_miners_page))
+        .route("/api/miner/page/top", get(miner::get_miners_page_top))
+        .route(
+            "/api/miner/page/continue",
+            get(miner::get_miners_page_continue),
+        )
         .layer(
             CorsLayer::new()
                 .allow_origin("*".parse::<HeaderValue>().unwrap())
@@ -84,5 +88,11 @@ struct AddressContinueParam {
     address: String,
     after_tx: String,
     after_timestamp: u64,
+    limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AfterHashParam {
+    hash: String,
     limit: Option<usize>,
 }

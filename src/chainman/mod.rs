@@ -23,7 +23,7 @@ use crate::{
         stats::Stats,
     },
 };
-use anyhow::{Result, bail};
+use anyhow::{Result, anyhow, bail};
 use blocksync::sync_blocks;
 use chain::Chain;
 use headersync::sync_headers;
@@ -151,6 +151,47 @@ pub fn get_block_timestamps_and_numbers(hashes: &[[u8; 32]]) -> (Vec<u64>, Vec<u
         .collect();
     let numbers = hashes.iter().map(|v| r.known_headers[v].number).collect();
     (timestamps, numbers)
+}
+
+pub fn try_get_block_timestamps_and_numbers_and_cb_asciis(
+    hashes: &[[u8; 32]],
+) -> Result<Vec<(u64, u64, String)>> {
+    let r = CHAIN.read().unwrap();
+    hashes
+        .iter()
+        .map(|hash| match r.known_headers.get(hash) {
+            Some(v) => Ok((
+                v.header.timestamp as u64,
+                v.number,
+                v.coinbase_ascii.clone()
+                    .unwrap_or_default(),
+            )),
+            None => Err(anyhow!("header not found")),
+        })
+        .collect()
+}
+
+pub fn get_parents(hash: [u8; 32], limit: usize) -> Vec<[u8; 32]> {
+    let r = CHAIN.read().unwrap();
+
+    let mut last = match r.known_headers.get(&hash) {
+        Some(v) => v,
+        None => return vec![],
+    };
+
+    let mut result = Vec::with_capacity(limit);
+    while result.len() < limit {
+        if last.header.parent == [0u8; 32] {
+            break;
+        }
+        last = match r.known_headers.get(&last.header.parent) {
+            Some(v) => v,
+            None => return result,
+        };
+        result.push(last.header.hash);
+    }
+
+    result
 }
 
 pub fn filter_tx_spends(spends: Vec<(u32, [u8; 32], [u8; 32])>) -> Vec<(u32, [u8; 32])> {
