@@ -32,6 +32,8 @@ pub async fn start() {
             "/api/miner/page/continue",
             get(miner::get_miners_page_continue),
         )
+        .route("/api/miner/top", get(miner::get_miner_data_top))
+        .route("/api/miner/continue", get(miner::get_miner_data_continue))
         .layer(
             CorsLayer::new()
                 .allow_origin("*".parse::<HeaderValue>().unwrap())
@@ -94,5 +96,18 @@ struct AddressContinueParam {
 #[derive(Debug, Deserialize)]
 struct AfterHashParam {
     hash: String,
+    limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MinerTopParam {
+    id: String,
+    limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MinerContinueParam {
+    id: String,
+    after_hash: String,
     limit: Option<usize>,
 }

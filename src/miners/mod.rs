@@ -24,7 +24,7 @@ use std::thread;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
-mod config;
+pub mod config;
 
 const MINER_PERCENTAGE_OVER_LAST_SECONDS: u64 = 3600 * 24 * 14; // 2 weeks
 static UNKNOWN_ID: LazyLock<MinerId> = LazyLock::new(|| Arc::new("unknown".to_owned()));
@@ -395,4 +395,35 @@ pub fn get_block_data(hashes: &[[u8; 32]]) -> anyhow::Result<Vec<RecentBlock>> {
             },
         )
         .collect())
+}
+
+pub fn get_miner(id: &MinerId) -> Option<Miner> {
+    let r = MINER_DATA.read().unwrap();
+    r.rules.get(id).cloned()
+}
+
+pub fn get_miner_blocks(id: &MinerId, limit: usize, after: Option<[u8; 32]>) -> Vec<RecentBlock> {
+    let r = MINER_DATA.read().unwrap();
+    let blocks = match r.blocks_mined_by_miners.get(id) {
+        Some(v) => v,
+        None => return vec![],
+    };
+
+    let hashes: Vec<[u8; 32]> = match after {
+        Some(v) => blocks
+            .iter()
+            .rev()
+            .skip_while(|h| **h != v)
+            .take(limit).copied()
+            .collect(),
+        None => blocks.iter().rev().take(limit).copied().collect(),
+    };
+
+    match get_block_data(&hashes) {
+        Ok(v) => v,
+        Err(e) => {
+            warn!("miner blocks contains an unknown hash!?"; "error" => e.to_string(), "miner_id" => id);
+            vec![]
+        }
+    }
 }
