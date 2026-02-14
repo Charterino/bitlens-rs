@@ -137,6 +137,7 @@ fn evaluate_crawl_result(
 
     if result.packets_received_total < 10 {
         // Some peers will accept connections, handshake, and disconnect.
+        *failed_times += 1;
         return Some(format!(
             "packet count below minumum threshold: wanted 10 got {}",
             result.packets_received_total
