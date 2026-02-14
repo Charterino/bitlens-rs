@@ -13,6 +13,7 @@ use crate::{
     metrics::{METRIC_CONNECTIONS_IPV4, METRIC_CONNECTIONS_IPV6, METRIC_NET_DIALS_TOTAL},
     packets::{
         packetpayload::{PayloadToSend, ReceivedPayload},
+        pong::Pong,
         sendaddrv2::SendAddrV2,
         sendheaders::SendHeaders,
         verack::VerAck,
@@ -23,7 +24,7 @@ use crate::{
 
 pub mod connection;
 
-const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(15);
 
 pub async fn connect_and_handshake(peer: &AddressPortNetwork) -> Result<HandshakedConnection> {
     let mut conn = connect(peer).await?;
@@ -114,6 +115,9 @@ fn handle_packet_during_handshaking(
             }
             *success = true;
             return Ok(Some(res));
+        }
+        ReceivedPayload::Ping(ping) => {
+            return Ok(Some(vec![PayloadToSend::Pong(Pong { nonce: ping.nonce })]));
         }
         _ => {}
     }
