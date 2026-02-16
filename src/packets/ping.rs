@@ -28,6 +28,6 @@ impl DeserializableBorrowed<'_> for Ping {
 
 impl Serializable for Ping {
     fn serialize(&self, stream: &mut impl bytes::BufMut) {
-        stream.put_u64(self.nonce);
+        stream.put_u64_le(self.nonce);
     }
 }
