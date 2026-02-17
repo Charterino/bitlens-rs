@@ -234,7 +234,14 @@ async fn crawl(peer: &AddressPortNetwork, res: &mut CrawlResult) -> Result<()> {
             // Complete jobs assigned by the chainman
             job = &mut job_rx => {
                 let job = job?;
-                connection.inner.write_packet(&PayloadToSend::GetData(GetDataOwned { inner: vec![InventoryVectorOwned { inv_type: InventoryVectorType::WitnessBlock, hash: job }] })).await?;
+
+                let should_process_headers = !SYNCING_HEADERS.load(Ordering::Relaxed);
+                let should_process_blocks = should_process_headers && !SYNCING_BODIES.load(Ordering::Relaxed);
+
+                // Only ask for blocks if we're not IBD'ing
+                if !should_process_blocks {
+                    connection.inner.write_packet(&PayloadToSend::GetData(GetDataOwned { inner: vec![InventoryVectorOwned { inv_type: InventoryVectorType::WitnessBlock, hash: job }] })).await?;
+                }
 
                 // reregister
                 let (new_job_tx, new_job_rx) = oneshot::channel();
