@@ -5,13 +5,17 @@ use connection::{Connection, HandshakedConnection};
 use rand::RngCore;
 use tokio::{
     io::{BufReader, BufWriter},
+    net::tcp::OwnedReadHalf,
     select,
+    sync::mpsc::{Sender, channel},
     time::{self, Instant},
 };
 
 use crate::{
+    chainman,
     metrics::{METRIC_CONNECTIONS_IPV4, METRIC_CONNECTIONS_IPV6, METRIC_NET_DIALS_TOTAL},
     packets::{
+        packet::{Packet, read_packet},
         packetpayload::{PayloadToSend, ReceivedPayload},
         pong::Pong,
         sendaddrv2::SendAddrV2,
@@ -57,7 +61,7 @@ async fn handshake(conn: &mut Connection) -> Result<VersionOwned> {
         version: 70016,
         addrrecv: Default::default(),
         addrfrom: Default::default(),
-        start_height: 0,
+        start_height: chainman::get_top_header_number() as u32,
         announce_relayed_transactions: false,
     };
     conn.write_packet(&PayloadToSend::Version(version)).await?;
@@ -141,9 +145,27 @@ async fn connect(peer: &AddressPortNetwork) -> Result<Connection> {
         _ => {}
     }
 
+    let (tx, rx) = channel(8);
+    let read_handle = tokio::spawn(read_and_send_messages(bufreader, tx));
+
     Ok(Connection {
         write_stream: bufwriter,
-        read_stream: bufreader,
+        read_handle,
         network_id: peer.network_id,
+        read_chan: rx,
     })
+}
+
+async fn read_and_send_messages(
+    mut read_stream: BufReader<OwnedReadHalf>,
+    tx: Sender<Result<Packet>>,
+) {
+    loop {
+        let packet = read_packet(&mut read_stream).await;
+        let should_exit = packet.is_err();
+        let _ = tx.send(packet).await;
+        if should_exit {
+            break;
+        }
+    }
 }

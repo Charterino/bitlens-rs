@@ -1,10 +1,12 @@
 use std::ops::DerefMut;
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use sha2::{Digest, Sha256};
 use tokio::{
-    io::{AsyncWriteExt, BufReader, BufWriter},
-    net::tcp::{OwnedReadHalf, OwnedWriteHalf},
+    io::{AsyncWriteExt, BufWriter},
+    net::tcp::OwnedWriteHalf,
+    sync::mpsc::Receiver,
+    task::JoinHandle,
 };
 
 use crate::{
@@ -12,7 +14,7 @@ use crate::{
     packets::{
         magic::ACTIVE_MAGIC,
         network_id::NetworkId,
-        packet::{Packet, SERIALIZE_POOL, read_packet},
+        packet::{Packet, SERIALIZE_POOL},
         packetpayload::PayloadToSend,
         version::VersionOwned,
     },
@@ -20,9 +22,10 @@ use crate::{
 
 #[derive(Debug)]
 pub struct Connection {
-    pub read_stream: BufReader<OwnedReadHalf>,
+    pub read_handle: JoinHandle<()>,
     pub write_stream: BufWriter<OwnedWriteHalf>,
     pub network_id: NetworkId,
+    pub read_chan: Receiver<Result<Packet>>,
 }
 
 impl Drop for Connection {
@@ -43,6 +46,7 @@ impl Connection {
     pub async fn write_packet(&mut self, packet: &PayloadToSend) -> Result<()> {
         let mut serialize_buffer = SERIALIZE_POOL.get().await?;
         let buf = serialize_buffer.deref_mut();
+        buf.clear();
         packet.serialize(buf);
         let mut hash = Sha256::digest(&buf);
         hash = Sha256::digest(hash);
@@ -56,13 +60,15 @@ impl Connection {
 
         self.write_stream.flush().await?;
 
-        buf.clear();
-
         Ok(())
     }
 
     pub async fn read_packet(&mut self) -> Result<Packet> {
-        read_packet(&mut self.read_stream).await
+        
+        match self.read_chan.recv().await {
+            Some(v) => v,
+            None => Err(anyhow!("read chan closed")),
+        }
     }
 }
 
