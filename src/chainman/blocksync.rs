@@ -104,14 +104,13 @@ type BlockWithNumber = (PayloadWithAllocator, u64);
 pub fn start_syncing_blocks() {
     SYNCING_BODIES.store(true, Ordering::Relaxed);
     // Increase the max number of deserialize arenas while we're syncing blocks
-    packet::CURRENT_POOL_LIMIT.store(
-        *packet::MAX_DESERIALIZE_ARENA_COUNT_DURING_BLOCKSYNC,
-        Ordering::Relaxed,
-    );
+    packet::DESERIALIZE_POOL_LARGE.set_limit(*packet::LARGE_DESERIALIZE_ARENAS_COUNT_BLOCKSYNC);
+    packet::DESERIALIZE_POOL_SMALL.set_limit(*packet::SMALL_DESERIALIZE_ARENAS_COUNT_BLOCKSYNC);
 }
 
 pub fn stop_syncing_blocks() {
-    packet::CURRENT_POOL_LIMIT.store(*packet::INITIAL_DESERIALIZE_ARENA_COUNT, Ordering::Relaxed);
+    packet::DESERIALIZE_POOL_LARGE.set_limit(*packet::INITIAL_LARGE_DESERIALIZE_ARENAS_COUNT);
+    packet::DESERIALIZE_POOL_SMALL.set_limit(*packet::INITIAL_SMALL_DESERIALIZE_ARENAS_COUNT);
     SYNCING_BODIES.store(false, Ordering::Relaxed);
 }
 

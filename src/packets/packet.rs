@@ -1,21 +1,21 @@
 use super::block::BlockBorrowed;
 use super::packetheader::{PacketHeader, read_header};
+use crate::packets::arenapool::ArenaPool;
 use crate::packets::packetpayload::{ReceivedPayload, deserialize_payload};
 use crate::util::arena::Arena;
+use crate::util::env::get_env;
 use crate::util::speedtracker::read_payload;
 use anyhow::Result;
 use deadpool::unmanaged::Pool;
-use deadpool::unmanaged::{Object, PoolConfig};
+use deadpool::unmanaged::Object;
 use ouroboros::self_referencing;
-use slog_scope::{debug, info, warn};
-use std::env::VarError;
+use slog_scope::debug;
 use std::sync::LazyLock;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Duration;
 use tokio::io::BufReader;
 use tokio::net::tcp::OwnedReadHalf;
 
 pub const MAX_PACKET_SIZE: usize = 4 * 1024 * 1024;
+pub const SMALL_ARENA_SIZE: usize = 4 * 1024;
 
 pub static SERIALIZE_POOL: LazyLock<Pool<Vec<u8>>> = LazyLock::new(|| {
     let mut pool = Vec::with_capacity(32);
@@ -25,86 +25,44 @@ pub static SERIALIZE_POOL: LazyLock<Pool<Vec<u8>>> = LazyLock::new(|| {
     Pool::from(pool)
 });
 
-pub static SHOULD_LOG_INSUFFICIENT_ARENAS: LazyLock<bool> =
-    LazyLock::new(|| match std::env::var("DISABLE_INSUFFICIENT_ARENAS_LOG") {
-        Ok(v) => v.is_empty(),
-        Err(_) => true,
-    });
-
-// So we start off with 128 4mb arenas. During block download we can have as many as 2k of them. After that, it's gonna go back to 128.
+// So we start off with 64 4mb arenas. During block download we can have as many as 1k of them. After that, it's gonna go back to 64.
 // See deserializearenas.png for a drawing explaining this process.
-pub const DESERIALIZE_POOL_TIMEOUT: Duration = Duration::from_millis(100);
-const DEFAULT_INITIAL_DESERIALIZE_ARENA_COUNT: usize = 128;
-const DEFAULT_MAX_DESERIALIZE_ARENA_COUNT: usize = 2048;
-pub static INITIAL_DESERIALIZE_ARENA_COUNT: LazyLock<usize> = LazyLock::new(
-    || match std::env::var("INITIAL_DESERIALIZE_ARENA_COUNT") {
-        Ok(v) => match v.parse::<usize>() {
-            Ok(v) => v,
-            Err(e) => {
-                info!(
-                    "failed to parse INITIAL_DESERIALIZE_ARENA_COUNT: {e} defaulting to {DEFAULT_INITIAL_DESERIALIZE_ARENA_COUNT}"
-                );
-                DEFAULT_INITIAL_DESERIALIZE_ARENA_COUNT
-            }
-        },
-        Err(e) => {
-            if let VarError::NotPresent = e {
-                info!(
-                    "INITIAL_DESERIALIZE_ARENA_COUNT is not set, defaulting to {DEFAULT_INITIAL_DESERIALIZE_ARENA_COUNT}"
-                );
-            } else {
-                info!(
-                    "failed to read INITIAL_DESERIALIZE_ARENA_COUNT: {e} defaulting to {DEFAULT_INITIAL_DESERIALIZE_ARENA_COUNT}"
-                );
-            }
-            DEFAULT_INITIAL_DESERIALIZE_ARENA_COUNT
-        }
-    },
-);
-
-pub static MAX_DESERIALIZE_ARENA_COUNT_DURING_BLOCKSYNC: LazyLock<usize> = LazyLock::new(|| {
-    match std::env::var("MAX_DESERIALIZE_ARENA_COUNT") {
-        Ok(v) => match v.parse::<usize>() {
-            Ok(v) => v,
-            Err(e) => {
-                info!(
-                    "failed to parse MAX_DESERIALIZE_ARENA_COUNT: {e} defaulting to {DEFAULT_MAX_DESERIALIZE_ARENA_COUNT}"
-                );
-                DEFAULT_MAX_DESERIALIZE_ARENA_COUNT
-            }
-        },
-        Err(e) => {
-            if let VarError::NotPresent = e {
-                info!(
-                    "MAX_DESERIALIZE_ARENA_COUNT is not set, defaulting to {DEFAULT_MAX_DESERIALIZE_ARENA_COUNT}"
-                );
-            } else {
-                info!(
-                    "failed to read MAX_DESERIALIZE_ARENA_COUNT: {e} defaulting to {DEFAULT_MAX_DESERIALIZE_ARENA_COUNT}"
-                );
-            }
-            DEFAULT_MAX_DESERIALIZE_ARENA_COUNT
-        }
-    }
+// We also have a similar setup for 4kb arenas but in higher quantities.
+const DEFAULT_INITIAL_LARGE_DESERIALIZE_ARENAS_COUNT: usize = 64;
+const DEFAULT_LARGE_DESERIALIZE_ARENAS_COUNT_BLOCKSYNC: usize = 512;
+pub static INITIAL_LARGE_DESERIALIZE_ARENAS_COUNT: LazyLock<usize> = LazyLock::new(|| {
+    get_env(
+        "INITIAL_LARGE_DESERIALIZE_ARENAS_COUNT",
+        DEFAULT_INITIAL_LARGE_DESERIALIZE_ARENAS_COUNT,
+    )
+});
+pub static LARGE_DESERIALIZE_ARENAS_COUNT_BLOCKSYNC: LazyLock<usize> = LazyLock::new(|| {
+    get_env(
+        "LARGE_DESERIALIZE_ARENAS_COUNT_BLOCKSYNC",
+        DEFAULT_LARGE_DESERIALIZE_ARENAS_COUNT_BLOCKSYNC,
+    )
 });
 
-pub static CURRENT_POOL_LIMIT: LazyLock<AtomicUsize> =
-    LazyLock::new(|| AtomicUsize::new(*INITIAL_DESERIALIZE_ARENA_COUNT));
-pub static CURRENT_POOL_SIZE: LazyLock<AtomicUsize> =
-    LazyLock::new(|| AtomicUsize::new(*INITIAL_DESERIALIZE_ARENA_COUNT));
-
-pub static DESERIALIZE_POOL: LazyLock<Pool<Arena>> = LazyLock::new(|| {
-    let mut config = PoolConfig::new(1024 * 1024);
-    config.runtime = Some(deadpool::Runtime::Tokio1);
-    config.timeout = Some(DESERIALIZE_POOL_TIMEOUT);
-
-    let pool = Pool::from_config(&config);
-    for _ in 0..*INITIAL_DESERIALIZE_ARENA_COUNT {
-        let a = Arena::new(MAX_PACKET_SIZE);
-        pool.try_add(a).expect("to have added arena");
-    }
-    pool
+const DEFAULT_INITIAL_SMALL_DESERIALIZE_ARENAS_COUNT: usize = 256;
+const DEFAULT_SMALL_DESERIALIZE_ARENAS_COUNT_BLOCKSYNC: usize = 1024;
+pub static INITIAL_SMALL_DESERIALIZE_ARENAS_COUNT: LazyLock<usize> = LazyLock::new(|| {
+    get_env(
+        "INITIAL_SMALL_DESERIALIZE_ARENAS_COUNT",
+        DEFAULT_INITIAL_SMALL_DESERIALIZE_ARENAS_COUNT,
+    )
 });
+pub static SMALL_DESERIALIZE_ARENAS_COUNT_BLOCKSYNC: LazyLock<usize> = LazyLock::new(|| {
+    get_env(
+        "SMALL_DESERIALIZE_ARENAS_COUNT_BLOCKSYNC",
+        DEFAULT_SMALL_DESERIALIZE_ARENAS_COUNT_BLOCKSYNC,
+    )
+});
+
+pub static DESERIALIZE_POOL_LARGE: LazyLock<ArenaPool> =
+    LazyLock::new(|| ArenaPool::new(MAX_PACKET_SIZE, *INITIAL_LARGE_DESERIALIZE_ARENAS_COUNT));
+
+pub static DESERIALIZE_POOL_SMALL: LazyLock<ArenaPool> =
+    LazyLock::new(|| ArenaPool::new(SMALL_ARENA_SIZE, *INITIAL_SMALL_DESERIALIZE_ARENAS_COUNT));
 
 pub struct Packet {
     pub header: PacketHeader,
@@ -155,66 +113,11 @@ pub struct AllocatorWithBuffer {
 pub async fn read_packet(stream: &mut BufReader<OwnedReadHalf>) -> Result<Packet> {
     let header = read_header(stream).await?;
 
-    let mut allocator = None;
-    while allocator.is_none() {
-        match DESERIALIZE_POOL.get().await {
-            Ok(p) => {
-                // Should we drop this arena?
-                let mut current_size = CURRENT_POOL_SIZE.load(Ordering::SeqCst);
-                let limit = CURRENT_POOL_LIMIT.load(Ordering::SeqCst);
-                if current_size <= limit {
-                    allocator = Some(p);
-                    break;
-                }
-                while current_size > limit {
-                    match CURRENT_POOL_SIZE.compare_exchange_weak(
-                        current_size,
-                        current_size - 1,
-                        Ordering::SeqCst,
-                        Ordering::SeqCst,
-                    ) {
-                        Ok(_) => {
-                            // Dropping this arena
-                            let _ = Object::take(p);
-                            debug!("removed a deserialize arena"; "limit" => limit, "new_size" => current_size - 1);
-                            break;
-                        }
-                        Err(new_current) => current_size = new_current,
-                    }
-                }
-            }
-            Err(_) => {
-                // Can we add another arena?
-                let mut current_size = CURRENT_POOL_SIZE.load(Ordering::SeqCst);
-                let limit = CURRENT_POOL_LIMIT.load(Ordering::Relaxed);
-                while current_size < limit {
-                    match CURRENT_POOL_SIZE.compare_exchange_weak(
-                        current_size,
-                        current_size + 1,
-                        Ordering::SeqCst,
-                        Ordering::SeqCst,
-                    ) {
-                        Ok(_) => {
-                            // Adding new arena.
-                            let a = Arena::new(MAX_PACKET_SIZE);
-                            DESERIALIZE_POOL
-                                .try_add(a)
-                                .expect("to have added a new arena");
-                            debug!("added a new deserialize arena"; "limit" => limit, "new_size" => current_size + 1);
-                            break;
-                        }
-                        Err(new_current) => current_size = new_current,
-                    }
-                }
-                // If we can't add a new arena, the loop will continue waiting.
-                if current_size >= limit && *SHOULD_LOG_INSUFFICIENT_ARENAS {
-                    warn!("insufficient arenas, considering adding more"; "size" => current_size, "limit" => limit);
-                }
-            }
-        }
-    }
-    let allocator = allocator.unwrap();
-    allocator.reset();
+    let allocator = if header.length as usize > SMALL_ARENA_SIZE {
+        DESERIALIZE_POOL_LARGE.get_arena().await
+    } else {
+        DESERIALIZE_POOL_SMALL.get_arena().await
+    };
 
     let mut allocator_with_buffer: AllocatorWithBuffer = AllocatorWithBufferBuilder {
         allocator,

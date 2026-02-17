@@ -1,6 +1,7 @@
 pub mod arena;
 pub mod arenaarray;
 pub mod compact;
+pub mod env;
 pub mod genesis;
 pub mod hash;
 pub mod merkle;

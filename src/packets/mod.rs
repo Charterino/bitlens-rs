@@ -7,6 +7,7 @@ use varint::{VarInt, deserialize_varint, serialize_varint};
 
 pub mod addr;
 pub mod addrv2;
+pub mod arenapool;
 pub mod block;
 pub mod blockheader;
 pub mod buffer;

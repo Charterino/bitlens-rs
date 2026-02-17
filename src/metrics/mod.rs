@@ -1,4 +1,3 @@
-use crate::packets::packet::{CURRENT_POOL_LIMIT, CURRENT_POOL_SIZE};
 use axum::{Router, extract::Request, http::StatusCode, routing::get};
 use prometheus::{
     Encoder, Histogram, IntGauge, TextEncoder, linear_buckets, register_histogram,
@@ -6,8 +5,10 @@ use prometheus::{
 };
 use std::{
     env,
-    sync::{LazyLock, atomic::Ordering},
+    sync::LazyLock,
 };
+
+use crate::packets::packet::{DESERIALIZE_POOL_LARGE, DESERIALIZE_POOL_SMALL};
 
 pub static METRIC_TOP_HEADER_HEIGHT: LazyLock<IntGauge> = LazyLock::new(|| {
     register_int_gauge!("bitlens_top_header_height", "the number of the top header").unwrap()
@@ -99,21 +100,40 @@ async fn metrics(req: Request) -> Result<String, StatusCode> {
 
     let metric_families = prometheus::gather();
     encoder.encode(&metric_families, &mut buffer).unwrap();
-    buffer.extend_from_slice("# HELP bitlens_deserialize_pool_size current number of bump allocators used for deserializing incoming packets\n".as_bytes());
-    buffer.extend_from_slice("# TYPE bitlens_deserialize_pool_size gauge\n".as_bytes());
+    buffer.extend_from_slice("# HELP bitlens_deserialize_pool_large_size current number of large bump allocators used for deserializing incoming packets\n".as_bytes());
+    buffer.extend_from_slice("# TYPE bitlens_deserialize_pool_large_size gauge\n".as_bytes());
     buffer.extend_from_slice(
         format!(
-            "bitlens_deserialize_pool_size {}\n",
-            CURRENT_POOL_SIZE.load(Ordering::Relaxed)
+            "bitlens_deserialize_pool_large_size {}\n",
+            DESERIALIZE_POOL_LARGE.get_size()
         )
         .as_bytes(),
     );
-    buffer.extend_from_slice("# HELP bitlens_deserialize_pool_limit current limit of bump allocators used for deserializing incoming packets\n".as_bytes());
-    buffer.extend_from_slice("# TYPE bitlens_deserialize_pool_limit gauge\n".as_bytes());
+    buffer.extend_from_slice("# HELP bitlens_deserialize_pool_large_limit current limit of large bump allocators used for deserializing incoming packets\n".as_bytes());
+    buffer.extend_from_slice("# TYPE bitlens_deserialize_pool_large_limit gauge\n".as_bytes());
     buffer.extend_from_slice(
         format!(
-            "bitlens_deserialize_pool_limit {}\n",
-            CURRENT_POOL_LIMIT.load(Ordering::Relaxed)
+            "bitlens_deserialize_pool_large_limit {}\n",
+            DESERIALIZE_POOL_LARGE.get_limit()
+        )
+        .as_bytes(),
+    );
+
+    buffer.extend_from_slice("# HELP bitlens_deserialize_pool_small_size current number of small bump allocators used for deserializing incoming packets\n".as_bytes());
+    buffer.extend_from_slice("# TYPE bitlens_deserialize_pool_small_size gauge\n".as_bytes());
+    buffer.extend_from_slice(
+        format!(
+            "bitlens_deserialize_pool_small_size {}\n",
+            DESERIALIZE_POOL_SMALL.get_size()
+        )
+        .as_bytes(),
+    );
+    buffer.extend_from_slice("# HELP bitlens_deserialize_pool_small_limit current limit of small bump allocators used for deserializing incoming packets\n".as_bytes());
+    buffer.extend_from_slice("# TYPE bitlens_deserialize_pool_small_limit gauge\n".as_bytes());
+    buffer.extend_from_slice(
+        format!(
+            "bitlens_deserialize_pool_small_limit {}\n",
+            DESERIALIZE_POOL_SMALL.get_limit()
         )
         .as_bytes(),
     );
