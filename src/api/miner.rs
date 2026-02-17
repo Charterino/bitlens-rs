@@ -92,11 +92,6 @@ pub async fn get_miner_data_continue(
     let unhexxed: [u8; 32] = unhexxed.try_into().unwrap();
 
     let miner_id = Arc::new(params.id);
-    let miner = match miners::get_miner(&miner_id) {
-        Some(v) => v,
-        None => return Err(StatusCode::NOT_FOUND),
-    };
-
     let recent_blocks = miners::get_miner_blocks(&miner_id, limit, Some(unhexxed));
 
     Ok(Json(recent_blocks))
