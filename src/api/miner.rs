@@ -60,9 +60,17 @@ pub async fn get_miner_data_top(Query(params): Query<MinerTopParam>) -> impl Int
     }
 
     let miner_id = Arc::new(params.id);
-    let miner = match miners::get_miner(&miner_id) {
-        Some(v) => v,
-        None => return Err(StatusCode::NOT_FOUND),
+    let miner = if miner_id.as_str() == "unknown" {
+        Miner {
+            display_name: "Unknown".to_string(),
+            icon: None,
+            regexes: vec![],
+        }
+    } else {
+        match miners::get_miner(&miner_id) {
+            Some(v) => v,
+            None => return Err(StatusCode::NOT_FOUND),
+        }
     };
 
     let recent_blocks = miners::get_miner_blocks(&miner_id, limit, None);
