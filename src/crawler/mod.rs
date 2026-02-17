@@ -38,7 +38,7 @@ pub mod peertracker;
 
 const NO_PEERS_SLEEP_DURATION: Duration = Duration::from_secs(1);
 const SLEEP_BETWEEN_CRAWLS_DURATION: Duration = Duration::from_millis(20);
-const PING_EVERY: Duration = Duration::from_secs(5);
+const PING_EVERY: Duration = Duration::from_secs(30);
 
 pub async fn crawl_forever() {
     loop {
