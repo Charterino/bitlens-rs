@@ -7,7 +7,7 @@ use crate::{
     metrics::{METRIC_FULL_BLOCKS_DOWNLOADED, METRIC_TOP_HEADER_HEIGHT},
     miners,
     packets::{
-        blockheader::{BlockHeaderBorrowed, BlockHeaderRef},
+        blockheader::{BlockHeaderBorrowed, BlockHeaderOwned, BlockHeaderRef},
         getheaders::GetHeadersOwned,
         packetpayload::PayloadToSend,
     },
@@ -110,6 +110,11 @@ pub fn get_top_header_hash() -> [u8; 32] {
     c.top_header.header.hash
 }
 
+pub fn get_top_header_number() -> u64 {
+    let c = CHAIN.read().unwrap();
+    c.top_header.number
+}
+
 pub fn get_header_by_hash(hash: [u8; 32]) -> Option<BlockHeaderWithNumber> {
     let r = CHAIN.read().unwrap();
     r.known_headers.get(&hash).cloned()
@@ -163,8 +168,7 @@ pub fn try_get_block_timestamps_and_numbers_and_cb_asciis(
             Some(v) => Ok((
                 v.header.timestamp as u64,
                 v.number,
-                v.coinbase_ascii.clone()
-                    .unwrap_or_default(),
+                v.coinbase_ascii.clone().unwrap_or_default(),
             )),
             None => Err(anyhow!("header not found")),
         })
@@ -205,6 +209,74 @@ pub fn filter_tx_spends(spends: Vec<(u32, [u8; 32], [u8; 32])>) -> Vec<(u32, [u8
         .filter(|item| r.most_work_chain.contains(&item.2))
         .map(|item| (item.0, item.1))
         .collect()
+}
+
+pub fn respond_to_getheaders<'a>(
+    locator: &[&[u8; 32]],
+    block_stop: [u8; 32],
+) -> Option<Vec<BlockHeaderOwned>> {
+    if locator.is_empty() {
+        return None;
+    }
+
+    let r = CHAIN.read().unwrap();
+    let mut found_match = None;
+
+    for hash in locator.iter().rev() {
+        if r.most_work_chain.contains(*hash) {
+            found_match = Some(**hash);
+            break;
+        }
+    }
+
+    let matched_hash = match found_match {
+        Some(v) => v,
+        None => {
+            // None of the hashes in block_locator are on our most work chain.
+            return None;
+        }
+    };
+
+    let header = match r.known_headers.get(&matched_hash) {
+        Some(v) => v,
+        None => {
+            // this should never happen
+            let mut r = matched_hash.to_vec();
+            r.reverse();
+            panic!(
+                "hash is in our most_work_chain but not in known_headers? {}",
+                hex::encode(r)
+            )
+        }
+    };
+
+    let mut blocks_to_send_count = r.top_header.number - header.number;
+    if blocks_to_send_count == 0 {
+        return None;
+    }
+    if blocks_to_send_count > 2000 {
+        blocks_to_send_count = 2000;
+    }
+
+    let mut result = Vec::with_capacity(blocks_to_send_count as usize);
+    for i in 0..blocks_to_send_count {
+        let hash = match r.number_to_hash.get(&(header.number + i)) {
+            Some(v) => v,
+            None => {
+                // this should never happen
+                panic!(
+                    "we have a higher top_header but no entry in number_to_hash, number: {}",
+                    header.number + i
+                )
+            }
+        };
+        if *hash == block_stop {
+            break;
+        }
+        result.push(r.known_headers[hash].header);
+    }
+
+    Some(result)
 }
 
 pub fn filter_and_populate_address_txs(

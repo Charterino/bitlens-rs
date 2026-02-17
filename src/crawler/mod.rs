@@ -10,6 +10,7 @@ use crate::{
         getaddr::GetAddr,
         getdata::GetDataOwned,
         getheaders::GetHeadersOwned,
+        headers::HeadersOwned,
         inv::InvOwned,
         invvector::{InventoryVectorOwned, InventoryVectorType},
         network_id::NetworkId,
@@ -37,7 +38,7 @@ pub mod peertracker;
 
 const NO_PEERS_SLEEP_DURATION: Duration = Duration::from_secs(1);
 const SLEEP_BETWEEN_CRAWLS_DURATION: Duration = Duration::from_millis(20);
-const PING_EVERY: Duration = Duration::from_secs(60);
+const PING_EVERY: Duration = Duration::from_secs(5);
 
 pub async fn crawl_forever() {
     loop {
@@ -239,7 +240,7 @@ async fn crawl(peer: &AddressPortNetwork, res: &mut CrawlResult) -> Result<()> {
                 let should_process_blocks = should_process_headers && !SYNCING_BODIES.load(Ordering::Relaxed);
 
                 // Only ask for blocks if we're not IBD'ing
-                if !should_process_blocks {
+                if should_process_blocks {
                     connection.inner.write_packet(&PayloadToSend::GetData(GetDataOwned { inner: vec![InventoryVectorOwned { inv_type: InventoryVectorType::WitnessBlock, hash: job }] })).await?;
                 }
 
@@ -346,6 +347,17 @@ async fn handle_payload(payload: PayloadWithAllocator) -> Option<Vec<PayloadToSe
                     chainman::keepup::on_header_received(header).await;
                 }
                 return None;
+            }
+            ReceivedPayload::GetHeaders(get_headers) => {
+                if should_process_headers {
+                    return chainman::respond_to_getheaders(
+                        get_headers.block_locator,
+                        *get_headers.hash_stop,
+                    )
+                    .map(|v| vec![PayloadToSend::Headers(HeadersOwned { inner: v })]);
+                } else {
+                    return None;
+                }
             }
             _ => {
                 return None;
