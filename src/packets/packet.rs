@@ -6,8 +6,8 @@ use crate::util::arena::Arena;
 use crate::util::env::get_env;
 use crate::util::speedtracker::read_payload;
 use anyhow::Result;
-use deadpool::unmanaged::Pool;
 use deadpool::unmanaged::Object;
+use deadpool::unmanaged::Pool;
 use ouroboros::self_referencing;
 use slog_scope::debug;
 use std::sync::LazyLock;
@@ -15,7 +15,7 @@ use tokio::io::BufReader;
 use tokio::net::tcp::OwnedReadHalf;
 
 pub const MAX_PACKET_SIZE: usize = 4 * 1024 * 1024;
-pub const SMALL_ARENA_SIZE: usize = 4 * 1024;
+pub const SMALL_ARENA_SIZE: usize = 8 * 1024;
 
 pub static SERIALIZE_POOL: LazyLock<Pool<Vec<u8>>> = LazyLock::new(|| {
     let mut pool = Vec::with_capacity(32);
@@ -113,7 +113,7 @@ pub struct AllocatorWithBuffer {
 pub async fn read_packet(stream: &mut BufReader<OwnedReadHalf>) -> Result<Packet> {
     let header = read_header(stream).await?;
 
-    let allocator = if header.length as usize > SMALL_ARENA_SIZE {
+    let allocator = if header.length as usize > SMALL_ARENA_SIZE / 2 {
         DESERIALIZE_POOL_LARGE.get_arena().await
     } else {
         DESERIALIZE_POOL_SMALL.get_arena().await
