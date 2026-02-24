@@ -222,7 +222,7 @@ pub fn respond_to_getheaders<'a>(
     let r = CHAIN.read().unwrap();
     let mut found_match = None;
 
-    for hash in locator.iter().rev() {
+    for hash in locator.iter() {
         if r.most_work_chain.contains(*hash) {
             found_match = Some(**hash);
             break;
