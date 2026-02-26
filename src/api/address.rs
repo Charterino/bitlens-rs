@@ -229,6 +229,7 @@ async fn populate_other_address_fields(
     let mut gain_txouts_index = 0usize;
     let mut lose_txouts_index = 0usize;
     for (address_tx, analyzed_tx) in transactions.iter_mut().zip(full_txs) {
+        #[allow(clippy::comparison_chain)]
         if address_tx.value > 0 {
             // they gained sats so check who it come from
             if TxRef::Owned(&analyzed_tx.tx).is_coinbase() {

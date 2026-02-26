@@ -211,7 +211,7 @@ pub fn filter_tx_spends(spends: Vec<(u32, [u8; 32], [u8; 32])>) -> Vec<(u32, [u8
         .collect()
 }
 
-pub fn respond_to_getheaders<'a>(
+pub fn respond_to_getheaders(
     locator: &[&[u8; 32]],
     block_stop: [u8; 32],
 ) -> Option<Vec<BlockHeaderOwned>> {

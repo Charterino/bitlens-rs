@@ -211,6 +211,7 @@ async fn handle_worker_message(
             state.block_avg_size = (1. - state.alpha) * state.block_avg_size
                 + state.alpha * payload.borrow_allocator_with_buffer().borrow_buffer().len() as f64;
             // first either process the payload directly or insert it into backlog
+            #[allow(clippy::comparison_chain)]
             if number > state.first_missing_number + state.next_to_apply as u64 {
                 // This block is ahead of what we're currently waiting for, insert it into the backlog
                 if let Err(i) = state.backlog.binary_search_by(|f| number.cmp(&f.1)) {

@@ -63,6 +63,7 @@ use super::{
     validate_and_apply_header_inner,
 };
 
+#[allow(clippy::type_complexity)]
 pub static NEW_HEADER_BROADCAST: LazyLock<(
     broadcast::Sender<[u8; 32]>,
     broadcast::Receiver<[u8; 32]>,

@@ -273,6 +273,7 @@ impl TxRef<'_> {
         }
     }
 
+    #[allow(clippy::type_complexity)]
     pub fn witness_data(&self) -> Option<Either<&[Vec<u8>], &[&[u8]]>> {
         match self {
             TxRef::Borrowed(tx_borrowed) => tx_borrowed.witness_data.map(either::Right),
