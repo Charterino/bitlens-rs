@@ -3,6 +3,7 @@ use crate::packets::tx::TxOutOwned;
 use crate::packets::varint::deserialize_varint;
 use crate::tx::AnalyzedTx;
 use crate::tx::deserialize_analyzed_tx;
+use crate::util::env::get_env;
 use anyhow::Result;
 use anyhow::bail;
 use rocksdb::BlockBasedOptions;
@@ -15,6 +16,10 @@ use rocksdb::{DB, IngestExternalFileOptions, Options};
 use serde::Serialize;
 use std::sync::LazyLock;
 use tokio::sync::Semaphore;
+
+static DEFAULT_ROCKSDB_BUFFER_SIZE: usize = 1_000_000_000;
+static ROCKSDB_BUFFER_SIZE: LazyLock<usize> =
+    LazyLock::new(|| get_env("ROCKSDB_BUFFER_SIZE", DEFAULT_ROCKSDB_BUFFER_SIZE));
 
 static OPEN_OPTIONS: LazyLock<Options> = LazyLock::new(|| {
     let mut open_options = rocksdb::Options::default();
@@ -29,16 +34,7 @@ static OPEN_OPTIONS: LazyLock<Options> = LazyLock::new(|| {
 
     open_options.set_use_direct_io_for_flush_and_compaction(true);
 
-    let buffer_size = {
-        let mut raw_value =
-            std::env::var("ROCKSDB_BUFFER_SIZE").expect("read ROCKSDB_BUFFER_SIZE env variable");
-        raw_value.retain(|v| v.is_numeric());
-        raw_value
-            .parse::<usize>()
-            .expect("to parse ROCKSDB_BUFFER_SIZE into integer")
-    };
-
-    let cache = Cache::new_lru_cache(buffer_size);
+    let cache = Cache::new_lru_cache(*ROCKSDB_BUFFER_SIZE);
     open_options.set_write_buffer_manager(
         &WriteBufferManager::new_write_buffer_manager_with_cache(0, true, cache.clone()),
     );

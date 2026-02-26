@@ -3,12 +3,12 @@ use prometheus::{
     Encoder, Histogram, IntGauge, TextEncoder, linear_buckets, register_histogram,
     register_int_gauge,
 };
-use std::{
-    env,
-    sync::LazyLock,
-};
+use std::{env, sync::LazyLock};
 
-use crate::packets::packet::{DESERIALIZE_POOL_LARGE, DESERIALIZE_POOL_SMALL};
+use crate::{
+    packets::packet::{DESERIALIZE_POOL_LARGE, DESERIALIZE_POOL_SMALL},
+    util::env::get_env,
+};
 
 pub static METRIC_TOP_HEADER_HEIGHT: LazyLock<IntGauge> = LazyLock::new(|| {
     register_int_gauge!("bitlens_top_header_height", "the number of the top header").unwrap()
@@ -70,9 +70,8 @@ static METRICS_TOKEN: LazyLock<Vec<u8>> = LazyLock::new(|| {
     ("Bearer ".to_owned() + &token).into_bytes()
 });
 
-static METRICS_LISTEN_ADDRESS: LazyLock<String> = LazyLock::new(|| {
-    env::var("METRICS_LISTEN_ADDRESS").expect("METRICS_LISTEN_ADDRESS is not set")
-});
+static METRICS_LISTEN_ADDRESS: LazyLock<String> =
+    LazyLock::new(|| get_env("METRICS_LISTEN_ADDRESS", "127.0.0.1:1281".to_string()));
 
 pub async fn start() {
     let _ = *METRICS_TOKEN; // Ensure METRICS_TOKEN is set.

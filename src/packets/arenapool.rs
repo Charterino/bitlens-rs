@@ -9,14 +9,10 @@ use std::{
 use deadpool::unmanaged::{Object, Pool, PoolConfig};
 use slog_scope::warn;
 
-use crate::util::arena::Arena;
+use crate::util::{arena::Arena, env::get_env};
 
 pub static SHOULD_LOG_INSUFFICIENT_ARENAS: LazyLock<bool> =
-    LazyLock::new(|| match std::env::var("DISABLE_INSUFFICIENT_ARENAS_LOG") {
-        Ok(v) => v.is_empty(),
-        Err(_) => true,
-    });
-
+    LazyLock::new(|| get_env("DISABLE_INSUFFICIENT_ARENAS_LOG", false));
 pub const DESERIALIZE_POOL_TIMEOUT: Duration = Duration::from_millis(100);
 
 pub struct ArenaPool {

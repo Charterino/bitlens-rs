@@ -15,7 +15,9 @@ use crate::{
     },
     some_or_return, tx,
     types::blockmetrics::BlockMetrics,
-    util::{SEGWIT_HEIGHT, arena::Arena, speedtracker::TOTAL_IN, timetracker::TimeTracker},
+    util::{
+        SEGWIT_HEIGHT, arena::Arena, env::get_env, speedtracker::TOTAL_IN, timetracker::TimeTracker,
+    },
     with_deadline,
 };
 use anyhow::Result;
@@ -23,7 +25,6 @@ use core::panic;
 use slog_scope::{debug, info};
 use std::{
     collections::HashMap,
-    env::VarError,
     num::NonZeroUsize,
     sync::{Arc, LazyLock, Mutex, RwLock, atomic::Ordering},
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -39,55 +40,12 @@ const INITIAL_WORKER_COUNT: usize = 10;
 
 const DEFAULT_MAX_WORKERS: usize = 100;
 pub static MAX_WORKERS: LazyLock<usize> =
-    LazyLock::new(|| match std::env::var("MAX_DOWNLOAD_WORKERS") {
-        Ok(v) => match v.parse::<usize>() {
-            Ok(v) => v,
-            Err(e) => {
-                info!(
-                    "failed to parse MAX_DOWNLOAD_WORKERS: {e} defaulting to {DEFAULT_MAX_WORKERS}"
-                );
-                DEFAULT_MAX_WORKERS
-            }
-        },
-        Err(e) => {
-            if let VarError::NotPresent = e {
-                info!("MAX_DOWNLOAD_WORKERS is not set, defaulting to {DEFAULT_MAX_WORKERS}");
-            } else {
-                info!(
-                    "failed to read MAX_DOWNLOAD_WORKERS: {e} defaulting to {DEFAULT_MAX_WORKERS}"
-                );
-            }
-            DEFAULT_MAX_WORKERS
-        }
-    });
+    LazyLock::new(|| get_env("MAX_DOWNLOAD_WORKERS", DEFAULT_MAX_WORKERS));
 const SYNC_PROGRESS_AVERAGE_OF: usize = 20;
 
 const DEFAULT_MAX_BLOCKS_PER_FLUSH: usize = 64;
-static MAX_BLOCKS_PER_FLUSH: LazyLock<usize> = LazyLock::new(|| {
-    match std::env::var("MAX_BLOCKS_PER_FLUSH") {
-        Ok(v) => match v.parse::<usize>() {
-            Ok(v) => v,
-            Err(e) => {
-                info!(
-                    "failed to parse MAX_BLOCKS_PER_FLUSH: {e} defaulting to {DEFAULT_MAX_BLOCKS_PER_FLUSH}"
-                );
-                DEFAULT_MAX_WORKERS
-            }
-        },
-        Err(e) => {
-            if let VarError::NotPresent = e {
-                info!(
-                    "MAX_BLOCKS_PER_FLUSH is not set, defaulting to {DEFAULT_MAX_BLOCKS_PER_FLUSH}"
-                );
-            } else {
-                info!(
-                    "failed to read MAX_BLOCKS_PER_FLUSH: {e} defaulting to {DEFAULT_MAX_BLOCKS_PER_FLUSH}"
-                );
-            }
-            DEFAULT_MAX_BLOCKS_PER_FLUSH
-        }
-    }
-});
+static MAX_BLOCKS_PER_FLUSH: LazyLock<usize> =
+    LazyLock::new(|| get_env("MAX_BLOCKS_PER_FLUSH", DEFAULT_MAX_BLOCKS_PER_FLUSH));
 pub const ANALYZED_OVERHEAD_PER_BLOCK: usize = 4096 * 1024;
 
 pub enum DownloadWorkerMessage {
