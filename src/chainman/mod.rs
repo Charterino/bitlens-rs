@@ -22,6 +22,7 @@ use crate::{
         },
         stats::Stats,
     },
+    util::genesis::GENESIS_HEADER,
 };
 use anyhow::{Result, anyhow, bail};
 use blocksync::sync_blocks;
@@ -125,25 +126,43 @@ pub fn get_hash_by_number(number: u64) -> Option<[u8; 32]> {
     r.number_to_hash.get(&number).cloned()
 }
 
-pub fn get_blocks_with_timestamps_and_coinbase_asciis() -> Vec<([u8; 32], u64, u64, String)> {
+pub fn get_top_synced_header_hash() -> Option<[u8; 32]> {
+    let c = CHAIN.read().unwrap();
+    let mut last_hash = c.top_header.header.hash;
+    loop {
+        let header = c.known_headers.get(&last_hash).unwrap();
+        if header.fetched_full {
+            return Some(last_hash);
+        }
+        if header.header.hash == GENESIS_HEADER.hash {
+            return None;
+        }
+        last_hash = header.header.parent
+    }
+}
+
+pub fn get_blocks_with_timestamps_and_coinbase_asciis(
+    mut last: [u8; 32],
+) -> Vec<([u8; 32], u64, u64, String)> {
     let r = CHAIN.read().unwrap();
     let mut result = vec![];
-
-    for block_number in 0..r.top_header.number + 1 {
-        let hash = r.number_to_hash[&block_number];
-        let header = &r.known_headers[&hash];
-        match &header.coinbase_ascii {
-            Some(v) => result.push((
-                hash,
+    loop {
+        let header = &r.known_headers[&last];
+        if let Some(v) = &header.coinbase_ascii {
+            result.push((
+                last,
                 header.number,
                 header.header.timestamp as u64,
                 v.clone(),
-            )),
-            None => {
-                break;
-            }
+            ));
         }
+        if header.header.hash == GENESIS_HEADER.hash {
+            break;
+        }
+        last = header.header.parent;
     }
+
+    result.reverse();
 
     result
 }

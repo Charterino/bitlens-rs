@@ -138,7 +138,7 @@ pub fn get_page_data() -> String {
 
 pub fn callback_after_headers_loaded() {
     let mut w = MINER_DATA.write().unwrap();
-    recalculate_full_miner_stats(&mut w);
+    recalculate_full_miner_stats(&mut w, chainman::get_top_synced_header_hash());
 }
 
 pub fn callback_chain_extended(
@@ -240,9 +240,9 @@ pub fn callback_chain_extended(
     update_page_data(w);
 }
 
-pub fn callback_chain_reorg() {
+pub fn callback_chain_reorg(top_hash: [u8; 32]) {
     let mut w = MINER_DATA.write().unwrap();
-    recalculate_full_miner_stats(&mut w);
+    recalculate_full_miner_stats(&mut w, Some(top_hash));
 }
 
 pub fn callback_config_updated(
@@ -252,11 +252,11 @@ pub fn callback_config_updated(
     let mut w = MINER_DATA.write().unwrap();
     w.rules = new_rules;
     w.rules_regexes = new_regrets;
-    recalculate_full_miner_stats(&mut w);
+    recalculate_full_miner_stats(&mut w, chainman::get_top_synced_header_hash());
     info!("successfully updated miners.yml config..");
 }
 
-fn recalculate_full_miner_stats(data: &mut Miners) {
+fn recalculate_full_miner_stats(data: &mut Miners, top_hash: Option<[u8; 32]>) {
     data.blocks_mined_by_miners.clear();
     data.block_miners.clear();
     data.recent_blocks.clear();
@@ -275,7 +275,12 @@ fn recalculate_full_miner_stats(data: &mut Miners) {
             .insert(id.clone(), 0);
     }
 
-    let hashes_and_asciis = chainman::get_blocks_with_timestamps_and_coinbase_asciis();
+    let top_hash = match top_hash {
+        Some(v) => v,
+        None => return,
+    };
+
+    let hashes_and_asciis = chainman::get_blocks_with_timestamps_and_coinbase_asciis(top_hash);
 
     let last_timestamp = hashes_and_asciis.last().map(|v| v.2).unwrap_or(
         SystemTime::now()
@@ -414,7 +419,8 @@ pub fn get_miner_blocks(id: &MinerId, limit: usize, after: Option<[u8; 32]>) -> 
             .iter()
             .rev()
             .skip_while(|h| **h != v)
-            .take(limit).copied()
+            .take(limit)
+            .copied()
             .collect(),
         None => blocks.iter().rev().take(limit).copied().collect(),
     };

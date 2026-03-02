@@ -395,7 +395,7 @@ async fn apply_block(block: BlockOwned, number: u64, frontpage_strat: FrontPageD
     mark_as_downloaded(vec![block.header.hash], coinbase_asciis);
     match frontpage_strat {
         FrontPageDataUpdateStrategy::RegenerateFromScratch => {
-            miners::callback_chain_reorg();
+            miners::callback_chain_reorg(block.header.hash);
             generate_frontpage_data(block.header.hash).await;
         }
         FrontPageDataUpdateStrategy::Append => {
