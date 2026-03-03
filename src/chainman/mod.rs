@@ -134,7 +134,7 @@ pub fn get_top_synced_header_hash() -> Option<[u8; 32]> {
         if header.fetched_full {
             return Some(last_hash);
         }
-        if header.header.hash == GENESIS_HEADER.hash {
+        if header.header.parent == [0u8; 32] {
             return None;
         }
         last_hash = header.header.parent
@@ -156,7 +156,7 @@ pub fn get_blocks_with_timestamps_and_coinbase_asciis(
                 v.clone(),
             ));
         }
-        if header.header.hash == GENESIS_HEADER.hash {
+        if header.header.parent == [0u8; 32] {
             break;
         }
         last = header.header.parent;
