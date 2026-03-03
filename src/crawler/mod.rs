@@ -317,7 +317,7 @@ async fn handle_payload(payload: PayloadWithAllocator) -> Option<Vec<PayloadToSe
                 return None;
             }
             ReceivedPayload::Block(block) => {
-                if should_process_blocks {
+                if should_process_headers {
                     chainman::keepup::on_header_received(&block.header).await;
                 }
                 if !should_process_blocks {
