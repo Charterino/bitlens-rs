@@ -22,7 +22,6 @@ use crate::{
         },
         stats::Stats,
     },
-    util::genesis::GENESIS_HEADER,
 };
 use anyhow::{Result, anyhow, bail};
 use blocksync::sync_blocks;
@@ -137,7 +136,7 @@ pub fn get_top_synced_header_hash() -> Option<[u8; 32]> {
         if header.header.parent == [0u8; 32] {
             return None;
         }
-        last_hash = header.header.parent
+        last_hash = header.header.parent;
     }
 }
 

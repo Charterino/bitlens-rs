@@ -23,7 +23,7 @@ use crate::{
 };
 use anyhow::{Error, Result, bail};
 use rand::RngCore;
-use slog_scope::info;
+use slog_scope::{debug, info};
 use std::{
     sync::atomic::Ordering,
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -83,7 +83,7 @@ async fn crawl_with_backoff(peer: AddressPortNetwork) {
             fail_reasons.clear();
         }
     }
-    info!("banning peer"; "peer" => peer.to_string(), "reasons" => fail_reasons.join(","));
+    debug!("banning peer"; "peer" => peer.to_string(), "reasons" => fail_reasons.join(","));
     addrman::delete_and_ban_peer(peer, fail_reasons).await;
 }
 
