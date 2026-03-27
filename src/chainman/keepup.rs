@@ -63,8 +63,15 @@ use super::{
     validate_and_apply_header_inner,
 };
 
+// Broadcasts hashes of headers we learn of, but we don't necessarily have the bodies for them.
 #[allow(clippy::type_complexity)]
 pub static NEW_HEADER_BROADCAST: LazyLock<(
+    broadcast::Sender<[u8; 32]>,
+    broadcast::Receiver<[u8; 32]>,
+)> = LazyLock::new(|| broadcast::channel(32));
+
+#[allow(clippy::type_complexity)]
+pub static BLOCK_APPLIED_BROADCAST: LazyLock<(
     broadcast::Sender<[u8; 32]>,
     broadcast::Receiver<[u8; 32]>,
 )> = LazyLock::new(|| broadcast::channel(32));
@@ -260,6 +267,7 @@ async fn handle_new_block(
         queue.pop_front();
         apply_block((*block).into(), number, strat).await;
         info!("block applied"; "hash" => hh, "number" => number);
+        let _ = BLOCK_APPLIED_BROADCAST.0.send(hash);
     } else {
         panic!("keepup got a payload that is not a block")
     }

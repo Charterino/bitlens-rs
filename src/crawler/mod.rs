@@ -1,8 +1,8 @@
 use crate::{
     addrman::{self, peers_seen},
     chainman::{
-        self, SYNCING_BODIES, SYNCING_HEADERS, get_top_header_hash,
-        keepup::{NEW_HEADER_BROADCAST, WORKER_REGISTRATION_CHANNEL},
+        self, SYNCING_BODIES, SYNCING_HEADERS, get_top_synced_header_hash,
+        keepup::{BLOCK_APPLIED_BROADCAST, WORKER_REGISTRATION_CHANNEL},
     },
     connect::connect_and_handshake,
     crawler::peertracker::TrackedConnection,
@@ -193,12 +193,12 @@ async fn crawl(peer: &AddressPortNetwork, res: &mut CrawlResult) -> Result<()> {
         .inner
         .write_packet(&PayloadToSend::GetHeaders(GetHeadersOwned {
             version: 70016,
-            block_locator: vec![get_top_header_hash()],
+            block_locator: vec![get_top_synced_header_hash().unwrap_or_default()],
             hash_stop: [0u8; 32],
         }))
         .await?;
     let mut ping_interval = interval(PING_EVERY);
-    let mut new_header_chan = NEW_HEADER_BROADCAST.0.subscribe();
+    let mut applied_block_chan = BLOCK_APPLIED_BROADCAST.0.subscribe();
     let (job_tx, mut job_rx) = oneshot::channel();
     WORKER_REGISTRATION_CHANNEL
         .get()
@@ -208,10 +208,10 @@ async fn crawl(peer: &AddressPortNetwork, res: &mut CrawlResult) -> Result<()> {
         .expect("to register peer as a worker");
     loop {
         select! {
-            // Share the new blocks we learn about with the peer
-            new_header = new_header_chan.recv() => {
-                let new_header = new_header?;
-                connection.inner.write_packet(&PayloadToSend::Inv(InvOwned { inner: vec![InventoryVectorOwned { inv_type: InventoryVectorType::Block, hash: new_header }] })).await?;
+            // Share hashes of blocks we verified and applied to our best chain
+            hash = applied_block_chan.recv() => {
+                let hash = hash?;
+                connection.inner.write_packet(&PayloadToSend::Inv(InvOwned { inner: vec![InventoryVectorOwned { inv_type: InventoryVectorType::Block, hash }] })).await?;
             }
             // Send a ping packet once every PING_EVERY interval
             _ = ping_interval.tick() => {
