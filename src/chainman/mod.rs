@@ -7,6 +7,7 @@ use crate::{
     metrics::{METRIC_FULL_BLOCKS_DOWNLOADED, METRIC_TOP_HEADER_HEIGHT},
     miners,
     packets::{
+        block::BlockOwned,
         blockheader::{BlockHeaderBorrowed, BlockHeaderOwned, BlockHeaderRef},
         getheaders::GetHeadersOwned,
         packetpayload::PayloadToSend,
@@ -140,6 +141,21 @@ pub fn get_top_synced_header_hash() -> Option<[u8; 32]> {
     }
 }
 
+pub fn get_top_synced_header_number() -> u64 {
+    let c = CHAIN.read().unwrap();
+    let mut last_hash = c.top_header.header.hash;
+    loop {
+        let header = c.known_headers.get(&last_hash).unwrap();
+        if header.fetched_full {
+            return header.number;
+        }
+        if header.header.parent == [0u8; 32] {
+            return 0;
+        }
+        last_hash = header.header.parent;
+    }
+}
+
 pub fn get_blocks_with_timestamps_and_coinbase_asciis(
     mut last: [u8; 32],
 ) -> Vec<([u8; 32], u64, u64, String)> {
@@ -227,6 +243,38 @@ pub fn filter_tx_spends(spends: Vec<(u32, [u8; 32], [u8; 32])>) -> Vec<(u32, [u8
         .filter(|item| r.most_work_chain.contains(&item.2))
         .map(|item| (item.0, item.1))
         .collect()
+}
+
+pub async fn get_block(hash: [u8; 32], include_witness_data: bool) -> Result<BlockOwned> {
+    let header = match get_header_by_hash(hash) {
+        None => bail!("not found"),
+        Some(v) => v,
+    };
+
+    let txs = match db::rocksdb::get_block_tx_entries(hash).await {
+        Ok(v) => v.into_iter().map(|v| v.hash),
+        Err(_) => {
+            bail!("txs not found")
+        }
+    };
+
+    let mut txs_result = Vec::with_capacity(txs.len());
+    for tx in txs.map(|v| tokio::task::spawn(db::rocksdb::get_analyzed_tx(v))) {
+        txs_result.push(tx.await??);
+    }
+
+    Ok(BlockOwned {
+        header: header.header,
+        txs: txs_result
+            .into_iter()
+            .map(|mut v| {
+                if !include_witness_data {
+                    v.tx.witness_data = None;
+                }
+                v.tx
+            })
+            .collect(),
+    })
 }
 
 pub fn respond_to_getheaders(

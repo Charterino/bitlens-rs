@@ -61,7 +61,7 @@ async fn handshake(conn: &mut Connection) -> Result<VersionOwned> {
         version: 70016,
         addrrecv: Default::default(),
         addrfrom: Default::default(),
-        start_height: chainman::get_top_header_number() as u32,
+        start_height: chainman::get_top_synced_header_number() as u32,
         announce_relayed_transactions: false,
     };
     conn.write_packet(&PayloadToSend::Version(version)).await?;

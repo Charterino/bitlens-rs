@@ -20,6 +20,7 @@ pub mod invvector;
 pub mod magic;
 pub mod netaddr;
 pub mod network_id;
+pub mod notfound;
 pub mod packet;
 #[cfg(test)]
 pub mod packet_test;

@@ -7,19 +7,19 @@ use super::{
 use crate::util::arena::Arena;
 
 #[derive(Debug, Clone, Copy, Default)]
-pub struct GetDataBorrowed<'a> {
+pub struct NotFoundBorrowed<'a> {
     pub inner: &'a [InventoryVectorBorrowed<'a>],
 }
 
-pub const GETDATA_COMMAND: [u8; 12] = *b"getdata\0\0\0\0\0";
+pub const NOTFOUND_COMMAND: [u8; 12] = *b"notfound\0\0\0\0";
 
-impl<'a> PacketPayload<'a, GetDataOwned> for GetDataBorrowed<'a> {
+impl<'a> PacketPayload<'a, NotFoundOwned> for NotFoundBorrowed<'a> {
     fn command(&self) -> &'static [u8; 12] {
-        &GETDATA_COMMAND
+        &NOTFOUND_COMMAND
     }
 }
 
-impl<'a> DeserializableBorrowed<'a> for GetDataBorrowed<'a> {
+impl<'a> DeserializableBorrowed<'a> for NotFoundBorrowed<'a> {
     fn deserialize_borrowed(
         &mut self,
         allocator: &'a Arena,
@@ -32,18 +32,18 @@ impl<'a> DeserializableBorrowed<'a> for GetDataBorrowed<'a> {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct GetDataOwned {
+pub struct NotFoundOwned {
     pub inner: Vec<InventoryVectorOwned>,
 }
 
-impl Serializable for GetDataOwned {
+impl Serializable for NotFoundOwned {
     fn serialize(&self, stream: &mut impl bytes::BufMut) {
         serialize_array(&self.inner, stream);
     }
 }
 
-impl From<GetDataBorrowed<'_>> for GetDataOwned {
-    fn from(value: GetDataBorrowed<'_>) -> Self {
+impl From<NotFoundBorrowed<'_>> for NotFoundOwned {
+    fn from(value: NotFoundBorrowed<'_>) -> Self {
         Self {
             inner: value.inner.iter().map(|v| (*v).into()).collect(),
         }

@@ -8,12 +8,13 @@ use crate::{
     crawler::peertracker::TrackedConnection,
     packets::{
         getaddr::GetAddr,
-        getdata::GetDataOwned,
+        getdata::{GetDataBorrowed, GetDataOwned},
         getheaders::GetHeadersOwned,
         headers::HeadersOwned,
         inv::InvOwned,
         invvector::{InventoryVectorOwned, InventoryVectorType},
         network_id::NetworkId,
+        notfound::NotFoundOwned,
         packet::PayloadWithAllocator,
         packetpayload::{InvalidChecksum, PayloadToSend, ReceivedPayload},
         ping::Ping,
@@ -25,6 +26,7 @@ use anyhow::{Error, Result, bail};
 use rand::RngCore;
 use slog_scope::{debug, info};
 use std::{
+    collections::VecDeque,
     sync::atomic::Ordering,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -206,6 +208,12 @@ async fn crawl(peer: &AddressPortNetwork, res: &mut CrawlResult) -> Result<()> {
         .send(job_tx)
         .await
         .expect("to register peer as a worker");
+
+    // The rate limit for block requests is 2/second
+    let mut block_request_interval = interval(Duration::from_millis(500));
+    // If this array grows to be over 100_000 elements long, terminate the connection
+    let mut block_requests = VecDeque::with_capacity(50_000);
+
     loop {
         select! {
             // Share hashes of blocks we verified and applied to our best chain
@@ -218,12 +226,31 @@ async fn crawl(peer: &AddressPortNetwork, res: &mut CrawlResult) -> Result<()> {
                 let nonce = rand::rng().next_u64();
                 connection.inner.write_packet(&PayloadToSend::Ping(Ping {nonce})).await?;
             }
+            _ = block_request_interval.tick() => {
+                let (next_block, need_witness_data) = match block_requests.pop_front() {
+                    Some(v) => v,
+                    None => continue
+                };
+                match chainman::get_block(next_block, need_witness_data).await {
+                    Ok(block) => {
+                        connection.inner.write_packet(&PayloadToSend::Block(block)).await?;
+                    }
+                    Err(_) => {
+                        // most likely not found
+                        connection.inner.write_packet(&PayloadToSend::NotFound(NotFoundOwned { inner: vec![InventoryVectorOwned { inv_type: if need_witness_data {
+                            InventoryVectorType::WitnessBlock
+                        } else {
+                            InventoryVectorType::Block
+                        }, hash: next_block }] })).await?;
+                    }
+                }
+            }
             // Handle the packets we receive from this peer
             packet = connection.inner.read_packet() => {
                 let packet = packet?;
                 {
                     let payload = packet.payload;
-                    if let Some(responses) = handle_payload(payload).await {
+                    if let Some(responses) = handle_payload(payload, &mut block_requests).await {
                         for packet in responses {
                             connection.inner.write_packet(&packet).await?;
                         }
@@ -258,7 +285,10 @@ async fn crawl(peer: &AddressPortNetwork, res: &mut CrawlResult) -> Result<()> {
     }
 }
 
-async fn handle_payload(payload: PayloadWithAllocator) -> Option<Vec<PayloadToSend>> {
+async fn handle_payload(
+    payload: PayloadWithAllocator,
+    block_requests: &mut VecDeque<([u8; 32], bool)>,
+) -> Option<Vec<PayloadToSend>> {
     let should_process_headers = !SYNCING_HEADERS.load(Ordering::Relaxed);
     let should_process_blocks = should_process_headers && !SYNCING_BODIES.load(Ordering::Relaxed);
     if let Some(payload) = payload.borrow_payload() {
@@ -359,6 +389,20 @@ async fn handle_payload(payload: PayloadWithAllocator) -> Option<Vec<PayloadToSe
                     return None;
                 }
             }
+            ReceivedPayload::GetData(get_data) => {
+                let (requests, not_found) = extract_block_requests(get_data);
+                block_requests.reserve(requests.len());
+                for i in requests {
+                    block_requests.push_back(i);
+                }
+                if not_found.is_empty() {
+                    return None;
+                } else {
+                    return Some(vec![PayloadToSend::NotFound(NotFoundOwned {
+                        inner: not_found,
+                    })]);
+                }
+            }
             _ => {
                 return None;
             }
@@ -369,4 +413,49 @@ async fn handle_payload(payload: PayloadWithAllocator) -> Option<Vec<PayloadToSe
     // if we got here, that means its a Block and we must send it to chainman
     chainman::keepup::on_block_received(payload).await;
     None
+}
+
+// return type is (BlockRequests, NotFound)
+pub fn extract_block_requests(
+    get_data: &&GetDataBorrowed<'_>,
+) -> (Vec<([u8; 32], bool)>, Vec<InventoryVectorOwned>) {
+    let mut requests = Vec::with_capacity(get_data.inner.len());
+    let mut not_found: Vec<InventoryVectorOwned> = Vec::with_capacity(get_data.inner.len());
+
+    for entity in get_data.inner {
+        match entity.inv_type {
+            InventoryVectorType::Error => {
+                // error is always not found
+                not_found.push(InventoryVectorOwned::from(*entity));
+            }
+            InventoryVectorType::Tx => {
+                // mempool txs only which we dont have so not found
+                not_found.push(InventoryVectorOwned::from(*entity));
+            }
+            InventoryVectorType::Block => {
+                requests.push((*entity.hash, false));
+            }
+            InventoryVectorType::FilteredBlock => {
+                // uh we dont support this so not found
+                not_found.push(InventoryVectorOwned::from(*entity));
+            }
+            InventoryVectorType::CmpctBlock => {
+                // uh we dont support this so not found
+                not_found.push(InventoryVectorOwned::from(*entity));
+            }
+            InventoryVectorType::WitnessTx => {
+                // mempool txs only which we dont have so not found
+                not_found.push(InventoryVectorOwned::from(*entity));
+            }
+            InventoryVectorType::WitnessBlock => {
+                requests.push((*entity.hash, true));
+            }
+            InventoryVectorType::FilteredWitnessBlock => {
+                // we also dont support this so not found
+                not_found.push(InventoryVectorOwned::from(*entity));
+            }
+        }
+    }
+
+    (requests, not_found)
 }

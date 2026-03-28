@@ -16,7 +16,10 @@ use super::{
     verack::{VERACK_COMMAND, VerAck},
     version::{VERSION_COMMAND, VersionBorrowed, VersionOwned},
 };
-use crate::util::arena::Arena;
+use crate::{
+    packets::notfound::{NOTFOUND_COMMAND, NotFoundBorrowed, NotFoundOwned},
+    util::arena::Arena,
+};
 use anyhow::{Result, bail};
 use bytes::BufMut;
 use sha2::{Digest, Sha256};
@@ -129,6 +132,11 @@ pub fn deserialize_payload(
             v.deserialize_borrowed(allocator, buffer)?;
             Some(ReceivedPayload::GetHeaders(v))
         }
+        super::notfound::NOTFOUND_COMMAND => {
+            let v = allocator.try_alloc_default::<NotFoundBorrowed>()?;
+            v.deserialize_borrowed(allocator, buffer)?;
+            Some(ReceivedPayload::NotFound(v))
+        }
         _ => None,
     })
 }
@@ -174,6 +182,7 @@ pub enum ReceivedPayload<'a> {
     GetData(&'a GetDataBorrowed<'a>),
     Headers(&'a HeadersBorrowed<'a>),
     GetHeaders(&'a GetHeadersBorrowed<'a>),
+    NotFound(&'a NotFoundBorrowed<'a>),
 }
 
 #[derive(Clone, Debug)]
@@ -193,6 +202,7 @@ pub enum PayloadToSend {
     GetData(GetDataOwned),
     Headers(HeadersOwned),
     GetHeaders(GetHeadersOwned),
+    NotFound(NotFoundOwned),
 }
 
 impl PayloadToSend {
@@ -213,6 +223,7 @@ impl PayloadToSend {
             PayloadToSend::Inv(inv) => inv.serialize(stream),
             PayloadToSend::Headers(headers) => headers.serialize(stream),
             PayloadToSend::GetHeaders(getheaders) => getheaders.serialize(stream),
+            PayloadToSend::NotFound(notfound) => notfound.serialize(stream),
         }
     }
 
@@ -233,6 +244,7 @@ impl PayloadToSend {
             PayloadToSend::Inv(_) => &INV_COMMAND,
             PayloadToSend::Headers(_) => &HEADERS_COMMAND,
             PayloadToSend::GetHeaders(_) => &GETHEADERS_COMMAND,
+            PayloadToSend::NotFound(_) => &NOTFOUND_COMMAND,
         }
     }
 }
